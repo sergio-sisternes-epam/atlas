@@ -10,13 +10,12 @@ Process memory is **not** authored here. Canonical store:
 
 https://github.com/sergio-sisternes-epam/atlas-atlas
 
-OKF root inside that repo is `atlas/` (`atlas/SCHEMA.json`), not git root. Mount it as a submodule at `references/atlas`:
+Git root **is** the OKF root (`SCHEMA.json`). Mount it at `references/atlas`:
 
 ```text
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
 ```
 
-Mount path: `references/atlas`  
-Compile/query root: `references/atlas/atlas`
+Mount path = compile/query root: `references/atlas`
 
 See `SKILL.md` and `apm.yml`.

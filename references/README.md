@@ -11,7 +11,6 @@ atlas auth login --host github.com
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
 ```
 
-Mount path: `references/atlas`  
-OKF root is `atlas/` inside the store repo (`atlas/SCHEMA.json`), not git root.  
-Compile/query root: `references/atlas/atlas`
+Mount path = compile/query root: `references/atlas`  
+Git root of the store **is** the OKF root (`SCHEMA.json`).
 

@@ -14,13 +14,13 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-Process memory is **not** authored in this repo. Canonical store: `github.com/sergio-sisternes-epam/atlas-atlas`. OKF root there is `atlas/` (`atlas/SCHEMA.json`), not git root.
+Process memory is **not** authored in this repo. Canonical store: `github.com/sergio-sisternes-epam/atlas-atlas`. Git root **is** the OKF root (`SCHEMA.json`).
 
 ```text
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
 ```
 
-**Canonical store (this skill):** `references/atlas/atlas`
+**Canonical store (this skill):** `references/atlas`
 
 Always pass that path as card `root` / `--root`. The CLI does not default `--root` to the mount (omit = cwd).
 
