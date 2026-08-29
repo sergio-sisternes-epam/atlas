@@ -15,10 +15,10 @@ If this session **is** Build:
 
 ```bash
 export ATLAS_ROOT=/absolute/path/to/atlas
-export ATLAS_PRESETS="Skill memory:/absolute/path/to/references/atlas"
+export ATLAS_PRESETS="Skill memory:/absolute/path/to/.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas"
 
 python3 scripts/atlas.py view --root /absolute/path/to/atlas --check
-python3 scripts/atlas.py view --root references/atlas --check
+python3 scripts/atlas.py view --root .atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas --check
 ```
 
 `view --root` puts `/?root=...` on the preview URL. Never assume skill-memory in code. Any folder with `SCHEMA.json` or `index.md` is an Atlas.

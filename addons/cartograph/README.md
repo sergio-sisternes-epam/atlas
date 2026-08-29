@@ -13,7 +13,7 @@ Other sessions: use `python3 scripts/atlas.py search|validate`. No Vite, no view
 
 Defaults (relative to this skill, not host copies):
 
-- `references/atlas` — skill process memory
+- `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas` — skill process memory (after mount)
 - `fixtures/mini-atlas` — fixture
 
 Absolute paths are **not** committed for third-party stores. Inject those at host startup:

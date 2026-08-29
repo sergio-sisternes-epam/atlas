@@ -14,7 +14,13 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-**Default store (this skill):** `references/atlas/`
+Process memory is **not** in this repo. Canonical store: `github.com/sergio-sisternes-epam/atlas-atlas`. OKF root there is `atlas/` (`atlas/SCHEMA.json`), not git root.
+
+```text
+atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
+```
+
+**Default store (this skill):** `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
 
 ## Activation card (required)
 
