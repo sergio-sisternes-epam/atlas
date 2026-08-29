@@ -1,0 +1,13 @@
+{
+  "atlases": [
+    {
+      "id": "skill-memory",
+      "root": "../skill-memory",
+      "access": "read/write",
+      "contribution": {
+        "type": "github",
+        "repository": "https://github.com/example/skill-memory-atlas"
+      }
+    }
+  ]
+}

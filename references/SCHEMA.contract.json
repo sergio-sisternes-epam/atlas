@@ -1,0 +1,185 @@
+{
+  "$comment": "Contract shape for Atlas SCHEMA.json \u2014 validation-first, machine-only. Not a full JSON Schema draft yet; normative field list from approved plan.",
+  "schema_version": "1.0",
+  "required_root_fields": [
+    "schema_version",
+    "atlas_id",
+    "structure",
+    "compile"
+  ],
+  "structure": {
+    "free_layout": true,
+    "staging_dir": "staging",
+    "require_index_in_folders": true,
+    "reserved_names": [
+      "index.md",
+      "log.md",
+      "staging"
+    ]
+  },
+  "compile": {
+    "hard_fail": true,
+    "allow_inline_ignores": true,
+    "core_checks": [
+      "okf_compliance",
+      "frontmatter",
+      "internal_links",
+      "not_just_links",
+      "schema_present",
+      "no_answerable_in_staging",
+      "index_md_present"
+    ],
+    "page_contract": {
+      "$comment": "Optional on live SCHEMA. Engine reads it; do not hardcode types in Python.",
+      "when_work_id": {"require_kind": "implements"},
+      "when_type": {"protostar": {"require_kind": "derived_from"}},
+      "forming_requires_type": "protostar"
+    },
+    "simplicity_budget": {
+      "max_required_frontmatter_keys_per_type": 8,
+      "max_required_sections_per_type": 6
+    }
+  },
+  "templates": {
+    "directory": "templates/",
+    "by_type": {
+      "$comment": "Each type may declare file + frontmatter required/recommended + sections; MD template carries a copy of rules",
+      "work": {
+        "file": "templates/work.md",
+        "frontmatter": {
+          "required": [
+            "type",
+            "title",
+            "created",
+            "work_id"
+          ],
+          "recommended": [
+            "status",
+            "description"
+          ]
+        },
+        "sections": {
+          "required": [
+            "Scope",
+            "Status"
+          ],
+          "recommended": [
+            "Outcomes",
+            "Related"
+          ]
+        }
+      },
+      "document": {
+        "file": "templates/document.md",
+        "frontmatter": {
+          "required": [
+            "type",
+            "title",
+            "created"
+          ],
+          "recommended": [
+            "description",
+            "tags",
+            "origin",
+            "sensitivity",
+            "status"
+          ]
+        },
+        "sections": {
+          "required": [],
+          "recommended": [
+            "Content",
+            "Provenance",
+            "Related"
+          ]
+        }
+      }
+    }
+  },
+  "query": {
+    "default_mode": "local",
+    "search_engine": "grep",
+    "fallback": "rg",
+    "staging_visible": false
+  },
+  "mesh": {
+    "entry_required": [
+      "id",
+      "root",
+      "access"
+    ],
+    "access_enum": [
+      "read",
+      "read/write"
+    ],
+    "contribution_optional": [
+      "type",
+      "repository"
+    ]
+  },
+  "sources_profile": {
+    "minimal_extracted": [
+      "uri",
+      "extracted_at",
+      "version"
+    ],
+    "optional": [
+      "kind",
+      "author",
+      "last_modified"
+    ]
+  },
+  "types": {
+    "recommended": [
+      "experience",
+      "decision",
+      "lesson",
+      "recipe",
+      "work",
+      "document",
+      "protostar"
+    ],
+    "roles": {
+      "experience": "episodic \u2014 session / phase / challenge that happened",
+      "decision": "semantic \u2014 pinned choice",
+      "lesson": "semantic \u2014 do X / avoid Y (optional; distilled from experiences)",
+      "recipe": "procedural \u2014 reusable how-to",
+      "work": "task hub \u2014 scope, status, and relates_to cluster for a work_id",
+      "document": "durable content object \u2014 source material, page, file, note (not an episodic event)",
+      "protostar": "forming idea worth chasing later \u2014 linked to origin and work hub; not implement authority"
+    },
+    "notes": [
+      "Types are recommendations, not a closed enum (OKF freedom).",
+      "memory is not a page type; Atlas is the memory substrate.",
+      "origin (recommended): internal | third-party | user | derived",
+      "sensitivity (recommended): public | internal | restricted"
+    ]
+  },
+  "relations": {
+    "how_to_link": [
+      "AUTHORITATIVE: frontmatter relates_to: [{path, kind}] \u2014 used by visualisers, tools, and compile-time graph consumers.",
+      "OPTIONAL: ## Related Markdown section may mirror relates_to for human reading of the body; agents should prefer frontmatter.",
+      "path values are relative to the Atlas root (forward slashes).",
+      "kind should be one of the recommended_kinds when possible.",
+      "atlas compile checks that relates_to paths resolve (and Markdown links if present).",
+      "On promote/compile, agent writes relates_to first; body Related is optional echo."
+    ],
+    "authoritative": "frontmatter",
+    "recommended_kinds": [
+      "follows",
+      "records",
+      "supersedes",
+      "implements",
+      "derived_from",
+      "related"
+    ],
+    "kind_meanings": {
+      "follows": "This item continues or comes after the target in a sequence (e.g. phase N follows phase N-1).",
+      "records": "This item (usually a decision) captures the outcome of the target experience/session.",
+      "supersedes": "This item replaces the target; prefer this over the target for current guidance.",
+      "implements": "This item carries out the target plan, decision, or work_id scope.",
+      "derived_from": "This item was distilled or extracted from the target.",
+      "related": "Generic association when no tighter role fits."
+    }
+  }
+}

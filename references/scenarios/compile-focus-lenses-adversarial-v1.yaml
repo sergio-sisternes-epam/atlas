@@ -1,0 +1,25 @@
+id: compile-focus-lenses-adversarial-v1
+work_id: 2026-08-27-atlas-compile-focus-lenses
+adversarial: true
+packages: [atlas]
+expect:
+  list_type_removed: true
+  type_and_path_and: true
+  path_escape_critical: true
+  empty_and_exit_0: true
+smokes:
+  - id: list-type-gone
+    source: Q5 hard cut
+    expect: --list-type is an unknown Click option
+  - id: list-type-must-not-exit-0
+    source: 0.7.5 defect / p-list-swallows-gate
+    expect: focused compile still emits issues and uses exit 1/2
+  - id: path-escape-critical
+    source: OWASP / GW CLI PR 447
+    expect: --path ../ or absolute outside root exits 2
+  - id: empty-and-ok
+    source: find(1) exit 0
+    expect: --type no-such-type on a clean store exits 0 with pages=0
+  - id: and-intersection
+    source: Q8
+    expect: --type and --path together list only the intersection

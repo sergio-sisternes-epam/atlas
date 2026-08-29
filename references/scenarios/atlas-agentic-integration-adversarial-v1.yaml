@@ -1,0 +1,24 @@
+id: atlas-agentic-integration-adversarial-v1
+work_id: atlas-agentic-integration-v1
+adversarial: true
+packages:
+  - atlas
+smokes:
+  - id: no-unbounded-grep-primary
+    source: "Query discipline"
+    expect: "paths/query and SKILL hard rules forbid unbounded tree grep as primary; atlas search is the entrypoint"
+  - id: no-answer-from-staging
+    source: "Structure pin"
+    expect: "query path and CLI treat staging as non-answer; compile fails if staging non-empty"
+  - id: remember-requires-compile-green
+    source: "Remember discipline"
+    expect: "paths/remember requires atlas compile exit 0 before claiming memory stored"
+  - id: work-hub-linked
+    source: "Work discipline"
+    expect: "New experience under a work_id includes relates_to work hub with kind implements"
+  - id: activation-card-when-on
+    source: "B17 / card pattern"
+    expect: "activation_card on; store-changing or formal query Run documents Enter card with path_module"
+  - id: path-modules-present
+    source: "Implement acceptance"
+    expect: "references/paths/query.md, remember.md, work.md exist and are linked from SKILL path registry"

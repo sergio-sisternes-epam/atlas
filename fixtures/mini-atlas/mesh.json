@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "atlases": [
+    {
+      "id": "project-reqs",
+      "root": "../project-reqs",
+      "access": "read"
+    },
+    {
+      "id": "skill-memory",
+      "root": "../skill-memory",
+      "access": "read/write",
+      "contribution": {
+        "type": "github",
+        "repository": "https://github.com/example/skill-memory-atlas"
+      }
+    }
+  ],
+  "consolidated_from": [
+    "mesh/fragments/project-reqs.json",
+    "mesh/fragments/skill-memory.json"
+  ]
+}

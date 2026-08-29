@@ -1,0 +1,24 @@
+id: storage-mesh-mvp-adversarial-v1
+work_id: 2026-08-29-atlas-storage-mesh-mvp
+adversarial: true
+packages: [atlas]
+smokes:
+  - id: no-nickname-id
+    source: drop-aliases-mvp
+    expect: normalise("wiki") errors; only host/org/repo accepted
+  - id: no-atlas-sync
+    source: mesh-pull
+    expect: no atlas sync command in CLI help
+  - id: mesh-json-schema
+    source: decision-mesh-json-schema
+    expect: invalid atlas-mesh.json fails mount or compile
+  - id: no-tokens-in-mesh
+    source: decision-pointer-vs-auth
+    expect: atlas-mesh.json schema forbids token fields
+  - id: refuse-dirty-mount
+    source: decision-mount-lifecycle
+    expect: mount exits non-zero on dirty worktree
+  - id: unmounted-resolve-fails
+    source: decision-unresolved-id
+    expect: resolve unknown id exits non-zero
+---

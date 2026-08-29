@@ -1,0 +1,27 @@
+id: landscape-adversarial-v1
+adversarial: true
+work_id: 2026-08-27-atlas-landscape-review
+packages:
+  - atlas
+smokes:
+  - id: refuse-mem0-peer
+    source: atlas-project/wrong-path-agent-memory-layer/exit-wrong-comparison.md
+    expect: competitors.md must not list Mem0/Zep/Letta/Cognee as living peers
+  - id: microsoft-subsection-required
+    source: plan pin 3
+    expect: landscape run records a Microsoft pass before other symbionts
+  - id: no-user-target-required
+    source: user correction 2026-08-27
+    expect: landscape run is valid with empty user target list
+  - id: protostar-not-living-row
+    source: plan pins 4 and 9
+    expect: unverified names are landscape protostars or gaps, not competitors.md peers
+  - id: citation-or-gap
+    source: Segment8 State of CI 2026 governance gap
+    expect: new competitor/partner claims have origin/sources or an explicit gap
+  - id: not-feature-matrix
+    source: ORRJO competitive intelligence mistakes
+    expect: write-back uses glossary labels and job test, not feature-count tables only
+expect:
+  compile: green
+  glossary_promoted: true

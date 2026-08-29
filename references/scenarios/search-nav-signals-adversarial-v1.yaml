@@ -1,0 +1,43 @@
+id: search-nav-signals-adversarial-v1
+work_id: 2026-08-27-atlas-search-nav-signals
+adversarial: true
+packages: [atlas]
+expect:
+  type_filter_frontmatter_only: true
+  exits_excluded_by_default: true
+  no_root_escape: true
+  body_recall_unconstrained: true
+  query_path_requires_card: true
+  query_path_keeps_glossary_rewrite: true
+smokes:
+  - id: search-type-frontmatter-only
+    source: pin U / find-by-type
+  - id: search-type-only-no-body-score
+    source: cli-compile-list-review
+  - id: search-exit-excluded
+    source: FRESCO + query path
+  - id: search-include-exits
+    source: terminate-wrong-path
+  - id: search-work-id-filter
+    source: closed field grammar
+  - id: search-path-prefix
+    source: growth valve
+  - id: search-path-escape
+    source: OWASP path traversal
+  - id: search-hit-signals
+    source: parked hit-card from query-harness-hubs
+  - id: search-body-recall
+    source: Elastic why-metadata-isnt-enough
+  - id: search-staging-out
+    source: structure pin
+  - id: search-sparse-kva-still-found
+    source: kva-signals-challenge
+  - id: card-required-for-query
+    source: B17
+  - id: glossary-rewrite-kept
+    source: 0.7.7 query-harness-hubs
+    expect: query.md still has rewrite at most once from glossary Search aliases
+  - id: no-unbounded-grep-primary
+    source: Query discipline
+  - id: guidance-relates-to
+    source: alignment pin

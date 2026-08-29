@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/atlas-mesh.schema.json",
+  "title": "atlas-mesh",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "stores"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "stores": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/store" }
+    }
+  },
+  "$defs": {
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 3 },
+        "subpath": { "type": "string" },
+        "ref": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    }
+  }
+}

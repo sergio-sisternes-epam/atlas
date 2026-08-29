@@ -1,0 +1,14 @@
+{
+  "atlases": [
+    {
+      "id": "project-reqs",
+      "root": "../project-reqs",
+      "access": "read"
+    },
+    {
+      "id": "skill-memory",
+      "root": "../skill-memory",
+      "access": "read/write"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "atlas_id": "mini-atlas-fixture",
+  "title": "Mini Atlas fixture for validate smokes",
+  "structure": {
+    "free_layout": true,
+    "staging_dir": "staging",
+    "require_index_in_folders": true,
+    "reserved_names": ["index.md", "log.md", "staging"]
+  },
+  "compile": {
+    "hard_fail": true,
+    "allow_inline_ignores": true,
+    "min_body_chars": 40,
+    "core_checks": [
+      "okf_compliance",
+      "frontmatter",
+      "internal_links",
+      "not_just_links",
+      "schema_present",
+      "no_answerable_in_staging",
+      "index_md_present"
+    ],
+    "simplicity_budget": {
+      "max_required_frontmatter_keys_per_type": 8,
+      "max_required_sections_per_type": 6
+    }
+  },
+  "templates": {
+    "directory": "templates/",
+    "by_type": {
+      "experience": {
+        "file": "templates/experience.md",
+        "frontmatter": {
+          "required": ["type", "title", "created", "work_id"],
+          "recommended": ["description", "tags", "status"]
+        },
+        "sections": {
+          "required": ["Context", "What happened", "Outcome"],
+          "recommended": ["Related", "Follow-ups"]
+        }
+      },
+      "decision": {
+        "file": "templates/decision.md",
+        "frontmatter": {
+          "required": ["type", "title", "created"],
+          "recommended": ["status", "work_id"]
+        },
+        "sections": {
+          "required": ["Decision", "Rationale"],
+          "recommended": ["Alternatives considered", "Consequences"]
+        }
+      }
+    }
+  },
+  "query": {
+    "default_mode": "local",
+    "search_engine": "grep",
+    "fallback": "rg",
+    "staging_visible": false
+  }
+}

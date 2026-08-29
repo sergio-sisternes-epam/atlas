@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from ..core.auth import AuthResult, resolve_auth
+from ..core.authstore import lookup
+from ..core.gitops import (
+    clone,
+    current_branch,
+    git_root,
+    has_git,
+    is_dirty,
+    submodule_add,
+    submodule_init,
+)
+from ..core.identity import IdentityError, parse_pointer
+from ..core.meshfile import MeshFileError, find_project_root, find_store, upsert
+from ..core.translate import remote_url
+
+
+def default_mount(project: Path, atlas_id: str) -> Path:
+    return project / ".atlas" / Path(*atlas_id.split("/"))
+
+
+def run(
+    pointer: str,
+    ref: str | None,
+    target: str | None,
+    ssh: bool,
+    start: str | None,
+    as_json: bool,
+) -> int:
+    base = Path(start).resolve() if start else Path.cwd()
+    try:
+        parsed = parse_pointer(pointer)
+    except IdentityError as e:
+        return _fail(str(e), as_json)
+
+    if not has_git():
+        return _fail("git not on PATH (headless: mount is unavailable)", as_json)
+
+    host, org, _repo = parsed.atlas_id.split("/", 2)
+    recorded = lookup(host, org)
+    if recorded and not ssh:
+        ssh = bool(recorded.get("ssh") or recorded.get("backend") == "ssh")
+    auth = resolve_auth(host, want_ssh=ssh)
+    if auth.error:
+        auth = AuthResult(backend="none", host=host, token=None, ssh=ssh, error=auth.error)
+    url = remote_url(pointer, auth)
+    token = None if auth.ssh else auth.token
+
+    project = git_root(base) or find_project_root(base)
+    dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
+    parent_git = git_root(project)
+
+    existing = dest / ".git"
+    gitmodules_listed = parent_git and _in_gitmodules(parent_git, dest)
+
+    if dest.exists() and existing.exists():
+        if is_dirty(dest):
+            return _fail(f"dirty worktree: {dest}", as_json)
+        stored = None
+        try:
+            row = find_store(project, parsed.atlas_id)
+            stored = (row or {}).get("ref")
+        except MeshFileError:
+            stored = None
+        want = ref or stored
+        have = current_branch(dest)
+        if want and have and have != want and have != "HEAD":
+            return _fail(f"wrong branch: have {have} want {want}", as_json)
+        return _ok(str(dest), parsed.atlas_id, have or want or "", as_json, "noop")
+
+    if gitmodules_listed and (not dest.exists() or not any(dest.iterdir()) if dest.exists() else True):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        code, err = submodule_init(parent_git, dest)
+        if code != 0:
+            return _fail(err or "submodule update failed", as_json)
+    elif parent_git and str(dest).startswith(str(parent_git)):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        code, err = submodule_add(parent_git, url, dest, ref, token=token)
+        if code != 0:
+            return _fail(err or "submodule add failed", as_json)
+    else:
+        code, err = clone(url, dest, ref, token=token)
+        if code != 0:
+            return _fail(err or "clone failed", as_json)
+
+    landed = current_branch(dest) or ref or ""
+    rel = dest
+    try:
+        rel = dest.relative_to(project)
+    except ValueError:
+        pass
+    try:
+        upsert(
+            project,
+            {
+                "id": parsed.atlas_id,
+                "ref": landed,
+                "path": str(rel).replace("\\", "/"),
+                "subpath": _infer_subpath(dest),
+            },
+        )
+    except MeshFileError as e:
+        return _fail(str(e), as_json)
+    return _ok(str(dest), parsed.atlas_id, landed, as_json, "mounted")
+
+
+def _infer_subpath(dest: Path) -> str:
+    if (dest / "references" / "atlas" / "SCHEMA.json").is_file():
+        return "references/atlas"
+    return ""
+
+
+def _in_gitmodules(parent: Path, dest: Path) -> bool:
+    gm = parent / ".gitmodules"
+    if not gm.is_file():
+        return False
+    try:
+        rel = str(dest.relative_to(parent)).replace("\\", "/")
+    except ValueError:
+        return False
+    return rel in gm.read_text(encoding="utf-8")
+
+
+def _fail(msg: str, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps({"ok": False, "error": msg}))
+    else:
+        print(f"atlas mount: {msg}", file=sys.stderr)
+    return 2
+
+
+def _ok(path: str, atlas_id: str, ref: str, as_json: bool, status: str) -> int:
+    if as_json:
+        print(json.dumps({"ok": True, "path": path, "id": atlas_id, "ref": ref, "status": status}))
+    else:
+        print(path)
+    return 0

@@ -1,0 +1,24 @@
+id: compile-type-contract-adversarial-v1
+work_id: 2026-08-27-atlas-compile-type-contract
+adversarial: true
+packages: [atlas]
+expect:
+  compile_headings_not_required: true
+  init_writes_schema: true
+  search_type_frontmatter_only: true
+smokes:
+  - id: heading-not-required
+    source: pin N / atlas-orders-the-graph
+    expect: no issue id for missing ## Pending or ## Growth path
+  - id: forming-on-document-warns
+    source: pin Q
+    expect: warning forming_requires_type
+  - id: recommended-type-missing-by_type-warns
+    source: pin C Layer 1
+    expect: warning not critical
+  - id: init-refuses-overwrite
+    source: pin F
+    expect: non-zero without --force when SCHEMA exists
+  - id: search-ignores-body-mention
+    source: pin U original inventory
+    expect: document that only mentions protostar is not a type hit
