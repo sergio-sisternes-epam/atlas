@@ -1,0 +1,4 @@
+[submodule "references/atlas"]
+	path = references/atlas
+	url = https://github.com/sergio-sisternes-epam/atlas-atlas.git
+	branch = main

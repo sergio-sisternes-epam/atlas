@@ -12,10 +12,17 @@ def has_git() -> bool:
     return shutil.which("git") is not None
 
 
-def run_git(args: list[str], cwd: Path | None = None, env: dict | None = None) -> tuple[int, str, str]:
+def run_git(
+    args: list[str],
+    cwd: Path | None = None,
+    env: dict | None = None,
+    drop_keys: tuple[str, ...] = (),
+) -> tuple[int, str, str]:
     full_env = os.environ.copy()
     if env:
         full_env.update(env)
+    for key in drop_keys:
+        full_env.pop(key, None)
     p = subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd else None,
@@ -44,10 +51,45 @@ def current_branch(repo: Path) -> str:
     return out if code == 0 else ""
 
 
-def _auth_prefix(token: str | None) -> list[str]:
-    if not token:
-        return []
-    return ["-c", f"http.extraHeader=Authorization: Bearer {token}"]
+def is_ignored(parent: Path, dest: Path) -> bool:
+    """True when dest is ignored by parent git (e.g. default .atlas/ overlay)."""
+    try:
+        rel = os.path.relpath(dest, parent)
+    except ValueError:
+        return False
+    code, _, _ = run_git(["check-ignore", "-q", rel], cwd=parent)
+    return code == 0
+
+
+def inside_git(parent: Path, dest: Path) -> bool:
+    try:
+        dest.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
+    """Git -c flags plus env keys to drop so a bad GH_TOKEN cannot override gh."""
+    drop = ("GH_TOKEN", "GITHUB_TOKEN")
+    if shutil.which("gh"):
+        return (
+            [
+                "-c",
+                "credential.helper=",
+                "-c",
+                "credential.helper=!gh auth git-credential",
+            ],
+            drop,
+        )
+    if token:
+        # Keep remotes token-free; insteadOf applies only to this process.
+        injected = f"https://x-access-token:{token}@github.com/"
+        return (
+            ["-c", f"url.{injected}.insteadOf=https://github.com/"],
+            (),
+        )
+    return [], ()
 
 
 def clone(
@@ -58,11 +100,12 @@ def clone(
     token: str | None = None,
 ) -> tuple[int, str]:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    args = [*_auth_prefix(token), "clone"]
+    auth, drop = _auth_args(token)
+    args = [*auth, "clone"]
     if ref:
         args.extend(["--branch", ref])
     args.extend([url, str(dest)])
-    code, _out, err = run_git(args, env=extra_env)
+    code, _out, err = run_git(args, env=extra_env, drop_keys=drop)
     return code, err
 
 
@@ -74,15 +117,21 @@ def submodule_add(
     token: str | None = None,
 ) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    args = [*_auth_prefix(token), "submodule", "add"]
+    auth, drop = _auth_args(token)
+    args = [*auth, "submodule", "add"]
     if ref:
         args.extend(["-b", ref])
     args.extend([url, rel])
-    code, _out, err = run_git(args, cwd=parent)
+    code, _out, err = run_git(args, cwd=parent, drop_keys=drop)
     return code, err
 
 
 def submodule_init(parent: Path, dest: Path) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    code, _out, err = run_git(["submodule", "update", "--init", "--", rel], cwd=parent)
+    auth, drop = _auth_args(None)
+    code, _out, err = run_git(
+        [*auth, "submodule", "update", "--init", "--", rel],
+        cwd=parent,
+        drop_keys=drop,
+    )
     return code, err
