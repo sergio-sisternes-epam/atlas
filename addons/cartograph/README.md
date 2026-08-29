@@ -11,11 +11,11 @@ Other sessions: use `python3 scripts/atlas.py search|validate`. No Vite, no view
 
 ## Store root — inject the mounted store; viewer does not auto-pick it
 
-Canonical skill process memory (after `atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main`):
+Canonical skill process memory (after `atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas`):
 
-`.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
+`references/atlas/atlas`
 
-Cartograph bundled presets still look for skill-relative `references/atlas` (gone) and `fixtures/mini-atlas`, then a bundled snapshot. They will **not** open the mount unless you set env or `?root=`.
+Cartograph bundled presets look for skill-relative `references/atlas`. The OKF root is nested at `references/atlas/atlas` (`SCHEMA.json` is not at the submodule root). Set `ATLAS_ROOT` / `?root=` to that nested path.
 
 Absolute paths are **not** committed for third-party stores. Inject the mount at host startup:
 

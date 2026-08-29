@@ -6,17 +6,17 @@ Durable OKF v0.2 knowledge substrate. Private APM package (`SKILL.md` + `apm.yml
 apm install sergio-sisternes-epam/atlas
 ```
 
-Process memory is **not** in this repo. Do not add `references/atlas/` here. Canonical store:
+Process memory is **not** authored here. Canonical store:
 
 https://github.com/sergio-sisternes-epam/atlas-atlas
 
-OKF root inside that repo is `atlas/` (`atlas/SCHEMA.json`), not git root.
+OKF root inside that repo is `atlas/` (`atlas/SCHEMA.json`), not git root. Mount it as a submodule at `references/atlas`:
 
 ```text
-atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
+atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
 ```
 
-Default clone path: `.atlas/github.com/sergio-sisternes-epam/atlas-atlas`  
-Compile/query root: `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
+Mount path: `references/atlas`  
+Compile/query root: `references/atlas/atlas`
 
 See `SKILL.md` and `apm.yml`.

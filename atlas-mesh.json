@@ -4,7 +4,7 @@
     {
       "id": "github.com/sergio-sisternes-epam/atlas-atlas",
       "ref": "main",
-      "path": ".atlas/github.com/sergio-sisternes-epam/atlas-atlas",
+      "path": "references/atlas",
       "subpath": "atlas"
     }
   ]
