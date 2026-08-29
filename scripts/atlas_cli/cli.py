@@ -7,7 +7,6 @@ from .commands import migrate as cmd_migrate
 from .commands import promote as cmd_promote
 from .commands import search as cmd_search
 from .commands import validate as cmd_validate
-from .commands import view as cmd_view
 from .commands import idcmd as cmd_id
 from .commands import mount as cmd_mount
 from .commands import resolve as cmd_resolve
@@ -210,23 +209,6 @@ def promote_cmd(
     raise SystemExit(
         cmd_promote.run(root, staging_file, to_path, type_hint, as_json)
     )
-
-
-@main.command("view")
-@click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--host", default=None, help="Build preview host (default: http://127.0.0.1:8080)")
-@click.option("--check", is_flag=True, help="probe the preview URL")
-@click.option("--open", "open_browser", is_flag=True, help="open the viewer URL")
-@click.option("--refresh", is_flag=True, help="bust listing cache then probe")
-def view_cmd(
-    root: str | None,
-    host: str | None,
-    check: bool,
-    open_browser: bool,
-    refresh: bool,
-) -> None:
-    """Point the Grok Build Cartograph preview at an Atlas (Build only)."""
-    raise SystemExit(cmd_view.run(root, host, check, open_browser, refresh))
 
 
 if __name__ == "__main__":

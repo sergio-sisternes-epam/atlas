@@ -22,7 +22,7 @@ atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target ref
 
 **Canonical store (this skill):** `references/atlas/atlas`
 
-Always pass that path as card `root` / `--root`. The CLI does not default `--root` to the mount (omit = cwd). Cartograph does not auto-open it; set `ATLAS_ROOT` / `ATLAS_PRESETS` or `?root=`.
+Always pass that path as card `root` / `--root`. The CLI does not default `--root` to the mount (omit = cwd).
 
 ## Activation card (required)
 
