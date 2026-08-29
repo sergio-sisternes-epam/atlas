@@ -57,6 +57,9 @@ def run(
     dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
     parent_git = git_root(project)
 
+    if dest.exists() and not dest.is_dir():
+        return _fail(f"target is not a directory: {dest}", as_json)
+
     existing = dest / ".git"
     gitmodules_listed = parent_git and _in_gitmodules(parent_git, dest)
 
@@ -81,9 +84,10 @@ def run(
         and not is_ignored(parent_git, dest)
     )
 
-    if gitmodules_listed and (not dest.exists() or not any(dest.iterdir()) if dest.exists() else True):
+    dest_empty = dest.is_dir() and not any(dest.iterdir())
+    if gitmodules_listed and (not dest.exists() or dest_empty):
         dest.parent.mkdir(parents=True, exist_ok=True)
-        code, err = submodule_init(parent_git, dest)
+        code, err = submodule_init(parent_git, dest, token=token)
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
     elif tracked_embed:

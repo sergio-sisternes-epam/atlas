@@ -70,8 +70,20 @@ def inside_git(parent: Path, dest: Path) -> bool:
 
 
 def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
-    """Git -c flags plus env keys to drop so a bad GH_TOKEN cannot override gh."""
+    """Git -c flags plus env keys to drop so a stale GH_TOKEN cannot override auth."""
     drop = ("GH_TOKEN", "GITHUB_TOKEN")
+    if token:
+        # Prefer the resolved token (env/gh) so CI/headless works even if `gh` is present.
+        injected = f"https://x-access-token:{token}@github.com/"
+        return (
+            [
+                "-c",
+                "credential.helper=",
+                "-c",
+                f"url.{injected}.insteadOf=https://github.com/",
+            ],
+            drop,
+        )
     if shutil.which("gh"):
         return (
             [
@@ -81,13 +93,6 @@ def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
                 "credential.helper=!gh auth git-credential",
             ],
             drop,
-        )
-    if token:
-        # Keep remotes token-free; insteadOf applies only to this process.
-        injected = f"https://x-access-token:{token}@github.com/"
-        return (
-            ["-c", f"url.{injected}.insteadOf=https://github.com/"],
-            (),
         )
     return [], ()
 
@@ -126,9 +131,11 @@ def submodule_add(
     return code, err
 
 
-def submodule_init(parent: Path, dest: Path) -> tuple[int, str]:
+def submodule_init(
+    parent: Path, dest: Path, token: str | None = None
+) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    auth, drop = _auth_args(None)
+    auth, drop = _auth_args(token)
     code, _out, err = run_git(
         [*auth, "submodule", "update", "--init", "--", rel],
         cwd=parent,
