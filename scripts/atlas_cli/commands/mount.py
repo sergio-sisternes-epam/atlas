@@ -11,7 +11,9 @@ from ..core.gitops import (
     current_branch,
     git_root,
     has_git,
+    inside_git,
     is_dirty,
+    is_ignored,
     submodule_add,
     submodule_init,
 )
@@ -73,17 +75,24 @@ def run(
             return _fail(f"wrong branch: have {have} want {want}", as_json)
         return _ok(str(dest), parsed.atlas_id, have or want or "", as_json, "noop")
 
+    tracked_embed = (
+        parent_git
+        and inside_git(parent_git, dest)
+        and not is_ignored(parent_git, dest)
+    )
+
     if gitmodules_listed and (not dest.exists() or not any(dest.iterdir()) if dest.exists() else True):
         dest.parent.mkdir(parents=True, exist_ok=True)
         code, err = submodule_init(parent_git, dest)
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
-    elif parent_git and str(dest).startswith(str(parent_git)):
+    elif tracked_embed:
         dest.parent.mkdir(parents=True, exist_ok=True)
         code, err = submodule_add(parent_git, url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "submodule add failed", as_json)
     else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
         code, err = clone(url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "clone failed", as_json)
@@ -110,6 +119,10 @@ def run(
 
 
 def _infer_subpath(dest: Path) -> str:
+    if (dest / "SCHEMA.json").is_file():
+        return ""
+    if (dest / "atlas" / "SCHEMA.json").is_file():
+        return "atlas"
     if (dest / "references" / "atlas" / "SCHEMA.json").is_file():
         return "references/atlas"
     return ""

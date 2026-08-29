@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "stores": [
+    {
+      "id": "github.com/sergio-sisternes-epam/atlas-atlas",
+      "ref": "main",
+      "path": ".atlas/github.com/sergio-sisternes-epam/atlas-atlas",
+      "subpath": "atlas"
+    }
+  ]
+}
