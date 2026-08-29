@@ -9,14 +9,15 @@ This UI is **Grok Build only**. The skill does not ship a standalone server.
 
 Other sessions: use `python3 scripts/atlas.py search|validate`. No Vite, no view host.
 
-## Store root — skill stores by default, env to override
+## Store root — inject the mounted store; viewer does not auto-pick it
 
-Defaults (relative to this skill, not host copies):
+Canonical skill process memory (after `atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main`):
 
-- `references/atlas` — skill process memory
-- `fixtures/mini-atlas` — fixture
+`.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
 
-Absolute paths are **not** committed for third-party stores. Inject those at host startup:
+Cartograph bundled presets still look for skill-relative `references/atlas` (gone) and `fixtures/mini-atlas`, then a bundled snapshot. They will **not** open the mount unless you set env or `?root=`.
+
+Absolute paths are **not** committed for third-party stores. Inject the mount at host startup:
 
 ```bash
 export ATLAS_ROOT=/absolute/path/to/atlas

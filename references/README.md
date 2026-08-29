@@ -1,6 +1,6 @@
 # Atlas store lives in its own repository
 
-This skill’s process memory is **not** authored here any longer as the source of truth.
+This skill’s process memory is **not** authored here. Do not add `references/atlas/` or any process-memory tree to this repo.
 
 **Remote:** `https://github.com/sergio-sisternes-epam/atlas-atlas`
 
@@ -11,8 +11,7 @@ atlas auth login --host github.com
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
 ```
 
-Default mount path: `.atlas/github.com/sergio-sisternes-epam/atlas-atlas`  
-OKF root is the repository root (`SCHEMA.json` at the top of `atlas-atlas`).
+Default clone path: `.atlas/github.com/sergio-sisternes-epam/atlas-atlas`  
+OKF root is `atlas/` inside the store repo (`atlas/SCHEMA.json`), not git root.  
+Compile/query root: `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
 
-This Grok session cannot keep a clone after publishing. Until you mount on a git machine, a local working copy may still exist under `references/atlas/` for the running skill. Treat GitHub as the published snapshot.
----

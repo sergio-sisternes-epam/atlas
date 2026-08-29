@@ -1,12 +1,16 @@
 # atlas
 
-Durable OKF v0.2 knowledge substrate. Private APM package.
+Durable OKF v0.2 knowledge substrate. Private APM package (`SKILL.md` + `apm.yml` at repo root). Format authority remains **okf**.
 
-Process memory is **not** in this repo. Canonical store:
+```text
+apm install sergio-sisternes-epam/atlas
+```
+
+Process memory is **not** in this repo. Do not add `references/atlas/` here. Canonical store:
 
 https://github.com/sergio-sisternes-epam/atlas-atlas
 
-OKF root inside that repo is `atlas/` (`atlas/SCHEMA.json`).
+OKF root inside that repo is `atlas/` (`atlas/SCHEMA.json`), not git root.
 
 ```text
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
