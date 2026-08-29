@@ -20,7 +20,9 @@ Process memory is **not** in this repo. Canonical store: `github.com/sergio-sist
 atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
 ```
 
-**Default store (this skill):** `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
+**Canonical store (this skill):** `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas`
+
+Always pass that path as card `root` / `--root`. The CLI does not default `--root` to the mount (omit = cwd). Cartograph does not auto-open it; set `ATLAS_ROOT` / `ATLAS_PRESETS` or `?root=`.
 
 ## Activation card (required)
 

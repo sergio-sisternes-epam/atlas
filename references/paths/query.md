@@ -38,7 +38,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas sear
 
 ## Procedure
 
-1. **Resolve root** — card `root` / `--root`, else skill default `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas` after `atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main`.
+1. **Resolve root** — always set card `root` and `--root` to the mounted OKF root `.atlas/github.com/sergio-sisternes-epam/atlas-atlas/atlas` (after `atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main`). Omitting `--root` uses the current working directory; the CLI does not default to the mount.
 2. **Form the query** from the intent. Free text plus only justified field tokens:
    - `type:<name>` — frontmatter type, not a body mention
    - `kva:<value>` — traffic (alive, forming, terminated, …)
