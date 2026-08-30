@@ -87,7 +87,7 @@ def run(
     dest_empty = dest.is_dir() and not any(dest.iterdir())
     if gitmodules_listed and (not dest.exists() or dest_empty):
         dest.parent.mkdir(parents=True, exist_ok=True)
-        code, err = submodule_init(parent_git, dest, token=token)
+        code, err = submodule_init(parent_git, dest, token=token, host=host)
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
     elif tracked_embed:
