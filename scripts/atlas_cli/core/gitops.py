@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def has_git() -> bool:
@@ -69,8 +70,33 @@ def inside_git(parent: Path, dest: Path) -> bool:
         return False
 
 
-def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
-    """Git -c flags plus env keys to drop so a bad GH_TOKEN cannot override gh."""
+def _https_host(url: str | None) -> str:
+    if not url:
+        return "github.com"
+    if url.startswith("git@"):
+        rest = url[4:]
+        return rest.split(":", 1)[0] or "github.com"
+    return urlsplit(url).hostname or "github.com"
+
+
+def _redact(err: str, token: str | None) -> str:
+    if err and token:
+        return err.replace(token, "***")
+    return err
+
+
+def _auth_args(
+    token: str | None, host: str = "github.com"
+) -> tuple[list[str], tuple[str, ...]]:
+    """Auth for clone / submodule add / submodule update.
+
+    Never set http.extraHeader=Authorization — GitHub rejects that for
+    private HTTPS clone/submodule add (invalid credentials). Prefer the
+    gh credential helper when gh is on PATH (including machines that also
+    have GH_TOKEN). Token insteadOf is only the no-gh / CI fallback, and
+    rewrites the same host as the remote (not only github.com).
+    Drop GH_TOKEN/GITHUB_TOKEN so a stale env token cannot override gh.
+    """
     drop = ("GH_TOKEN", "GITHUB_TOKEN")
     if shutil.which("gh"):
         return (
@@ -83,11 +109,15 @@ def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
             drop,
         )
     if token:
-        # Keep remotes token-free; insteadOf applies only to this process.
-        injected = f"https://x-access-token:{token}@github.com/"
+        injected = f"https://x-access-token:{token}@{host}/"
         return (
-            ["-c", f"url.{injected}.insteadOf=https://github.com/"],
-            (),
+            [
+                "-c",
+                "credential.helper=",
+                "-c",
+                f"url.{injected}.insteadOf=https://{host}/",
+            ],
+            drop,
         )
     return [], ()
 
@@ -100,13 +130,13 @@ def clone(
     token: str | None = None,
 ) -> tuple[int, str]:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    auth, drop = _auth_args(token)
+    auth, drop = _auth_args(token, host=_https_host(url))
     args = [*auth, "clone"]
     if ref:
         args.extend(["--branch", ref])
     args.extend([url, str(dest)])
     code, _out, err = run_git(args, env=extra_env, drop_keys=drop)
-    return code, err
+    return code, _redact(err, token)
 
 
 def submodule_add(
@@ -117,21 +147,26 @@ def submodule_add(
     token: str | None = None,
 ) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    auth, drop = _auth_args(token)
+    auth, drop = _auth_args(token, host=_https_host(url))
     args = [*auth, "submodule", "add"]
     if ref:
         args.extend(["-b", ref])
     args.extend([url, rel])
     code, _out, err = run_git(args, cwd=parent, drop_keys=drop)
-    return code, err
+    return code, _redact(err, token)
 
 
-def submodule_init(parent: Path, dest: Path) -> tuple[int, str]:
+def submodule_init(
+    parent: Path,
+    dest: Path,
+    token: str | None = None,
+    host: str = "github.com",
+) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    auth, drop = _auth_args(None)
+    auth, drop = _auth_args(token, host=host)
     code, _out, err = run_git(
         [*auth, "submodule", "update", "--init", "--", rel],
         cwd=parent,
         drop_keys=drop,
     )
-    return code, err
+    return code, _redact(err, token)
