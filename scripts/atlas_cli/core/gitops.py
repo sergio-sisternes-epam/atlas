@@ -70,20 +70,15 @@ def inside_git(parent: Path, dest: Path) -> bool:
 
 
 def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
-    """Git -c flags plus env keys to drop so a stale GH_TOKEN cannot override auth."""
+    """Auth for clone / submodule add / submodule update.
+
+    Never set http.extraHeader=Authorization — GitHub rejects that for
+    private HTTPS clone/submodule add (invalid credentials). Prefer the
+    gh credential helper when gh is on PATH (including machines that also
+    have GH_TOKEN). Token insteadOf is only the no-gh / CI fallback.
+    Drop GH_TOKEN/GITHUB_TOKEN so a stale env token cannot override gh.
+    """
     drop = ("GH_TOKEN", "GITHUB_TOKEN")
-    if token:
-        # Prefer the resolved token (env/gh) so CI/headless works even if `gh` is present.
-        injected = f"https://x-access-token:{token}@github.com/"
-        return (
-            [
-                "-c",
-                "credential.helper=",
-                "-c",
-                f"url.{injected}.insteadOf=https://github.com/",
-            ],
-            drop,
-        )
     if shutil.which("gh"):
         return (
             [
@@ -91,6 +86,17 @@ def _auth_args(token: str | None) -> tuple[list[str], tuple[str, ...]]:
                 "credential.helper=",
                 "-c",
                 "credential.helper=!gh auth git-credential",
+            ],
+            drop,
+        )
+    if token:
+        injected = f"https://x-access-token:{token}@github.com/"
+        return (
+            [
+                "-c",
+                "credential.helper=",
+                "-c",
+                f"url.{injected}.insteadOf=https://github.com/",
             ],
             drop,
         )
