@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (query, remember, work) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.1
+version: 0.8.2
 status: active
 work_id: 2026-08-27-atlas-search-nav-signals
 plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md
@@ -56,7 +56,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 
 1. **Formal lookup = path `query` + `atlas search`** — B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages.
 2. **`staging/` never answers** — compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** — `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links — not markdown headings. New page-contract misses are warnings (`exit 1`) until promoted.
+3. **Writes end on compile green** — `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links — not markdown headings. `index_md_present` and `index_md_listing` are warnings (`exit 1`), never critical. Listing checks concept `.md` pages and child folders with an index; media files are ignored. New page-contract misses are warnings until promoted.
 4. **`relates_to` / `kind` are authoritative** — body `## Related` is optional mirror.
 5. **Work cluster** — pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** — append only for structural store changes (not every experience).
