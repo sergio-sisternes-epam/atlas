@@ -60,9 +60,18 @@ class CiActivationContractTests(unittest.TestCase):
             self.assertNotIn("$GITHUB_WORKSPACE/.atlas-cli", workflow)
 
     def test_cli_default_ref_is_not_a_floating_branch(self) -> None:
+        floating_env_ref = re.compile(
+            r"^\s*ATLAS_REF:\s*(?:main|master)\s*$", re.MULTILINE
+        )
+        floating_input_default = re.compile(
+            r"^\s*default:\s*(?:main|master)\s*$", re.MULTILINE
+        )
         for workflow in (self.copy, self.reusable):
-            self.assertIn("ATLAS_REF must be a tag or 40-character commit SHA", workflow)
-            self.assertNotRegex(workflow, r"ATLAS_REF:\s*(?:main|master)\s*$")
+            self.assertIn(
+                "ATLAS_REF must be a tag or 40-character commit SHA", workflow
+            )
+        self.assertNotRegex(self.copy, floating_env_ref)
+        self.assertNotRegex(self.reusable, floating_input_default)
 
     def test_third_party_actions_are_sha_pinned(self) -> None:
         action_ref = re.compile(
