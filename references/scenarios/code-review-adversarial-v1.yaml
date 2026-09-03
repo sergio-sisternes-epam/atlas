@@ -1,0 +1,33 @@
+id: code-review-adversarial-v1
+work_id: 2026-09-03-pr-panel-review
+adversarial: true
+packages: [atlas]
+expect:
+  one_skill_dir: true
+  no_apm_package: true
+  lazy_lenses: true
+  skip_python_on_docs: true
+  no_merge_gate_language: true
+  dispatch_name_code_review: true
+smokes:
+  - id: no-apm-yml
+    source: user constraint / pin 2
+    expect: no apm.yml under .github/skills/code-review
+  - id: one-skill-not-four
+    source: A1 PANEL-WITHOUT-SYNTHESIS / pin 3
+    expect: exactly one SKILL.md for the panel; no per-lens SKILL.md
+  - id: lenses-not-inlined
+    source: C1 EAGER BLOAT / CCR tutorial context limits
+    expect: SKILL.md does not contain the full text of any lens file
+  - id: docs-only-skips-python-cli
+    source: B2 skip rules / pin roster
+    expect: roster.md skip python-cli when diff is markdown-only under docs/README/recipes
+  - id: no-approve-reject
+    source: advisory regime / deprecated panel-review
+    expect: SKILL.md and synthesizer.md contain no APPROVE/REJECT merge-gate instruction
+  - id: dispatch-name-code-review
+    source: GitHub CCR changelog 2026-06-02 / pin 1
+    expect: directory and SKILL.md name are code-review, not pr-panel-review
+  - id: inline-plus-summary-table
+    source: operator 2026-09-03 output format
+    expect: SKILL.md requires inline comments plus one summary; synthesizer.md has Blocker/Recommended/Nits table and per-lens details
