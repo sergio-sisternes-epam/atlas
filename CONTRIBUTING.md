@@ -33,9 +33,15 @@ The source audit omits install-replay drift because this repository combines a
 root skill bundle with local `.apm` review skills. CI runs the full drift audit
 after installing Atlas into each disposable consumer target.
 
-Pull requests run the Python tests but skip package and consumer jobs. Those
-secret-dependent jobs run only after merge or through a reusable workflow call,
-so pull-request code never receives `APM_READ_TOKEN`.
+Pull requests from branches in this repository run the Python tests, the APM
+baseline integrity checks, and full install-replay drift audits in disposable
+consumers. The source audit receives `APM_READ_TOKEN` but does not run
+`apm install`, so the checked-out deployment remains unchanged. It uses
+`--no-drift` because this repository combines a root skill bundle with local
+`.apm` review skills; the disposable consumers provide the full drift evidence
+for both supported target sets. Pull requests from forks cannot receive
+repository secrets and therefore skip the APM and consumer gates; they still
+run the Python tests.
 
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime

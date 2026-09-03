@@ -166,6 +166,25 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", self.ci_workflow)
         self.assertIn("python3 scripts/run_tests.py", self.ci_workflow)
         self.assertIn("python3 scripts/release_readiness.py", self.ci_workflow)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            self.ci_workflow,
+        )
+        self.assertIn("name: Audit committed APM state", self.ci_workflow)
+        self.assertIn(
+            "apm audit --ci --no-policy --no-fail-fast --no-drift",
+            self.ci_workflow,
+        )
+        self.assertEqual(
+            2,
+            self.ci_workflow.count(
+                "github.event.pull_request.head.repo.full_name == github.repository"
+            ),
+        )
+        self.assertIn(
+            "apm audit --ci --no-policy --no-fail-fast\n",
+            self.ci_workflow,
+        )
         self.assertIn("name: Release readiness decision", self.ci_workflow)
         self.assertIn('if [ "$REF_NAME" != main ]', self.ci_workflow)
 
