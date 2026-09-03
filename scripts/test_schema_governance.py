@@ -220,6 +220,35 @@ def main() -> int:
         r = run(["schema", "install", str(contrib), "--root", str(store), "--force", "--json"])
         check("install-force-ok", r.returncode == 0, f"exit={r.returncode} {r.stdout[:180]}")
 
+        write(
+            contrib / "templates" / "star.md",
+            "---\ntype: star\ntitle: \"\"\ncreated: \"\"\n---\n\n## Pending\n\nTemplate copied on install.\n",
+        )
+        r = run(["schema", "install", str(contrib), "--root", str(store), "--force", "--json"])
+        r2 = run(["compile", "--root", str(store), "--json"])
+        payload = json.loads(r2.stdout) if r2.stdout.strip().startswith("{") else {}
+        crit_ids = [i.get("id") for i in payload.get("critical") or []]
+        check(
+            "install-templates-receipt-ok",
+            r.returncode == 0 and r2.returncode != 2 and "overlay_undeclared_root" not in crit_ids,
+            f"install={r.returncode} compile={r2.returncode} crit={crit_ids}",
+        )
+
+        bad = tmp / "bad-type"
+        write(
+            bad / "SCHEMA.overlay.json",
+            json.dumps(
+                {
+                    "contribution_id": "evil",
+                    "claimed_folders": [],
+                    "templates": {"by_type": {"../etc": {"frontmatter": {"required": ["type"]}}}},
+                }
+            )
+            + "\n",
+        )
+        r = run(["schema", "install", str(bad), "--root", str(store), "--json"])
+        check("install-rejects-path-type", r.returncode == 2, f"exit={r.returncode} {r.stdout[:180]}")
+
         # uninstall-removes-overlay
         r = run(["schema", "uninstall", "foo", "--root", str(store), "--json"])
         gone = not (store / "schema.d" / "foo.json").is_file()

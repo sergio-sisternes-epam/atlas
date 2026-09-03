@@ -44,6 +44,12 @@ def validate_id(cid: str) -> str | None:
     return None
 
 
+def validate_type_name(tname: str) -> str | None:
+    if not KEBAB.match(tname or ""):
+        return f"type name must be kebab-case with no path separators (got {tname!r})"
+    return None
+
+
 def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not path.is_file():
         return None, f"missing {path.name}"
@@ -146,6 +152,8 @@ def claimed_allows(claimed: list[str], wp: str) -> bool:
         return False
     if relp == SCHEMA_D or relp.startswith(SCHEMA_D + "/"):
         return True
+    if relp == "templates" or relp.startswith("templates/"):
+        return True
     for c in claimed:
         prefix = normalize_rel_path(c)
         if not prefix:
@@ -186,7 +194,7 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
         for key, val in ov.items():
             if key in META_KEYS:
                 continue
-            if key in FORBIDDEN_CORE and key in core:
+            if key in FORBIDDEN_CORE:
                 critical.append(
                     _issue("overlay_core_clash", relp, f"overlay must not set core key '{key}'")
                 )
@@ -205,6 +213,10 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                     dest_by = {}
                     dest_t["by_type"] = dest_by
                 for tname, block in add_by.items():
+                    t_err = validate_type_name(str(tname))
+                    if t_err:
+                        critical.append(_issue("overlay_type_name", relp, t_err))
+                        continue
                     if tname in core_by_type:
                         critical.append(
                             _issue(

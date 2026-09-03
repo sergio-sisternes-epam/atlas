@@ -14,6 +14,7 @@ from ..core.overlay import (
     required_fingerprint,
     resolve_under_root,
     validate_id,
+    validate_type_name,
     write_json,
     write_receipt,
 )
@@ -108,6 +109,11 @@ def run_install(
         _print(as_json, {"ok": False, "error": id_err, "root": str(r)})
         return 2
     dest = overlay_path(r, cid)
+    for tname in added_types(ov):
+        t_err = validate_type_name(tname)
+        if t_err:
+            _print(as_json, {"ok": False, "error": t_err, "root": str(r), "id": cid})
+            return 2
     if dest.is_file() and not force:
         existing, _ = load_overlay(r, cid)
         if existing is not None:
