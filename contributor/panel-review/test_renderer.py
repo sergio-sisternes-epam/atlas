@@ -218,6 +218,8 @@ class RendererSpecTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("YAML scenario/eval fixtures are not OKF pages", atlas_lens)
         self.assertIn("Nested skills use their own local references/assets", skill_lens)
+        self.assertIn("fails closed only when", skill_lens)
+        self.assertIn("Runtime topology fallback remains owned", skill_lens)
         self.assertIn("Do not request a", skill_lens)
         self.assertIn("`version` field", skill_lens)
         self.assertIn("Contributor panel evals stay outside", skill_lens)

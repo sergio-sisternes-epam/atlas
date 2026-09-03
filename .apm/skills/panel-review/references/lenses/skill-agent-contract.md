@@ -13,8 +13,9 @@ Run only when the roster includes this lens.
   Nested skills use their own local references/assets and do not need Atlas path
   procedure modules.
 - When `code-review` is the broad review entrypoint, it loads the sibling
-  `panel-review` skill through a valid relative link and fails closed when the
-  panel cannot execute. It does not copy panel orchestration or output rules.
+  `panel-review` skill through a valid relative link and fails closed only when
+  that sibling cannot load. Runtime topology fallback remains owned by
+  `panel-review`; the adapter does not copy panel orchestration or output rules.
 - Progressive disclosure: do not inline every path module into the root skill.
 - Nested skill calls use the multi-harness substrate contract (load the full target skill body; do not invent from memory).
 - Frontmatter `description` names triggers and bounds (imperative, user intent).
