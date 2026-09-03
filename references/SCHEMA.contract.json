@@ -27,7 +27,8 @@
       "not_just_links",
       "schema_present",
       "no_answerable_in_staging",
-      "index_md_present"
+      "index_md_present",
+      "index_md_listing"
     ],
     "page_contract": {
       "$comment": "Optional on live SCHEMA. Engine reads it; do not hardcode types in Python.",
