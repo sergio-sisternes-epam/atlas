@@ -31,6 +31,9 @@ The source audit omits install-replay drift because this repository combines a
 root skill bundle with local `.apm` review skills. CI runs the full drift audit
 after installing Atlas into each disposable consumer target.
 
+Fork pull requests run the Python tests but skip package and consumer jobs,
+because GitHub does not expose repository secrets to fork workflows.
+
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime
 target set.
