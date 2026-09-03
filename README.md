@@ -26,7 +26,7 @@ The project-level panel review skill is authored at
 `.apm/skills/panel-review/`. Generate the Copilot deployment with:
 
 ```text
-apm install --target copilot
+apm install --target copilot --frozen
 ```
 
 APM deploys it to `.agents/skills/panel-review/`. Edit the `.apm/` source,

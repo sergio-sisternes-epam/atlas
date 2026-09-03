@@ -26,9 +26,9 @@ smokes:
   - id: docs-only-skips-python-cli
     source: B2 skip rules / pin roster
     expect: roster.md skip python-cli when diff is markdown-only under docs/README/recipes
-  - id: no-approve-reject
+  - id: no-merge-gate-vocabulary
     source: advisory regime / deprecated panel-review
-    expect: SKILL.md and synthesizer.md contain no APPROVE/REJECT merge-gate instruction
+    expect: SKILL.md and synthesizer.md use advisory language without merge-decision tokens or formal review-state instructions
   - id: dispatch-name-panel-review
     source: operator correction 2026-09-03
     expect: source directory and SKILL.md name are panel-review

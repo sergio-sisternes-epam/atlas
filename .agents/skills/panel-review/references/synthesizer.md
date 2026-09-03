@@ -50,4 +50,4 @@ Include a `<details>` block **only** for lenses that ran. If a lens ran with zer
 - only **Recommended** → `ship with follow-ups` or `needs discussion`
 - only **Nits** or empty → `ship now`
 
-Do not emit APPROVE, REJECT, REQUEST_CHANGES, or merge labels. Do not approve the PR. Humans ship.
+Do not emit merge-decision labels or set a formal review state. Humans decide and ship.

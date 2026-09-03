@@ -52,7 +52,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8a1ce376747ed046c1579a4b4f106eeeef0a485057f92fc0f4526b04b0cc42f1
+  content_hash: sha256:ee52f0641fcfa37a197eca39ae26af56ceeb3f1b9ebb72e0734afd5d6c782ffd
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/references/finding-schema.md
@@ -115,7 +115,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:51edc2f311a139ece4ea3460f45f62b36a199342a68af0a4e739e89512264ce6
+  content_hash: sha256:27df4e32bc23360efed165179988558f59fabbff72b7bd0ed2b8a518c044069f
 - kind: project-relative
   target: copilot
   value: .agents/skills/okf
@@ -226,11 +226,11 @@ local_deployed_files:
 - .agents/skills/panel-review/references/roster.md
 - .agents/skills/panel-review/references/synthesizer.md
 local_deployed_file_hashes:
-  .agents/skills/panel-review/SKILL.md: sha256:8a1ce376747ed046c1579a4b4f106eeeef0a485057f92fc0f4526b04b0cc42f1
+  .agents/skills/panel-review/SKILL.md: sha256:ee52f0641fcfa37a197eca39ae26af56ceeb3f1b9ebb72e0734afd5d6c782ffd
   .agents/skills/panel-review/references/finding-schema.md: sha256:79227ae2d0c840409117dccdaca958530c01a931416101c7a0f07cd86ce75ac9
   .agents/skills/panel-review/references/lenses/atlas-contract.md: sha256:a67ee600703c9f8c0387231fe8064e2396fe86977b9984bc26ed84b91a107738
   .agents/skills/panel-review/references/lenses/python-cli.md: sha256:640257a171cd693c01ec778ef7303a47e464f3a866322f3ea790509ccdeef2e0
   .agents/skills/panel-review/references/lenses/security-gitops.md: sha256:ffac211e2b518a560d0ef1401764885565a2ffdef11a5fc9373211a7ca611c6d
   .agents/skills/panel-review/references/lenses/skill-agent-contract.md: sha256:905b2f263132c003aa9b615a84b749649bf1466d99589a789f1ee9c404c76a63
   .agents/skills/panel-review/references/roster.md: sha256:15979ecf1d8b234d638c1dccb3eb3e13fe69e84b1a86a7271eaaa49e59723350
-  .agents/skills/panel-review/references/synthesizer.md: sha256:51edc2f311a139ece4ea3460f45f62b36a199342a68af0a4e739e89512264ce6
+  .agents/skills/panel-review/references/synthesizer.md: sha256:27df4e32bc23360efed165179988558f59fabbff72b7bd0ed2b8a518c044069f

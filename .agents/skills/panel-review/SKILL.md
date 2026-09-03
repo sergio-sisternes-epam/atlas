@@ -19,7 +19,7 @@ You are the **orchestrator**. Specialists do not write to the PR. You are the so
 
 - **Orchestrator writes; specialists do not.** Lenses return structured findings only.
 - **Inline + one summary:** for each finding with a diff line, leave an inline comment on that line. Then post **exactly one** summary comment (table + per-lens `<details>`). No extra per-lens top-level comments.
-- **Advisory only:** do not approve, request-changes as a merge gate, merge, or apply APPROVE/REJECT labels.
+- **Advisory only:** leave formal review-state decisions and merging to humans; never apply merge-decision labels.
 - **Do not implement** the PR under review.
 - **Lazy load:** read a lens file only after the roster says that lens runs. Do not paste lens bodies into this file.
 - **Review lens** ≠ atlas compile `--path`/`--type` **focus lens**. Do not mix those words.
