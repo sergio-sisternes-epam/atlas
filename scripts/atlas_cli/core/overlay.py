@@ -90,10 +90,22 @@ def required_fingerprint(overlay: dict[str, Any]) -> dict[str, list[str]]:
     for tname, block in by_type.items():
         if not isinstance(block, dict):
             continue
-        req = ((block.get("frontmatter") or {}).get("required")) or []
+        fm = block.get("frontmatter")
+        if not isinstance(fm, dict):
+            fm = {}
+        req = fm.get("required") or []
         if not isinstance(req, list):
             req = []
-        out[str(tname)] = sorted({str(x).strip() for x in req if str(x).strip()})
+        names: list[str] = []
+        seen: set[str] = set()
+        for x in req:
+            if isinstance(x, (dict, list)):
+                continue
+            s = str(x).strip()
+            if s and s not in seen:
+                seen.add(s)
+                names.append(s)
+        out[str(tname)] = sorted(names)
     return out
 
 
@@ -282,7 +294,16 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                         existing = dest.get(sub) or []
                         if not isinstance(existing, list):
                             existing = []
-                        dest[sub] = list(dict.fromkeys([*existing, *sval]))
+                        merged_list: list[str] = []
+                        seen_t: set[str] = set()
+                        for x in [*existing, *sval]:
+                            if isinstance(x, (dict, list)):
+                                continue
+                            s = str(x).strip()
+                            if s and s not in seen_t:
+                                seen_t.add(s)
+                                merged_list.append(s)
+                        dest[sub] = merged_list
                     elif sub in dest and dest[sub] != sval:
                         critical.append(
                             _issue("overlay_key_clash", relp, f"two overlays clash on types.{sub}")

@@ -290,8 +290,25 @@ def run(
         schema = None
     else:
         assert schema is not None
-        for msg in validate_schema_shape(schema):
-            critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
+        tmpl = schema.get("templates")
+        if tmpl is not None and not isinstance(tmpl, dict):
+            critical.append(
+                {
+                    "id": "schema_shape",
+                    "path": "SCHEMA.json",
+                    "msg": "SCHEMA.templates must be an object",
+                }
+            )
+        elif isinstance(tmpl, dict):
+            by = tmpl.get("by_type")
+            if by is not None and not isinstance(by, dict):
+                critical.append(
+                    {
+                        "id": "schema_shape",
+                        "path": "SCHEMA.json",
+                        "msg": "SCHEMA.templates.by_type must be an object",
+                    }
+                )
         merged, ov_crit, ov_warn = merge_overlays(schema, r)
         critical.extend(ov_crit)
         warnings.extend(ov_warn)
