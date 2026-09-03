@@ -14,7 +14,7 @@ Use when findings should become Atlas **lessons**, live **decisions**, or **reci
 
 ## Always required (agent thinking)
 
-1. Atlas activation card with `path: remember` and `path_module: references/paths/remember.md`.
+1. Atlas activation card with `path: remember`, `path_module: references/paths/remember.md`, and `root: <atlas root>`.
 2. A designed inventory the agent actually thought through: proposed path, type, one-line claim, source URIs. Dumping unexamined text into a lesson is forbidden.
 
 After that inventory exists, **write and compile**. Do not wait for a human unless they asked.
