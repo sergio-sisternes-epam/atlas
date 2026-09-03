@@ -9,6 +9,7 @@ from ..core.overlay import (
     added_types,
     load_overlay,
     load_receipt,
+    overlay_by_type,
     overlay_path,
     receipt_path,
     required_fingerprint,
@@ -109,6 +110,10 @@ def run_install(
         _print(as_json, {"ok": False, "error": id_err, "root": str(r)})
         return 2
     dest = overlay_path(r, cid)
+    _, by_err = overlay_by_type(ov)
+    if by_err:
+        _print(as_json, {"ok": False, "error": by_err, "root": str(r), "id": cid})
+        return 2
     for tname in added_types(ov):
         t_err = validate_type_name(tname)
         if t_err:

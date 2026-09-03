@@ -95,6 +95,20 @@ def required_fingerprint(overlay: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+def overlay_by_type(overlay: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    tmpl = overlay.get("templates")
+    if tmpl is None:
+        return {}, None
+    if not isinstance(tmpl, dict):
+        return None, "templates must be an object"
+    if "by_type" not in tmpl:
+        return {}, None
+    by = tmpl.get("by_type")
+    if not isinstance(by, dict):
+        return None, "templates.by_type must be an object"
+    return by, None
+
+
 def added_types(overlay: dict[str, Any]) -> list[str]:
     return sorted(required_fingerprint(overlay).keys())
 
@@ -204,7 +218,14 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                 if not isinstance(val, dict):
                     critical.append(_issue("overlay_templates", relp, "templates must be an object"))
                     continue
-                add_by = (val.get("by_type") or {}) if isinstance(val.get("by_type"), dict) else {}
+                if "by_type" in val and not isinstance(val.get("by_type"), dict):
+                    critical.append(
+                        _issue("overlay_templates", relp, "templates.by_type must be an object")
+                    )
+                    continue
+                add_by = val.get("by_type") or {}
+                if not isinstance(add_by, dict):
+                    add_by = {}
                 dest_t = merged.setdefault("templates", {})
                 if not isinstance(dest_t, dict):
                     dest_t = {}

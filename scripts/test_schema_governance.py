@@ -272,6 +272,21 @@ def main() -> int:
         r = run(["schema", "install", str(bad), "--root", str(store), "--json"])
         check("install-rejects-path-type", r.returncode == 2, f"exit={r.returncode} {r.stdout[:180]}")
 
+        bad2 = tmp / "bad-by-type"
+        write(
+            bad2 / "SCHEMA.overlay.json",
+            json.dumps(
+                {
+                    "contribution_id": "shapeless",
+                    "claimed_folders": [],
+                    "templates": {"by_type": ["not", "an", "object"]},
+                }
+            )
+            + "\n",
+        )
+        r = run(["schema", "install", str(bad2), "--root", str(store), "--json"])
+        check("install-rejects-by-type-list", r.returncode == 2, f"exit={r.returncode} {r.stdout[:180]}")
+
         # uninstall-removes-overlay
         r = run(["schema", "uninstall", "foo", "--root", str(store), "--json"])
         gone = not (store / "schema.d" / "foo.json").is_file()
