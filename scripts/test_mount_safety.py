@@ -206,6 +206,32 @@ def main() -> int:
             parse_error
             or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
         )
+
+        mesh = parent / "atlas-mesh.json"
+        mesh.unlink()
+        result = run(
+            [
+                "mount",
+                "github.com/example/store",
+                "--target",
+                "matching",
+                "--cwd",
+                str(parent),
+                "--json",
+            ],
+            parent,
+        )
+        payload, parse_error = json_payload(result)
+        mesh_payload = json.loads(mesh.read_text(encoding="utf-8")) if mesh.exists() else {}
+        check(
+            "registered-checkout-repairs-missing-mesh",
+            result.returncode == 0
+            and payload.get("status") == "noop"
+            and mesh_payload.get("stores", [{}])[0].get("id")
+            == "github.com/example/store",
+            parse_error
+            or f"exit={result.returncode} payload={payload} mesh={mesh_payload}",
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

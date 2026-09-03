@@ -99,7 +99,14 @@ def run(
         have = current_branch(dest)
         if want and have and have != want and have != "HEAD":
             return _fail(f"wrong branch: have {have} want {want}", as_json)
-        return _ok(str(dest), parsed.atlas_id, have or want or "", as_json, "noop")
+        return _finish(
+            project,
+            dest,
+            parsed.atlas_id,
+            have or want or "",
+            as_json,
+            "noop",
+        )
 
     dest_empty = dest.is_dir() and not any(dest.iterdir())
     dest.parent.mkdir(parents=True, exist_ok=True)

@@ -42,6 +42,9 @@ smokes:
   - id: existing-checkout-origin-matches-id
     source: safe existing-checkout registration
     expect: registration rejects an origin whose normalised atlas-id differs from the requested atlas-id
+  - id: existing-gitlink-repairs-mesh
+    source: mount lifecycle convergence
+    expect: mounting an already registered checkout upserts atlas-mesh.json before returning noop
   - id: unmounted-atlas-uri-is-non-blocking
     source: external dependencies may be transient
     expect: compile reports atlas_uri_unmounted and exits 0 when no actionable warning or critical issue exists
