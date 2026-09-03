@@ -2,6 +2,10 @@
 type: recipe
 title: "Thoughtful current-theory memory building"
 created: 2026-09-03
+description: "Inventory-first remember for lessons, live decisions, and recipes. Human hold only on request."
+relates_to:
+  - path: references/paths/remember.md
+    kind: related
 ---
 
 # Thoughtful current-theory memory building
