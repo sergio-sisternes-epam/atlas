@@ -62,7 +62,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 ```text
 python3 scripts/atlas.py init --root <atlas> [--force]
 python3 scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
-python3 scripts/atlas.py search "…" --root <atlas> [--engine grep|bm25] [--include_exits]
+python3 scripts/atlas.py search "…" --root <atlas> [--engine grep|bm25] [--include-exits]
          # query tokens: type: kva: status: work_id: path:
 python3 scripts/atlas.py id <pointer>
 python3 scripts/atlas.py auth [--host github.com] [--ssh]
