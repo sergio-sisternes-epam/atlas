@@ -53,8 +53,14 @@ def validate_panelist(receipt: Any) -> None:
     for finding in findings:
         if not isinstance(finding, dict):
             raise ValueError("finding must be an object")
-        required_finding = {"severity", "title", "rationale", "follow_up"}
-        optional_finding = {"path", "line", "evidence"}
+        required_finding = {
+            "severity",
+            "title",
+            "rationale",
+            "follow_up",
+            "evidence",
+        }
+        optional_finding = {"path", "line"}
         if not required_finding <= set(finding) or set(finding) - (
             required_finding | optional_finding
         ):

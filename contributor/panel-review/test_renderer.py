@@ -55,6 +55,12 @@ class RendererSpecTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "summary"):
             renderer.validate_payload(payload)
 
+    def test_finding_without_evidence_is_rejected(self):
+        payload = load_fixture("needs-rework.json")
+        del payload["panelists"][0]["findings"][0]["evidence"]
+        with self.assertRaisesRegex(ValueError, "finding fields"):
+            renderer.validate_payload(payload)
+
     def test_runtime_schema_and_template_contract(self):
         panelist = json.loads(
             (SKILL / "assets" / "panelist-receipt.schema.json").read_text()
