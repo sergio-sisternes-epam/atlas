@@ -21,9 +21,9 @@ analysis, validation, synthesis, and publication.
 2. LOAD [panel-review](../panel-review/SKILL.md).
 3. Execute the loaded panel procedure end-to-end. Its hard rules, roster,
    receipt schemas, validation gates, and publication order are authoritative.
-4. If the sibling skill cannot be loaded or its required isolated reviewers
-   cannot run, stop and report that the panel is unavailable. Do not claim a
-   completed code review and do not fall back to a single-context simulation.
+4. If the sibling skill cannot be loaded, stop and report that the panel is
+   unavailable. Runtime execution fallback remains owned by `panel-review`;
+   do not substitute adapter-owned analysis.
 
 ## Ownership boundary
 

@@ -17,6 +17,12 @@
       "prompt": "Review a documentation-only Atlas pull request.",
       "with_skill": "Run only atlas-contract and provide a concise evidence-backed recommendation.",
       "without_skill": "A generic review has no deterministic roster or cost evidence."
+    },
+    {
+      "id": "children-unavailable",
+      "prompt": "Run the Atlas panel where isolated child reviewers are unavailable.",
+      "with_skill": "Run each selected lens as a bounded sequential receipt slot, validate before advancing, synthesize only from receipts, and disclose reduced context isolation.",
+      "without_skill": "The review may stop entirely or present same-context lens passes as independent reviewers."
     }
   ],
   "trigger_evals": [

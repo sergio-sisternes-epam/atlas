@@ -17,12 +17,12 @@ DEPLOYED_PANEL = ROOT / ".agents" / "skills" / "panel-review" / "SKILL.md"
 
 
 class CodeReviewContractTest(unittest.TestCase):
-    def test_adapter_loads_deployed_panel_and_fails_closed(self):
+    def test_adapter_loads_deployed_panel_and_defers_runtime_fallback(self):
         source = SOURCE.read_text(encoding="utf-8")
         deployed = DEPLOYED.read_text(encoding="utf-8")
         self.assertIn("name: code-review", deployed)
         self.assertIn("Execute the loaded panel procedure end-to-end", deployed)
-        self.assertIn("do not fall back", deployed)
+        self.assertIn("Runtime execution fallback remains owned", deployed)
 
         match = re.search(r"\[panel-review\]\(([^)]+)\)", deployed)
         self.assertIsNotNone(match)
@@ -58,7 +58,11 @@ class CodeReviewContractTest(unittest.TestCase):
             ROOT / "references" / "scenarios" / "code-review-panel-delegation-v1.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn("panel_load_mandatory: true", scenario)
-        self.assertIn("unavailable_panel_fails_closed: true", scenario)
+        self.assertIn("missing_panel_fails_closed: true", scenario)
+        self.assertIn(
+            "unavailable_children_use_sequential_fallback: true",
+            scenario,
+        )
         self.assertIn("panel_logic_not_duplicated: true", scenario)
 
     def test_eval_inventory_is_balanced(self):
