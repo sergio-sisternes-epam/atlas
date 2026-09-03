@@ -157,8 +157,9 @@ def run_install(
             tmpl_dst.mkdir(exist_ok=True)
             for tname in add:
                 src_f = tmpl_src / f"{tname}.md"
-                if src_f.is_file():
-                    shutil.copy2(src_f, tmpl_dst / src_f.name)
+                dest_f = tmpl_dst / f"{tname}.md"
+                if src_f.is_file() and not dest_f.exists():
+                    shutil.copy2(src_f, dest_f)
                     written.append(f"templates/{tname}.md")
                     copied.append(tname)
     rec = write_receipt(r, cid, written + [f"{SCHEMA_D}/{cid}.receipt.json"], types=added_types(ov))
