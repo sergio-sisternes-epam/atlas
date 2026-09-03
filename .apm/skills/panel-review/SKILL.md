@@ -62,19 +62,26 @@ never write to the PR.
    retry fails, create a schema-valid `status: failed` receipt whose summary,
    coverage, and limitations explain that no review evidence was produced.
    Do not rerun valid slots.
-5. After every selected slot has a valid receipt, load
-   `assets/synthesizer-receipt.schema.json`. Start one reviewer-class,
-   low-effort synthesizer with validated receipts only, never lens bodies:
+5. After every selected slot has a valid receipt, collect up to five available
+   deterministic checks relevant to the review (for example existing CI status
+   or commands already run by the orchestrator). Record command/check name,
+   outcome, and scope; do not run unrelated broad suites just to fill this list.
+   Then load `assets/synthesizer-receipt.schema.json`. Start one
+   reviewer-class, low-effort synthesizer with validated receipts plus that
+   bounded validation evidence, never lens bodies:
 
    ```text
    ROLE: dissent-weighted panel synthesizer. RESPOND JSON ONLY.
-   INPUT: validated receipts only. NO new findings. Preserve lone dissent.
+   INPUT: validated receipts + deterministic checks only. NO new findings.
+   Resolve a panelist limitation only when a supplied check directly covers it.
+   Preserve lone dissent.
    RETURN: headline, synthesis, optional dissent, top_items<=3,
    ship_recommendation. Explain clean results from summaries and coverage.
    ```
 
-   Validate its receipt against the schema and source receipts: every top item
-   must match an input finding, text must be non-empty, and bounds must hold.
+   Validate its receipt against the schema, source receipts, and supplied
+   checks: every top item must match an input finding, validation claims must
+   match a supplied check, text must be non-empty, and bounds must hold.
    Retry malformed synthesis once. If it still fails, construct a valid
    `needs discussion` fallback that reports synthesis failure and retains no
    top items; never invent a technical finding.

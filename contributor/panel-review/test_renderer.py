@@ -78,6 +78,10 @@ class RendererSpecTest(unittest.TestCase):
             "do not infer absence from a partial diff",
             (SKILL / "SKILL.md").read_text(),
         )
+        self.assertIn(
+            "validated receipts + deterministic checks only",
+            (SKILL / "SKILL.md").read_text(),
+        )
 
     def test_lenses_bound_page_and_nested_skill_rules(self):
         atlas_lens = (
