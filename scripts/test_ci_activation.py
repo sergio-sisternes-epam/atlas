@@ -65,6 +65,15 @@ class CiActivationContractTests(unittest.TestCase):
             self.assertIn('$RUNNER_TEMP/atlas-cli.', workflow)
             self.assertNotIn("$GITHUB_WORKSPACE", workflow)
 
+    def test_cli_downloads_use_configured_token(self) -> None:
+        token_env = (
+            "ATLAS_TOKEN: ${{ secrets.ATLAS_CLI_TOKEN || github.token }}"
+        )
+        auth_header = '--header "Authorization: Bearer $ATLAS_TOKEN"'
+        for workflow in (self.copy, self.reusable):
+            self.assertIn(token_env, workflow)
+            self.assertEqual(2, workflow.count(auth_header))
+
     def test_cli_archive_ref_is_encoded_and_temp_file_is_unique(self) -> None:
         for workflow in (self.copy, self.reusable):
             self.assertIn(
