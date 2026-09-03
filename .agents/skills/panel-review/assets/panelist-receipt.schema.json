@@ -31,7 +31,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "pattern": ".*\\S.*"
+      "pattern": "\\S"
     },
     "coverage": {
       "type": "array",
@@ -42,7 +42,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 240,
-        "pattern": ".*\\S.*"
+        "pattern": "\\S"
       }
     },
     "findings": {
@@ -60,7 +60,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 200,
-        "pattern": ".*\\S.*"
+        "pattern": "\\S"
       }
     }
   },
@@ -92,13 +92,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100,
-          "pattern": ".*\\S.*"
+          "pattern": "\\S"
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "pattern": ".*\\S.*"
+          "pattern": "\\S"
         },
         "path": {
           "type": "string",
@@ -114,13 +114,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "pattern": ".*\\S.*"
+          "pattern": "\\S"
         },
         "evidence": {
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "pattern": ".*\\S.*"
+          "pattern": "\\S"
         }
       }
     }

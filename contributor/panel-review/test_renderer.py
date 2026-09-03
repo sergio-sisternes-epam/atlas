@@ -9,6 +9,8 @@ import re
 import unittest
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -92,25 +94,74 @@ class RendererSpecTest(unittest.TestCase):
                     renderer.validate_payload(payload)
 
     def test_non_posix_finding_paths_are_rejected(self):
-        for path in (r"..\secret.py", r"C:\repo\file.py", r"src\file.py"):
+        for path in (
+            r"..\secret.py",
+            r"C:\repo\file.py",
+            r"src\file.py",
+            "src/\nfile.py",
+        ):
             with self.subTest(path=path):
                 payload = load_fixture("needs-rework.json")
                 payload["panelists"][0]["findings"][0]["path"] = path
                 with self.assertRaisesRegex(ValueError, "repo-relative"):
                     renderer.validate_payload(payload)
 
+    def test_finding_path_uses_safe_markdown_code_span(self):
+        payload = load_fixture("needs-rework.json")
+        payload["panelists"][0]["findings"][0]["path"] = "src/odd`name.py"
+        rendered = renderer.render_summary(payload)
+        self.assertIn("``src/odd`name.py:88``", rendered)
+
+    def test_runtime_schemas_accept_multiline_text(self):
+        payload = load_fixture("needs-rework.json")
+        panelist = payload["panelists"][0]
+        panelist["summary"] = "First line\nSecond line"
+        panelist["coverage"][0] = "First check\nSecond check"
+        panelist["limitations"] = ["First limit\nSecond limit"]
+        finding = panelist["findings"][0]
+        for field in ("title", "rationale", "follow_up", "evidence"):
+            finding[field] = f"First {field}\nSecond {field}"
+
+        panelist_schema = json.loads(
+            (
+                SKILL / "assets" / "panelist-receipt.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(panelist_schema).validate(panelist)
+
+        synthesizer = payload["synthesizer"]
+        for field in ("headline", "synthesis", "dissent"):
+            synthesizer[field] = f"First {field}\nSecond {field}"
+        synthesizer["top_items"][0]["title"] = finding["title"]
+        synthesizer["top_items"][0]["why"] = "First reason\nSecond reason"
+        synthesizer["ship_recommendation"]["rationale"] = (
+            "First recommendation\nSecond recommendation"
+        )
+        synthesizer_schema = json.loads(
+            (
+                SKILL / "assets" / "synthesizer-receipt.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(synthesizer_schema).validate(synthesizer)
+
     def test_runtime_schema_and_template_contract(self):
         self.assertEqual(
-            (SOURCE_SKILL / "SKILL.md").read_text(),
-            (SKILL / "SKILL.md").read_text(),
+            (SOURCE_SKILL / "SKILL.md").read_text(encoding="utf-8"),
+            (SKILL / "SKILL.md").read_text(encoding="utf-8"),
         )
         panelist = json.loads(
-            (SKILL / "assets" / "panelist-receipt.schema.json").read_text()
+            (SKILL / "assets" / "panelist-receipt.schema.json").read_text(
+                encoding="utf-8"
+            )
         )
         synthesizer = json.loads(
-            (SKILL / "assets" / "synthesizer-receipt.schema.json").read_text()
+            (SKILL / "assets" / "synthesizer-receipt.schema.json").read_text(
+                encoding="utf-8"
+            )
         )
-        template = (SKILL / "assets" / "recommendation-template.md").read_text()
+        template = (SKILL / "assets" / "recommendation-template.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("summary", panelist["required"])
         self.assertGreaterEqual(panelist["properties"]["summary"]["minLength"], 1)
         self.assertEqual(panelist["properties"]["coverage"]["minItems"], 1)
@@ -121,35 +172,41 @@ class RendererSpecTest(unittest.TestCase):
         )
         path_pattern = panelist["$defs"]["finding"]["properties"]["path"]["pattern"]
         self.assertIsNotNone(re.fullmatch(path_pattern, "src/module.py"))
-        for path in (r"..\secret.py", r"C:\repo\file.py", r"src\file.py"):
+        for path in (
+            r"..\secret.py",
+            r"C:\repo\file.py",
+            r"src\file.py",
+            "src/\nfile.py",
+        ):
             self.assertIsNone(re.fullmatch(path_pattern, path))
         self.assertEqual(synthesizer["properties"]["top_items"]["maxItems"], 3)
         self.assertIn("| Lens | Blocker | Recommended | Nits | Takeaway |", template)
-        self.assertIn("Retry only a malformed slot once", (SKILL / "SKILL.md").read_text())
+        skill_body = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Retry only a malformed slot once", skill_body)
         self.assertIn(
             "do not infer absence from a partial diff",
-            (SKILL / "SKILL.md").read_text(),
+            skill_body,
         )
         self.assertIn(
             "validated receipts + deterministic checks only",
-            (SKILL / "SKILL.md").read_text(),
+            skill_body,
         )
         self.assertIn(
             "Never report errors in a",
-            (SKILL / "SKILL.md").read_text(),
+            skill_body,
         )
         self.assertIn(
             "full reviewer capable of cross-file reasoning",
-            (SKILL / "SKILL.md").read_text(),
+            skill_body,
         )
 
     def test_lenses_bound_page_and_nested_skill_rules(self):
         atlas_lens = (
             SKILL / "references" / "lenses" / "atlas-contract.md"
-        ).read_text()
+        ).read_text(encoding="utf-8")
         skill_lens = (
             SKILL / "references" / "lenses" / "skill-agent-contract.md"
-        ).read_text()
+        ).read_text(encoding="utf-8")
         self.assertIn("YAML scenario/eval fixtures are not OKF pages", atlas_lens)
         self.assertIn("Nested skills use their own local references/assets", skill_lens)
         self.assertIn("Do not request a", skill_lens)

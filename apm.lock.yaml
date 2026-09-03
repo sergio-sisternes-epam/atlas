@@ -178,7 +178,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:c00f29da65cd875ed12b71d400a5497312a6e96a3f14d3ef648daa3c99fb1134
+  content_hash: sha256:2488ef6954c5e3297cb7094081a08098c8efc045d7ad9dda58c105e06d3e410b
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/assets/recommendation-template.md
@@ -196,7 +196,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:e2d54999e7fe9f0b653aa5450a3d60607d6940483f6d6f4949b108acf5f10dc5
+  content_hash: sha256:32f0ef8867437e90b69713a82268728e6743e7ff87fae7bc7e80815dc47e21db
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/references/finding-schema.md
@@ -278,9 +278,9 @@ local_deployed_files:
 local_deployed_file_hashes:
   .agents/skills/code-review/SKILL.md: sha256:cac12add038b31377ec5f3a6999a0190969f38a3a4c3ee8433a8d89859339e63
   .agents/skills/panel-review/SKILL.md: sha256:494ad3c3cc0e99ae1363453ad38d425eff1ff290a672d77fc0dc245c0a23761b
-  .agents/skills/panel-review/assets/panelist-receipt.schema.json: sha256:c00f29da65cd875ed12b71d400a5497312a6e96a3f14d3ef648daa3c99fb1134
+  .agents/skills/panel-review/assets/panelist-receipt.schema.json: sha256:2488ef6954c5e3297cb7094081a08098c8efc045d7ad9dda58c105e06d3e410b
   .agents/skills/panel-review/assets/recommendation-template.md: sha256:b9fa0be14756c5da6ac374c24bf80dbdb5e8484b00ba44cb49209d3ecf2fb80a
-  .agents/skills/panel-review/assets/synthesizer-receipt.schema.json: sha256:e2d54999e7fe9f0b653aa5450a3d60607d6940483f6d6f4949b108acf5f10dc5
+  .agents/skills/panel-review/assets/synthesizer-receipt.schema.json: sha256:32f0ef8867437e90b69713a82268728e6743e7ff87fae7bc7e80815dc47e21db
   .agents/skills/panel-review/references/finding-schema.md: sha256:42a29d22b0eb7c4357d2e12a7958fb7334eb504687040d49df4fadaf3603df08
   .agents/skills/panel-review/references/lenses/atlas-contract.md: sha256:8ef67ccdc05537719f8d918cf8dc5c969ee0a40689d90a9dfdbf47ab7a4d5dde
   .agents/skills/panel-review/references/lenses/python-cli.md: sha256:03fcf3f9925f5692db2fa86243536027790fd96cd5c15b11207bbfd7570009b8

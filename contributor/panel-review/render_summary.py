@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,8 @@ def validate_panelist(receipt: Any) -> None:
             if (
                 path.startswith("/")
                 or "\\" in path
+                or "\n" in path
+                or "\r" in path
                 or has_drive_prefix
                 or ".." in path.split("/")
             ):
@@ -174,6 +177,14 @@ def _single_line(value: str) -> str:
     return " ".join(_safe(value).splitlines())
 
 
+def _code_span(value: str) -> str:
+    value = _single_line(value)
+    runs = re.findall(r"`+", value)
+    fence = "`" * (max((len(run) for run in runs), default=0) + 1)
+    padding = " " if value.startswith("`") or value.endswith("`") else ""
+    return f"{fence}{padding}{value}{padding}{fence}"
+
+
 def _table(value: str) -> str:
     return _single_line(value).replace("|", "\\|")
 
@@ -248,10 +259,10 @@ def render_summary(payload: dict[str, Any]) -> str:
         for finding in panelist["findings"]:
             location = ""
             if "path" in finding:
-                location = f" - `{finding['path']}"
+                location_text = finding["path"]
                 if "line" in finding:
-                    location += f":{finding['line']}"
-                location += "`"
+                    location_text += f":{finding['line']}"
+                location = f" - {_code_span(location_text)}"
             entry = (
                 f"- **{finding['severity']}** - {_safe(finding['title'])}"
                 f"{location} - {_safe(finding['rationale'])} "
