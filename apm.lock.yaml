@@ -151,7 +151,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:228705a3ae8c81538fa03a56ce64212cafccb419bcce3fe853ef315a76f46b4b
+  content_hash: sha256:1f4c74307b8a3a97e6ab7dbff061b014eb0280a6333fd40fdb6caac8cdffd8be
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/assets/panelist-receipt.schema.json
@@ -256,7 +256,7 @@ local_deployed_files:
 - .agents/skills/panel-review/references/roster.md
 - .agents/skills/panel-review/references/synthesizer.md
 local_deployed_file_hashes:
-  .agents/skills/panel-review/SKILL.md: sha256:228705a3ae8c81538fa03a56ce64212cafccb419bcce3fe853ef315a76f46b4b
+  .agents/skills/panel-review/SKILL.md: sha256:1f4c74307b8a3a97e6ab7dbff061b014eb0280a6333fd40fdb6caac8cdffd8be
   .agents/skills/panel-review/assets/panelist-receipt.schema.json: sha256:42482684dec4a21372ac583599634eba1d34f4732ee659b8723ff7e8016e6697
   .agents/skills/panel-review/assets/recommendation-template.md: sha256:b9fa0be14756c5da6ac374c24bf80dbdb5e8484b00ba44cb49209d3ecf2fb80a
   .agents/skills/panel-review/assets/synthesizer-receipt.schema.json: sha256:e2d54999e7fe9f0b653aa5450a3d60607d6940483f6d6f4949b108acf5f10dc5

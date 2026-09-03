@@ -88,6 +88,14 @@ class RendererSpecTest(unittest.TestCase):
             "validated receipts + deterministic checks only",
             (SKILL / "SKILL.md").read_text(),
         )
+        self.assertIn(
+            "Never report errors in a",
+            (SKILL / "SKILL.md").read_text(),
+        )
+        self.assertIn(
+            "full reviewer capable of cross-file reasoning",
+            (SKILL / "SKILL.md").read_text(),
+        )
 
     def test_lenses_bound_page_and_nested_skill_rules(self):
         atlas_lens = (

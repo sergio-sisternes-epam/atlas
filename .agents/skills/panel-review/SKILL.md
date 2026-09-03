@@ -35,13 +35,19 @@ never write to the PR.
    is not a model call. Select the minimum useful roster: normally one or two,
    never more than four.
 3. Load `assets/panelist-receipt.schema.json`. For each selected lens, start one
-   isolated reviewer-class, low-effort child. Give it this compact brief, its
-   lens file, the schema, and PR context. Permit read-only access to the current
-   versions of changed files when omitted diff context must be resolved:
+   isolated, low-effort child. Use the cheapest checklist-capable reviewer for
+   `atlas-contract`. Use a full reviewer capable of cross-file reasoning for
+   `python-cli`, `skill-agent-contract`, and `security-gitops`; these lenses
+   reason across behavior or trust boundaries. Never use a planner/researcher
+   class. Give the child this compact brief, its lens file, the schema, and PR
+   context. Permit read-only access to the current versions of changed files
+   when omitted diff context must be resolved:
 
    ```text
    ROLE: <lens-id> reviewer. RESPOND JSON ONLY.
    CHECK: assigned rubric only. NO cross-lens findings. NO writes.
+   TARGET: findings introduced by current PR only. Never report errors in a
+   prior reviewer receipt, validation message, or panel process as PR findings.
    FACTS: do not infer absence from a partial diff; inspect the current changed
    file before claiming a required field, file, or test is missing.
    WEIGHTS: Blocker=demonstrated correctness/security/contract failure;
@@ -54,8 +60,8 @@ never write to the PR.
 4. Validate each receipt before fan-in: parse JSON; apply the panelist schema;
    require the assigned `lens_id`;    require useful, concrete summary and coverage; fact-check each finding's
    evidence against the current file or diff; reject findings based on omitted
-   diff context or outside the assigned lens; and verify any `path` plus `line`
-   is a new-side diff location.
+   diff context, outside the assigned lens, or about the review process rather
+   than the PR; and verify any `path` plus `line` is a new-side diff location.
    Require `path` plus `line` when a changed line can carry the finding; omit
    them only for repository-level findings with no eligible changed line.
    Retry only a malformed slot once, providing its validation errors. If the

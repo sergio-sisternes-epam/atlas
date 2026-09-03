@@ -17,6 +17,8 @@ expect:
   partial_diff_absence_forbidden: true
   okf_pages_distinguished_from_fixtures: true
   deterministic_checks_reconcile_limitations: true
+  cross_file_lenses_use_full_reviewer: true
+  meta_review_findings_forbidden: true
   contributor_evals_outside_skill: true
   no_merge_gate_language: true
   dispatch_name_panel_review: true
@@ -60,6 +62,12 @@ smokes:
   - id: deterministic-validation-fan-in
     source: real-task refinement 2026-09-03
     expect: synthesizer receives at most five relevant deterministic check results and resolves a panelist limitation only when a supplied check directly covers it
+  - id: cost-gradient-quality-floor
+    source: real-task refinement 2026-09-03
+    expect: atlas-contract may use the cheapest checklist reviewer; cross-file and security lenses use a full reviewer; no lens uses planner class
+  - id: no-meta-review-findings
+    source: real-task refinement 2026-09-03
+    expect: findings must be introduced by the PR and must never report mistakes in prior receipts, validation messages, or panel execution
   - id: contributor-output-spec
     source: composition audience boundary
     expect: clean and needs-rework fixtures, trigger evals, renderer, and specification test live under contributor/panel-review outside .apm/skills/panel-review
