@@ -112,15 +112,61 @@ def _issue(iid: str, path: str, msg: str, severity: str = "critical") -> dict[st
     return {"id": iid, "path": path, "msg": msg, "severity": severity}
 
 
+def normalize_rel_path(wp: str) -> str | None:
+    """Store-relative POSIX path with no `..` or absolute form. None if unsafe."""
+    raw = str(wp).replace("\\", "/").strip()
+    if not raw or raw.startswith("/") or raw.startswith("~") or ":" in raw.split("/", 1)[0]:
+        return None
+    parts: list[str] = []
+    for p in raw.split("/"):
+        if p in ("", "."):
+            continue
+        if p == "..":
+            return None
+        parts.append(p)
+    return "/".join(parts) if parts else None
+
+
+def resolve_under_root(root: Path, wp: str) -> Path | None:
+    relp = normalize_rel_path(wp)
+    if relp is None:
+        return None
+    cand = (root / relp).resolve()
+    try:
+        cand.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return cand
+
+
+def claimed_allows(claimed: list[str], wp: str) -> bool:
+    """claimed_folders are prefixes. `foo/bar` allows `foo/bar` and `foo/bar/...`."""
+    relp = normalize_rel_path(wp)
+    if relp is None:
+        return False
+    if relp == SCHEMA_D or relp.startswith(SCHEMA_D + "/"):
+        return True
+    for c in claimed:
+        prefix = normalize_rel_path(c)
+        if not prefix:
+            continue
+        if relp == prefix or relp.startswith(prefix + "/"):
+            return True
+    return False
+
+
 def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], list[dict], list[dict]]:
     """Return (effective_schema, critical, warnings). Core is not mutated."""
-    merged = deepcopy(core)
+    merged = deepcopy(core) if isinstance(core, dict) else {}
     critical: list[dict] = []
     warnings: list[dict] = []
     extra_owners: dict[str, str] = {}
-    core_by_type = ((core.get("templates") or {}).get("by_type")) or {}
-    if not isinstance(core_by_type, dict):
-        core_by_type = {}
+    tmpl = merged.get("templates") if isinstance(merged, dict) else None
+    if not isinstance(tmpl, dict):
+        tmpl = {}
+        if isinstance(merged, dict):
+            merged["templates"] = tmpl
+    core_by_type = tmpl.get("by_type") if isinstance(tmpl.get("by_type"), dict) else {}
 
     for cid in list_overlays(root):
         ov, err = load_overlay(root, cid)
@@ -233,19 +279,23 @@ def receipt_issues(root: Path) -> list[dict]:
         if ov and isinstance(ov.get("claimed_folders"), list):
             claimed = [str(x).strip().strip("/") for x in ov["claimed_folders"] if str(x).strip()]
         for raw in written:
-            wp = str(raw).replace("\\", "/").lstrip("/")
+            wp = normalize_rel_path(str(raw))
             if not wp:
+                issues.append(
+                    _issue(
+                        "overlay_undeclared_root",
+                        str(raw),
+                        f"overlay {cid} receipt path escapes the store or is not relative",
+                    )
+                )
                 continue
-            first = wp.split("/", 1)[0]
-            if first == SCHEMA_D:
-                continue
-            if first in claimed or wp in claimed:
+            if claimed_allows(claimed, wp):
                 continue
             issues.append(
                 _issue(
                     "overlay_undeclared_root",
                     wp,
-                    f"overlay {cid} receipt lists undeclared path (not claimed, not {SCHEMA_D}/)",
+                    f"overlay {cid} receipt lists undeclared path (not claimed prefix, not {SCHEMA_D}/)",
                 )
             )
     return issues

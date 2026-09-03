@@ -44,10 +44,18 @@ def main() -> int:
 
         # init-core-only
         r = run(["init", "--root", str(store), "--json"])
-        schema = json.loads((store / "SCHEMA.json").read_text())
+        schema_file = store / "SCHEMA.json"
+        if r.returncode != 0 or not schema_file.is_file():
+            check(
+                "init-core-only",
+                False,
+                f"exit={r.returncode} missing SCHEMA.json stderr={r.stderr[:200]}",
+            )
+            return 1
+        schema = json.loads(schema_file.read_text())
         check(
             "init-core-only",
-            r.returncode == 0 and "kva" not in schema and not (store / "schema.d").exists(),
+            "kva" not in schema and not (store / "schema.d").exists(),
             f"exit={r.returncode}",
         )
 
@@ -148,6 +156,40 @@ def main() -> int:
         (store / "schema.d" / "bar.json").write_text(json.dumps(bar, indent=2) + "\n")
         del foo["kva"]
         (store / "schema.d" / "foo.json").write_text(json.dumps(foo, indent=2) + "\n")
+
+        # claimed_folders are prefixes (foo/bar allows foo/bar/x.md)
+        r = run(["schema", "new", "nested", "--root", str(store), "--claim", "foo/bar", "--json"])
+        nest = json.loads((store / "schema.d" / "nested.json").read_text())
+        recn = json.loads((store / "schema.d" / "nested.receipt.json").read_text())
+        recn["written"] = list(recn.get("written") or []) + ["foo/bar/page.md"]
+        (store / "schema.d" / "nested.receipt.json").write_text(json.dumps(recn, indent=2) + "\n")
+        write(
+            store / "foo" / "bar" / "page.md",
+            "---\ntype: document\ntitle: nested\ncreated: 2026-09-03\n---\n\n## Content\n\nClaimed prefix write is allowed and this body is long enough for compile.\n",
+        )
+        write(store / "foo" / "bar" / "index.md", "# Nested\n\nIndex for the claimed prefix folder used by the overlay smoke.\n")
+        write(store / "foo" / "index.md", "# Foo\n\nParent folder index so compile does not fail on thin listing pages.\n")
+        r = run(["compile", "--root", str(store), "--json"])
+        payload = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
+        crit_ids = [i.get("id") for i in payload.get("critical") or []]
+        check(
+            "claimed-prefix-nested-ok",
+            r.returncode != 2 and "overlay_undeclared_root" not in crit_ids,
+            f"exit={r.returncode} crit={crit_ids}",
+        )
+        recn["written"] = list(recn.get("written") or []) + ["templates/../../evil-out.md"]
+        (store / "schema.d" / "nested.receipt.json").write_text(json.dumps(recn, indent=2) + "\n")
+        r = run(["compile", "--root", str(store), "--json"])
+        payload = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
+        crit_ids = [i.get("id") for i in payload.get("critical") or []]
+        check(
+            "receipt-dotdot-fails",
+            r.returncode == 2 and "overlay_undeclared_root" in crit_ids,
+            f"exit={r.returncode} crit={crit_ids}",
+        )
+        recn["written"] = [w for w in recn["written"] if ".." not in str(w)]
+        (store / "schema.d" / "nested.receipt.json").write_text(json.dumps(recn, indent=2) + "\n")
+        run(["schema", "uninstall", "nested", "--root", str(store), "--json"])
 
         # install required-key change without --force
         contrib = tmp / "contrib"

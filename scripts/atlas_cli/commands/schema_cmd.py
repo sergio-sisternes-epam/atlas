@@ -12,6 +12,7 @@ from ..core.overlay import (
     overlay_path,
     receipt_path,
     required_fingerprint,
+    resolve_under_root,
     validate_id,
     write_json,
     write_receipt,
@@ -196,16 +197,22 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
 
     deleted: list[str] = []
     # Receipt writes only — never delete later authored pages.
+    # Confine every path under --root; skip `..` / absolute entries.
+    root_res = r.resolve()
+    dest_res = dest.resolve()
     for wp in written:
-        p = r / wp
-        # Always allow deleting this overlay + receipt even if listed.
-        if p.is_file() and p.resolve() != dest.resolve():
-            # skip receipt until end
-            if p.name.endswith(".receipt.json"):
-                continue
-            if SCHEMA_D in p.parts or wp.startswith("templates/"):
-                p.unlink()
-                deleted.append(wp)
+        p = resolve_under_root(r, wp)
+        if p is None or not p.is_file():
+            continue
+        if p == dest_res or p.name.endswith(".receipt.json"):
+            continue
+        try:
+            rel_parts = p.relative_to(root_res).parts
+        except ValueError:
+            continue
+        if rel_parts and rel_parts[0] in {SCHEMA_D, "templates"}:
+            p.unlink()
+            deleted.append("/".join(rel_parts))
     dest.unlink(missing_ok=True)
     deleted.append(f"{SCHEMA_D}/{cid}.json")
     rp = receipt_path(r, cid)
