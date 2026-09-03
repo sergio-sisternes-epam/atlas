@@ -173,7 +173,9 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
         tmpl = {}
         if isinstance(merged, dict):
             merged["templates"] = tmpl
-    core_by_type = tmpl.get("by_type") if isinstance(tmpl.get("by_type"), dict) else {}
+    src_tmpl = core.get("templates") if isinstance(core, dict) else None
+    src_by = src_tmpl.get("by_type") if isinstance(src_tmpl, dict) else None
+    core_type_names = frozenset(src_by.keys()) if isinstance(src_by, dict) else frozenset()
 
     for cid in list_overlays(root):
         ov, err = load_overlay(root, cid)
@@ -216,7 +218,7 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                     if t_err:
                         critical.append(_issue("overlay_type_name", relp, t_err))
                         continue
-                    if tname in core_by_type:
+                    if tname in core_type_names:
                         critical.append(
                             _issue(
                                 "overlay_core_type",

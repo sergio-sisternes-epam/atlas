@@ -157,6 +157,29 @@ def main() -> int:
         del foo["kva"]
         (store / "schema.d" / "foo.json").write_text(json.dumps(foo, indent=2) + "\n")
 
+        foo["templates"] = {
+            "by_type": {"comet": {"frontmatter": {"required": ["type", "title"]}}}
+        }
+        bar["templates"] = {
+            "by_type": {"comet": {"frontmatter": {"required": ["type", "title", "created"]}}}
+        }
+        (store / "schema.d" / "foo.json").write_text(json.dumps(foo, indent=2) + "\n")
+        (store / "schema.d" / "bar.json").write_text(json.dumps(bar, indent=2) + "\n")
+        r = run(["compile", "--root", str(store), "--json"])
+        payload = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
+        crit_ids = [i.get("id") for i in payload.get("critical") or []]
+        check(
+            "overlay-type-clash-not-core-type",
+            r.returncode == 2
+            and "overlay_key_clash" in crit_ids
+            and "overlay_core_type" not in crit_ids,
+            f"exit={r.returncode} crit={crit_ids}",
+        )
+        foo["templates"] = {"by_type": {}}
+        bar["templates"] = {"by_type": {}}
+        (store / "schema.d" / "foo.json").write_text(json.dumps(foo, indent=2) + "\n")
+        (store / "schema.d" / "bar.json").write_text(json.dumps(bar, indent=2) + "\n")
+
         # claimed_folders are prefixes (foo/bar allows foo/bar/x.md)
         r = run(["schema", "new", "nested", "--root", str(store), "--claim", "foo/bar", "--json"])
         nest = json.loads((store / "schema.d" / "nested.json").read_text())
