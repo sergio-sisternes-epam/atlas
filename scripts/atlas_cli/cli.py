@@ -16,9 +16,9 @@ from .commands import schema_cmd as cmd_schema
 
 @click.group(
     context_settings={"help_option_names": ["-h", "--help"]},
-    epilog="Exit: 0 ok · 1 warnings · 2 critical (validate/compile)",
+    epilog="Exit: 0 ok/non-blocking dependency warnings · 1 actionable warnings · 2 critical",
 )
-@click.version_option("0.8.5", prog_name="atlas")
+@click.version_option("0.8.6", prog_name="atlas")
 def main() -> None:
     """Atlas CLI — lean deterministic gates for OKF v0.2 knowledge substrates."""
 
@@ -87,7 +87,7 @@ def mount_cmd(
     start: str | None,
     as_json: bool,
 ) -> None:
-    """Materialise a git-backed Atlas and write atlas-mesh.json."""
+    """Materialise a git-backed Atlas as a submodule under .atlas/<id>/ and write atlas-mesh.json."""
     raise SystemExit(cmd_mount.run(source, ref, target, ssh, start, as_json))
 
 

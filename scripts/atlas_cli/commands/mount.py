@@ -13,12 +13,13 @@ from ..core.gitops import (
     has_git,
     inside_git,
     is_dirty,
-    is_ignored,
+    is_gitlink,
     submodule_add,
     submodule_init,
+    submodule_register,
 )
 from ..core.identity import IdentityError, parse_pointer
-from ..core.meshfile import MeshFileError, find_project_root, find_store, upsert
+from ..core.meshfile import MeshFileError, find_store, upsert
 from ..core.translate import remote_url
 
 
@@ -43,6 +44,10 @@ def run(
     if not has_git():
         return _fail("git not on PATH (headless: mount is unavailable)", as_json)
 
+    parent_git = git_root(base)
+    if parent_git is None:
+        return _fail("no git repository (refuse to mount; persist requires an active repo)", as_json)
+
     host, org, _repo = parsed.atlas_id.split("/", 2)
     recorded = lookup(host, org)
     if recorded and not ssh:
@@ -53,17 +58,24 @@ def run(
     url = remote_url(pointer, auth)
     token = None if auth.ssh else auth.token
 
-    project = git_root(base) or find_project_root(base)
+    project = parent_git
     dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
-    parent_git = git_root(project)
 
     if dest.exists() and not dest.is_dir():
         return _fail(f"target is not a directory: {dest}", as_json)
 
     existing = dest / ".git"
-    gitmodules_listed = parent_git and _in_gitmodules(parent_git, dest)
+    gitmodules_listed = _in_gitmodules(parent_git, dest)
+    in_parent = inside_git(parent_git, dest)
+    registered = is_gitlink(parent_git, dest)
 
     if dest.exists() and existing.exists():
+        if in_parent and not registered:
+            code, err = submodule_register(parent_git, dest, url, ref)
+            if code != 0:
+                return _fail(err or "submodule register failed", as_json)
+            landed = current_branch(dest) or ref or ""
+            return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
         if is_dirty(dest):
             return _fail(f"dirty worktree: {dest}", as_json)
         stored = None
@@ -78,48 +90,23 @@ def run(
             return _fail(f"wrong branch: have {have} want {want}", as_json)
         return _ok(str(dest), parsed.atlas_id, have or want or "", as_json, "noop")
 
-    tracked_embed = (
-        parent_git
-        and inside_git(parent_git, dest)
-        and not is_ignored(parent_git, dest)
-    )
-
     dest_empty = dest.is_dir() and not any(dest.iterdir())
+    dest.parent.mkdir(parents=True, exist_ok=True)
     if gitmodules_listed and (not dest.exists() or dest_empty):
-        dest.parent.mkdir(parents=True, exist_ok=True)
         code, err = submodule_init(parent_git, dest, token=token, host=host)
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
-    elif tracked_embed:
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    elif in_parent:
         code, err = submodule_add(parent_git, url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "submodule add failed", as_json)
     else:
-        dest.parent.mkdir(parents=True, exist_ok=True)
         code, err = clone(url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "clone failed", as_json)
 
     landed = current_branch(dest) or ref or ""
-    rel = dest
-    try:
-        rel = dest.relative_to(project)
-    except ValueError:
-        pass
-    try:
-        upsert(
-            project,
-            {
-                "id": parsed.atlas_id,
-                "ref": landed,
-                "path": str(rel).replace("\\", "/"),
-                "subpath": _infer_subpath(dest),
-            },
-        )
-    except MeshFileError as e:
-        return _fail(str(e), as_json)
-    return _ok(str(dest), parsed.atlas_id, landed, as_json, "mounted")
+    return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
 
 
 def _infer_subpath(dest: Path) -> str:
@@ -141,6 +128,34 @@ def _in_gitmodules(parent: Path, dest: Path) -> bool:
     except ValueError:
         return False
     return rel in gm.read_text(encoding="utf-8")
+
+
+def _finish(
+    project: Path,
+    dest: Path,
+    atlas_id: str,
+    landed: str,
+    as_json: bool,
+    status: str,
+) -> int:
+    rel = dest
+    try:
+        rel = dest.relative_to(project)
+    except ValueError:
+        pass
+    try:
+        upsert(
+            project,
+            {
+                "id": atlas_id,
+                "ref": landed,
+                "path": str(rel).replace("\\", "/"),
+                "subpath": _infer_subpath(dest),
+            },
+        )
+    except MeshFileError as e:
+        return _fail(str(e), as_json)
+    return _ok(str(dest), atlas_id, landed, as_json, status)
 
 
 def _fail(msg: str, as_json: bool) -> int:

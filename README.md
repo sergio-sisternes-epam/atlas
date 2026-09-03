@@ -10,13 +10,13 @@ Process memory is **not** authored here. Canonical store:
 
 https://github.com/sergio-sisternes-epam/atlas-atlas
 
-Git root **is** the OKF root (`SCHEMA.json`). Mount it at `references/atlas`:
+Git root **is** the OKF root (`SCHEMA.json`). Load path `mount` (`references/paths/mount.md`), then:
 
 ```text
-atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
+atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main
 ```
 
-Mount path = compile/query root: `references/atlas`
+Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-atlas` (compile/query root)
 
 See `SKILL.md` and `apm.yml`.
 
@@ -38,3 +38,5 @@ GitHub documents `code-review` as the review-focused directory name that makes
 Copilot code review load a skill. GitHub does not document skill-to-skill
 execution as guaranteed, so this adapter fails closed if it cannot load or
 execute `panel-review`.
+
+See `references/paths/mount.md` for the mount protocol.

@@ -26,6 +26,7 @@ from ..core.schema import (
 IGNORE_RE = re.compile(r"<!--\s*atlas-ignore:\s*([a-z0-9_\-]+)\s*-->", re.I)
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
+NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
 
 def _ignores_in(text: str) -> set[str]:
@@ -486,8 +487,15 @@ def run(
         mesh_note = mesh_result.get("written") or mesh_result.get("note")
         if mesh_note:
             print(f"mesh: {mesh_note}")
+        blocking_warnings = [
+            issue
+            for issue in warnings
+            if issue.get("id") not in NON_BLOCKING_WARNING_IDS
+        ]
         if not critical and not warnings:
             print("ok — no issues")
+        elif not critical and not blocking_warnings:
+            print("ok — non-blocking external dependency warnings only")
         elif not critical:
             print("ok — warnings only")
         else:
@@ -506,6 +514,9 @@ def run(
 
     if critical:
         return 2
-    if warnings:
+    if any(
+        issue.get("id") not in NON_BLOCKING_WARNING_IDS
+        for issue in warnings
+    ):
         return 1
     return 0

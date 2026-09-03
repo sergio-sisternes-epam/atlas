@@ -1,0 +1,33 @@
+id: storage-mesh-mvp-adversarial-v2
+work_id: 2026-09-03-skill-mount-home
+adversarial: true
+packages: [atlas]
+smokes:
+  - id: no-nickname-id
+    source: drop-aliases-mvp
+    expect: normalise("wiki") errors; only host/org/repo accepted
+  - id: no-atlas-sync
+    source: mesh-pull
+    expect: no atlas sync command in CLI help
+  - id: mesh-json-schema
+    source: decision-mesh-json-schema
+    expect: invalid atlas-mesh.json fails mount or compile
+  - id: no-tokens-in-mesh
+    source: decision-pointer-vs-auth
+    expect: atlas-mesh.json schema forbids token fields
+  - id: refuse-dirty-mount
+    source: decision-mount-lifecycle
+    expect: mount exits non-zero on dirty worktree
+  - id: unmounted-resolve-fails
+    source: decision-unresolved-id
+    expect: resolve unknown id exits non-zero
+  - id: refuse-mount-without-git-repo
+    source: skill-mount-home
+    expect: mount outside a git repository exits non-zero; no clone
+  - id: default-mount-is-submodule
+    source: skill-mount-home
+    expect: default mount under .atlas/<id>/ is a git submodule listed in .gitmodules
+  - id: unmounted-atlas-uri-is-non-blocking
+    source: external dependencies may be transient
+    expect: compile reports atlas_uri_unmounted and exits 0 when no actionable warning or critical issue exists
+---
