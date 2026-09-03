@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import click
 
+from . import __version__
 from .commands import init as cmd_init
 from .commands import migrate as cmd_migrate
 from .commands import promote as cmd_promote
@@ -18,7 +19,7 @@ from .commands import schema_cmd as cmd_schema
     context_settings={"help_option_names": ["-h", "--help"]},
     epilog="Exit: 0 ok/non-blocking dependency warnings · 1 actionable warnings · 2 critical",
 )
-@click.version_option("0.8.12", prog_name="atlas")
+@click.version_option(__version__, prog_name="atlas")
 def main() -> None:
     """Atlas CLI — lean deterministic gates for OKF v0.2 knowledge substrates."""
 
