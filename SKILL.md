@@ -165,4 +165,4 @@ Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when i
 
 ## Progressive disclosure
 
-Procedures live only under `references/paths/`. Load one path per intent (query, remember, work, landscape, schema). SCHEMA and templates under `references/`.
+Procedures live only under `references/paths/`. Load one path per intent (query, remember, work, landscape, schema, ci). SCHEMA and templates under `references/`.
