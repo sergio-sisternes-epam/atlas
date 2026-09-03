@@ -46,7 +46,7 @@ def validate_panelist(receipt: Any) -> None:
     if not isinstance(coverage, list) or not 1 <= len(coverage) <= 3:
         raise ValueError("coverage must contain one to three checks")
     for item in coverage:
-        _text(item, "coverage item", 200)
+        _text(item, "coverage item", 240)
     findings = receipt["findings"]
     if not isinstance(findings, list) or len(findings) > 10:
         raise ValueError("findings must be a list of at most ten items")

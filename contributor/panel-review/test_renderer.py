@@ -11,7 +11,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-SKILL = ROOT / ".apm" / "skills" / "panel-review"
+SOURCE_SKILL = ROOT / ".apm" / "skills" / "panel-review"
+SKILL = ROOT / ".agents" / "skills" / "panel-review"
 SPEC = importlib.util.spec_from_file_location(
     "panel_renderer", HERE / "render_summary.py"
 )
@@ -61,7 +62,16 @@ class RendererSpecTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "finding fields"):
             renderer.validate_payload(payload)
 
+    def test_coverage_accepts_schema_maximum_length(self):
+        payload = load_fixture("clean.json")
+        payload["panelists"][0]["coverage"][0] = "x" * 240
+        renderer.validate_payload(payload)
+
     def test_runtime_schema_and_template_contract(self):
+        self.assertEqual(
+            (SOURCE_SKILL / "SKILL.md").read_text(),
+            (SKILL / "SKILL.md").read_text(),
+        )
         panelist = json.loads(
             (SKILL / "assets" / "panelist-receipt.schema.json").read_text()
         )
