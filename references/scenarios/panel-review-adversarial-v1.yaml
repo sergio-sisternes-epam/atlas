@@ -13,6 +13,9 @@ expect:
   clean_coverage_required: true
   synthesizer_receipt_bounded: true
   malformed_retry_limit: 1
+  evidence_required: true
+  partial_diff_absence_forbidden: true
+  okf_pages_distinguished_from_fixtures: true
   contributor_evals_outside_skill: true
   no_merge_gate_language: true
   dispatch_name_panel_review: true
@@ -50,6 +53,9 @@ smokes:
   - id: malformed-retry-once
     source: S4 validation decorator
     expect: only a malformed slot retries and it retries at most once; valid slots never rerun
+  - id: evidence-and-scope-gate
+    source: real-task refinement 2026-09-03
+    expect: every finding includes evidence; parent rejects claims inferred from omitted diff context; OKF page rules do not apply to YAML scenario/eval fixtures
   - id: contributor-output-spec
     source: composition audience boundary
     expect: clean and needs-rework fixtures, trigger evals, renderer, and specification test live under contributor/panel-review outside .apm/skills/panel-review

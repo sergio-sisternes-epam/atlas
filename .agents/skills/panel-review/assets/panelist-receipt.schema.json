@@ -72,7 +72,8 @@
         "severity",
         "title",
         "rationale",
-        "follow_up"
+        "follow_up",
+        "evidence"
       ],
       "dependentRequired": {
         "line": [

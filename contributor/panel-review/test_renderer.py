@@ -66,9 +66,29 @@ class RendererSpecTest(unittest.TestCase):
         self.assertIn("summary", panelist["required"])
         self.assertGreaterEqual(panelist["properties"]["summary"]["minLength"], 1)
         self.assertEqual(panelist["properties"]["coverage"]["minItems"], 1)
+        self.assertIn(
+            "evidence",
+            panelist["$defs"]["finding"]["required"],
+        )
         self.assertEqual(synthesizer["properties"]["top_items"]["maxItems"], 3)
         self.assertIn("| Lens | Blocker | Recommended | Nits | Takeaway |", template)
         self.assertIn("Retry only a malformed slot once", (SKILL / "SKILL.md").read_text())
+        self.assertIn(
+            "do not infer absence from a partial diff",
+            (SKILL / "SKILL.md").read_text(),
+        )
+
+    def test_lenses_bound_page_and_nested_skill_rules(self):
+        atlas_lens = (
+            SKILL / "references" / "lenses" / "atlas-contract.md"
+        ).read_text()
+        skill_lens = (
+            SKILL / "references" / "lenses" / "skill-agent-contract.md"
+        ).read_text()
+        self.assertIn("YAML scenario/eval fixtures are not OKF pages", atlas_lens)
+        self.assertIn("Nested skills use their own local references/assets", skill_lens)
+        self.assertIn("Do not request a", skill_lens)
+        self.assertIn("`version` field", skill_lens)
 
     def test_contributor_eval_inventory_and_split(self):
         evals = json.loads((HERE / "evals.json").read_text(encoding="utf-8"))

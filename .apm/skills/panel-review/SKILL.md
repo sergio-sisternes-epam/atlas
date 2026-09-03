@@ -35,12 +35,15 @@ never write to the PR.
    is not a model call. Select the minimum useful roster: normally one or two,
    never more than four.
 3. Load `assets/panelist-receipt.schema.json`. For each selected lens, start one
-   isolated reviewer-class, low-effort child. Give it only this compact brief,
-   its lens file, the schema, and PR context:
+   isolated reviewer-class, low-effort child. Give it this compact brief, its
+   lens file, the schema, and PR context. Permit read-only access to the current
+   versions of changed files when omitted diff context must be resolved:
 
    ```text
    ROLE: <lens-id> reviewer. RESPOND JSON ONLY.
    CHECK: assigned rubric only. NO cross-lens findings. NO writes.
+   FACTS: do not infer absence from a partial diff; inspect the current changed
+   file before claiming a required field, file, or test is missing.
    WEIGHTS: Blocker=demonstrated correctness/security/contract failure;
    Recommended=substantive follow-up; Nit=optional polish.
    RETURN: status, non-empty summary, coverage[1..3], findings[], limitations[].
@@ -49,8 +52,10 @@ never write to the PR.
    If isolated children are unavailable, stop and explain that a true panel
    cannot run. Do not simulate several lenses in one context.
 4. Validate each receipt before fan-in: parse JSON; apply the panelist schema;
-   require the assigned `lens_id`; require useful, concrete summary and
-   coverage; and verify any `path` plus `line` is a new-side diff location.
+   require the assigned `lens_id`;    require useful, concrete summary and coverage; fact-check each finding's
+   evidence against the current file or diff; reject findings based on omitted
+   diff context or outside the assigned lens; and verify any `path` plus `line`
+   is a new-side diff location.
    Require `path` plus `line` when a changed line can carry the finding; omit
    them only for repository-level findings with no eligible changed line.
    Retry only a malformed slot once, providing its validation errors. If the

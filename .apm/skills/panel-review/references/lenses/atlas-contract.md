@@ -10,7 +10,9 @@ Always-on. Knowledge-store integrity for this package.
 
 - `SCHEMA.json` remains the compile authority. Do not invent parallel schema.
 - `staging/` never answers. Compile must hard-fail if staging is non-empty.
-- Pages with `work_id` include `relates_to` the work hub with `kind: implements`.
+- OKF Markdown pages with `work_id` include `relates_to` the work hub with
+  `kind: implements`. YAML scenario/eval fixtures are not OKF pages and do not
+  use this page relationship contract.
 - Protostars include `kind: derived_from` to origin. No `residuals/` buckets.
 - Path protocol vs CLI tool stay distinct (`path: query` vs `atlas search`; compile gate vs search inventory).
 - Skills with `activation_card: on` keep Enter card + path-module load.
@@ -20,6 +22,7 @@ Always-on. Knowledge-store integrity for this package.
 
 - Re-review Python call graphs (python-cli) or auth token handling (security-gitops).
 - Treat compile `--path`/`--type` as this panel's "lenses".
+- Apply OKF page frontmatter rules to scenario, eval, manifest, or lock files.
 
 ## Receipt
 
