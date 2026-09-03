@@ -7,7 +7,6 @@ from pathlib import Path
 from ..core.auth import AuthResult, resolve_auth
 from ..core.authstore import lookup
 from ..core.gitops import (
-    clone,
     current_branch,
     git_root,
     has_git,
@@ -48,6 +47,14 @@ def run(
     if parent_git is None:
         return _fail("no git repository (refuse to mount; persist requires an active repo)", as_json)
 
+    project = parent_git
+    dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
+    if not inside_git(project, dest):
+        return _fail(
+            "target must be inside the active git repository; omit --target to use .atlas/<id>",
+            as_json,
+        )
+
     host, org, _repo = parsed.atlas_id.split("/", 2)
     recorded = lookup(host, org)
     if recorded and not ssh:
@@ -58,9 +65,6 @@ def run(
     url = remote_url(pointer, auth)
     token = None if auth.ssh else auth.token
 
-    project = parent_git
-    dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
-
     if dest.exists() and not dest.is_dir():
         return _fail(f"target is not a directory: {dest}", as_json)
 
@@ -70,14 +74,14 @@ def run(
     registered = is_gitlink(parent_git, dest)
 
     if dest.exists() and existing.exists():
-        if in_parent and not registered:
+        if is_dirty(dest):
+            return _fail(f"dirty worktree: {dest}", as_json)
+        if not registered:
             code, err = submodule_register(parent_git, dest, url, ref)
             if code != 0:
                 return _fail(err or "submodule register failed", as_json)
             landed = current_branch(dest) or ref or ""
             return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
-        if is_dirty(dest):
-            return _fail(f"dirty worktree: {dest}", as_json)
         stored = None
         try:
             row = find_store(project, parsed.atlas_id)
@@ -100,11 +104,6 @@ def run(
         code, err = submodule_add(parent_git, url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "submodule add failed", as_json)
-    else:
-        code, err = clone(url, dest, ref, token=token)
-        if code != 0:
-            return _fail(err or "clone failed", as_json)
-
     landed = current_branch(dest) or ref or ""
     return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
 
@@ -138,11 +137,10 @@ def _finish(
     as_json: bool,
     status: str,
 ) -> int:
-    rel = dest
     try:
         rel = dest.relative_to(project)
     except ValueError:
-        pass
+        return _fail("mounted Atlas is outside the active git repository", as_json)
     try:
         upsert(
             project,

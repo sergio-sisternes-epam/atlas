@@ -27,6 +27,12 @@ smokes:
   - id: default-mount-is-submodule
     source: skill-mount-home
     expect: default mount under .atlas/<id>/ is a git submodule listed in .gitmodules
+  - id: reject-external-target
+    source: active repository write-home
+    expect: an explicit --target outside the active git repository exits non-zero without creating it
+  - id: dirty-existing-checkout-before-register
+    source: safe existing-checkout registration
+    expect: a dirty existing checkout exits non-zero without creating or staging .gitmodules
   - id: unmounted-atlas-uri-is-non-blocking
     source: external dependencies may be transient
     expect: compile reports atlas_uri_unmounted and exits 0 when no actionable warning or critical issue exists
