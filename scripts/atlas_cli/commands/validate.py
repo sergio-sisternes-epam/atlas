@@ -9,6 +9,7 @@ from ..core.paths import RESERVED, iter_concept_md, rel, staging_files, store_ro
 from ..core.mesh import consolidate as mesh_consolidate
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
+from ..core.overlay import merge_overlays, receipt_issues
 from ..core.schema import (
     by_type_map,
     load_contract,
@@ -58,7 +59,7 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
 def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
     """Dirs that contain concept .md files (not only index/log) should have index.md."""
     need: list[Path] = []
-    skip_top = {staging_dir, "templates", "mesh", ".atlas-index"}
+    skip_top = {staging_dir, "templates", "mesh", ".atlas-index", "schema.d"}
     for d in sorted(root.rglob("*")):
         if not d.is_dir():
             continue
@@ -289,6 +290,11 @@ def run(
         schema = None
     else:
         assert schema is not None
+        merged, ov_crit, ov_warn = merge_overlays(schema, r)
+        critical.extend(ov_crit)
+        warnings.extend(ov_warn)
+        critical.extend(receipt_issues(r))
+        schema = merged
         for msg in validate_schema_shape(schema):
             critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
         for msg in validate_against_contract(schema, load_contract()):

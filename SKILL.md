@@ -1,9 +1,9 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (query, remember, work) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.1
+description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+version: 0.8.2
 status: active
-work_id: 2026-08-27-atlas-search-nav-signals
+work_id: 2026-09-03-atlas-schema-governance
 plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md
 activation_card: on
 ---
@@ -33,7 +33,7 @@ skill: atlas
 skill_path: /home/workdir/.grok/skills/atlas
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape
+path: query | remember | work | landscape | schema
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas root path>
@@ -49,6 +49,7 @@ Then **`read_file` the `path_module`** and follow it. Do not run from this route
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
+| **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
 
 Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) are tools used inside paths.
 
@@ -63,6 +64,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 7. **Format-only questions** → skill **`okf`**.
 8. **Interim:** new process memory and knowledge ops for this substrate → **Atlas paths**, not okf-wiki (until migration work completes).
 9. **Wrong-frame correction** — if the user explicitly kills a comparison or thesis, load catalog skill **discuss** path `terminate` (recipe `references/recipes/terminate-wrong-path.md`). Do not keep writing the dead frame.
+10. **SCHEMA mutations = path `schema` + CLI** — load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
 
 ## CLI surface
 
@@ -77,6 +79,9 @@ python3 scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ss
 python3 scripts/atlas.py resolve <pointer>
 python3 scripts/atlas.py migrate <source> --root <atlas>
 python3 scripts/atlas.py promote <staging-file> --to <path> [--type …] --root <atlas>
+python3 scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]
+python3 scripts/atlas.py schema install <source> --root <atlas> [--force]
+python3 scripts/atlas.py schema uninstall <id> --root <atlas>
 ```
 
 Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when index exists).
@@ -111,4 +116,4 @@ Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when i
 
 ## Progressive disclosure
 
-Procedures live only under `references/paths/`. Load one path per intent. SCHEMA and templates under `references/`.
+Procedures live only under `references/paths/`. Load one path per intent (query, remember, work, landscape, schema). SCHEMA and templates under `references/`.

@@ -11,13 +11,14 @@ from .commands import idcmd as cmd_id
 from .commands import mount as cmd_mount
 from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
+from .commands import schema_cmd as cmd_schema
 
 
 @click.group(
     context_settings={"help_option_names": ["-h", "--help"]},
     epilog="Exit: 0 ok · 1 warnings · 2 critical (validate/compile)",
 )
-@click.version_option("0.8.1", prog_name="atlas")
+@click.version_option("0.8.2", prog_name="atlas")
 def main() -> None:
     """Atlas CLI — lean deterministic gates for OKF v0.2 knowledge substrates."""
 
@@ -209,6 +210,40 @@ def promote_cmd(
     raise SystemExit(
         cmd_promote.run(root, staging_file, to_path, type_hint, as_json)
     )
+
+
+@main.group("schema")
+def schema_group() -> None:
+    """Create, install, or uninstall SCHEMA overlays (CLI is the only writer)."""
+
+
+@schema_group.command("new")
+@click.argument("cid")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--claim", "claims", multiple=True, help="claimed folder prefix (repeatable)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def schema_new_cmd(cid: str, root: str | None, claims: tuple[str, ...], as_json: bool) -> None:
+    """Start a project-local overlay under schema.d/<id>.json."""
+    raise SystemExit(cmd_schema.run_new(cid, root, claims, as_json))
+
+
+@schema_group.command("install")
+@click.argument("source")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--force", is_flag=True, help="overwrite existing overlay (required if required-keys changed)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def schema_install_cmd(source: str, root: str | None, force: bool, as_json: bool) -> None:
+    """Copy a skill or file overlay into schema.d/."""
+    raise SystemExit(cmd_schema.run_install(source, root, force, as_json))
+
+
+@schema_group.command("uninstall")
+@click.argument("cid")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def schema_uninstall_cmd(cid: str, root: str | None, as_json: bool) -> None:
+    """Remove an overlay and receipt-listed CLI writes. Does not delete later pages."""
+    raise SystemExit(cmd_schema.run_uninstall(cid, root, as_json))
 
 
 if __name__ == "__main__":

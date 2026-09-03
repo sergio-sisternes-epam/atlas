@@ -16,7 +16,7 @@ DEFAULT_SCHEMA = {
         "free_layout": True,
         "staging_dir": "staging",
         "require_index_in_folders": True,
-        "reserved_names": ["index.md", "log.md", "staging"],
+        "reserved_names": ["index.md", "log.md", "staging", "schema.d"],
     },
     "compile": {
         "hard_fail": True,
