@@ -91,7 +91,9 @@ def required_fingerprint(overlay: dict[str, Any]) -> dict[str, list[str]]:
         if not isinstance(block, dict):
             continue
         req = ((block.get("frontmatter") or {}).get("required")) or []
-        out[str(tname)] = [str(x) for x in req] if isinstance(req, list) else []
+        if not isinstance(req, list):
+            req = []
+        out[str(tname)] = sorted({str(x).strip() for x in req if str(x).strip()})
     return out
 
 
@@ -243,6 +245,15 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                     t_err = validate_type_name(str(tname))
                     if t_err:
                         critical.append(_issue("overlay_type_name", relp, t_err))
+                        continue
+                    if not isinstance(block, dict):
+                        critical.append(
+                            _issue(
+                                "overlay_templates",
+                                relp,
+                                f"templates.by_type.{tname} must be an object",
+                            )
+                        )
                         continue
                     if tname in core_type_names:
                         critical.append(
