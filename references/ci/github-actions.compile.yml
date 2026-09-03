@@ -41,20 +41,20 @@ jobs:
               exit 2
               ;;
           esac
+          archive_ref="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["ATLAS_REF"], safe=""))')"
           if ! [[ "$ATLAS_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            encoded_ref="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["ATLAS_REF"], safe=""))')"
             curl --fail --location --silent --show-error \
               --header "Authorization: Bearer $ATLAS_TOKEN" \
               --header "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/$ATLAS_REPO/git/ref/tags/$encoded_ref" \
+              "https://api.github.com/repos/$ATLAS_REPO/git/ref/tags/$archive_ref" \
               --output /dev/null
           fi
           cli_dir="$(mktemp -d "$RUNNER_TEMP/atlas-cli.XXXXXX")"
-          archive="$RUNNER_TEMP/atlas-cli.tar.gz"
+          archive="$(mktemp "$RUNNER_TEMP/atlas-cli.XXXXXX")"
           curl --fail --location --silent --show-error \
             --header "Authorization: Bearer $ATLAS_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$ATLAS_REPO/tarball/$ATLAS_REF" \
+            "https://api.github.com/repos/$ATLAS_REPO/tarball/$archive_ref" \
             --output "$archive"
           tar -xzf "$archive" --strip-components=1 --directory "$cli_dir"
           echo "ATLAS_CLI=$cli_dir" >> "$GITHUB_ENV"

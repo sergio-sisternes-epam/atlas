@@ -62,6 +62,22 @@ class CiActivationContractTests(unittest.TestCase):
             self.assertIn('$RUNNER_TEMP/atlas-cli.', workflow)
             self.assertNotIn("$GITHUB_WORKSPACE", workflow)
 
+    def test_cli_archive_ref_is_encoded_and_temp_file_is_unique(self) -> None:
+        for workflow in (self.copy, self.reusable):
+            self.assertIn(
+                'urllib.parse.quote(os.environ["ATLAS_REF"], safe="")', workflow
+            )
+            self.assertIn(
+                '"https://api.github.com/repos/$ATLAS_REPO/tarball/$archive_ref"',
+                workflow,
+            )
+            self.assertIn(
+                'archive="$(mktemp "$RUNNER_TEMP/atlas-cli.XXXXXX")"', workflow
+            )
+            self.assertNotIn(
+                'archive="$RUNNER_TEMP/atlas-cli.tar.gz"', workflow
+            )
+
     def test_cli_default_ref_is_not_a_floating_branch(self) -> None:
         floating_env_ref = re.compile(
             r"^\s*ATLAS_REF:\s*(?:main|master)\s*$", re.MULTILINE
