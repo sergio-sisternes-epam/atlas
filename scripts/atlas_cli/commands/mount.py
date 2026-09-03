@@ -76,6 +76,13 @@ def run(
     if dest.exists() and existing.exists():
         if is_dirty(dest):
             return _fail(f"dirty worktree: {dest}", as_json)
+        actual_id, identity_error = _checkout_atlas_id(dest)
+        if actual_id != parsed.atlas_id:
+            detail = actual_id or identity_error or "unknown origin"
+            return _fail(
+                f"existing checkout origin is {detail}; expected {parsed.atlas_id}",
+                as_json,
+            )
         if not registered:
             code, err = submodule_register(parent_git, dest, url, ref)
             if code != 0:
@@ -137,6 +144,16 @@ def _in_gitmodules(parent: Path, dest: Path) -> bool:
         if len(parts) == 2 and parts[1] == rel:
             return True
     return False
+
+
+def _checkout_atlas_id(dest: Path) -> tuple[str | None, str | None]:
+    code, origin, error = run_git(["remote", "get-url", "origin"], cwd=dest)
+    if code != 0 or not origin:
+        return None, error or "origin remote is missing"
+    try:
+        return parse_pointer(origin).atlas_id, None
+    except IdentityError as exc:
+        return None, f"origin remote is invalid ({exc})"
 
 
 def _finish(

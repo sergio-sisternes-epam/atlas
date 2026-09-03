@@ -142,6 +142,70 @@ def main() -> int:
             and str(relative_existing) in payload.get("error", ""),
             parse_error or f"exit={result.returncode} payload={payload}",
         )
+
+        (parent / ".gitmodules").unlink()
+        unrelated = parent / "unrelated"
+        unrelated.mkdir()
+        git(["init", "-q"], unrelated)
+        git(
+            ["remote", "add", "origin", "https://github.com/example/other.git"],
+            unrelated,
+        )
+        result = run(
+            [
+                "mount",
+                "github.com/example/store",
+                "--target",
+                "unrelated",
+                "--cwd",
+                str(parent),
+                "--json",
+            ],
+            parent,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "unrelated-existing-checkout-rejected",
+            result.returncode == 2
+            and "github.com/example/other" in payload.get("error", "")
+            and "expected github.com/example/store" in payload.get("error", "")
+            and not (parent / ".gitmodules").exists(),
+            parse_error or f"exit={result.returncode} payload={payload}",
+        )
+
+        matching = parent / "matching"
+        matching.mkdir()
+        git(["init", "-q"], matching)
+        git(["config", "user.name", "Atlas Test"], matching)
+        git(["config", "user.email", "atlas@example.invalid"], matching)
+        (matching / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
+        git(["add", "SCHEMA.json"], matching)
+        git(["commit", "-q", "-m", "Initial store"], matching)
+        git(
+            ["remote", "add", "origin", "git@github.com:example/store.git"],
+            matching,
+        )
+        result = run(
+            [
+                "mount",
+                "https://github.com/example/store.git",
+                "--target",
+                "matching",
+                "--cwd",
+                str(parent),
+                "--json",
+            ],
+            parent,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "matching-existing-checkout-registered",
+            result.returncode == 0
+            and payload.get("id") == "github.com/example/store"
+            and _in_gitmodules(parent, matching),
+            parse_error
+            or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

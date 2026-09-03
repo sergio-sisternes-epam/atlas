@@ -18,7 +18,7 @@ from .commands import schema_cmd as cmd_schema
     context_settings={"help_option_names": ["-h", "--help"]},
     epilog="Exit: 0 ok/non-blocking dependency warnings · 1 actionable warnings · 2 critical",
 )
-@click.version_option("0.8.9", prog_name="atlas")
+@click.version_option("0.8.10", prog_name="atlas")
 def main() -> None:
     """Atlas CLI — lean deterministic gates for OKF v0.2 knowledge substrates."""
 
