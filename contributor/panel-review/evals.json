@@ -21,7 +21,7 @@
   ],
   "trigger_evals": [
     {
-      "query": "Review this PR.",
+      "query": "Convene the Atlas review panel for this PR.",
       "should_trigger": true,
       "split": "train"
     },
@@ -36,22 +36,22 @@
       "split": "train"
     },
     {
-      "query": "Check this branch before I ask for review.",
+      "query": "Use panel-review on the current branch.",
       "should_trigger": true,
       "split": "train"
     },
     {
-      "query": "Look for contract and security issues in this PR.",
+      "query": "Have each relevant Atlas lens inspect this PR.",
       "should_trigger": true,
       "split": "train"
     },
     {
-      "query": "Have the Atlas reviewers inspect these changes.",
+      "query": "Run a panel verdict over these Atlas changes.",
       "should_trigger": true,
       "split": "validation"
     },
     {
-      "query": "Review the current pull request and summarize the risk.",
+      "query": "Execute the panel delegated by code-review.",
       "should_trigger": true,
       "split": "validation"
     },
@@ -76,7 +76,7 @@
       "split": "train"
     },
     {
-      "query": "Draft a pull request description.",
+      "query": "Review this PR.",
       "should_trigger": false,
       "split": "train"
     },

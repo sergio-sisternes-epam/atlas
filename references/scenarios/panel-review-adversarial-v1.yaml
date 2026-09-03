@@ -3,7 +3,7 @@ work_id: 2026-09-03-pr-panel-review
 adversarial: true
 packages: [atlas]
 expect:
-  one_skill_dir: true
+  one_panel_skill_dir: true
   apm_source_package: true
   copilot_deployment: true
   lazy_lenses: true
@@ -28,10 +28,10 @@ smokes:
     expect: source lives under .apm/skills/panel-review and root apm.yml declares a hybrid package
   - id: copilot-deployment
     source: operator correction 2026-09-03
-    expect: apm install --target copilot deploys panel-review for Copilot
+    expect: apm install --target copilot deploys code-review and panel-review for Copilot
   - id: one-skill-not-four
     source: A1 PANEL-WITHOUT-SYNTHESIS / pin 3
-    expect: exactly one SKILL.md for the panel; no per-lens SKILL.md
+    expect: panel-review remains one SKILL.md with no per-lens SKILL.md; the separate code-review skill is only a discovery adapter
   - id: lenses-not-inlined
     source: C1 EAGER BLOAT / CCR tutorial context limits
     expect: SKILL.md does not contain the full text of any lens file

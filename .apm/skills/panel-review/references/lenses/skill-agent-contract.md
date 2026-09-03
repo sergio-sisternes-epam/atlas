@@ -12,13 +12,16 @@ Run only when the roster includes this lens.
   procedures live in `references/paths/<path>.md` and are loaded before execute.
   Nested skills use their own local references/assets and do not need Atlas path
   procedure modules.
+- When `code-review` is the broad review entrypoint, it loads the sibling
+  `panel-review` skill through a valid relative link and fails closed when the
+  panel cannot execute. It does not copy panel orchestration or output rules.
 - Progressive disclosure: do not inline every path module into the root skill.
 - Nested skill calls use the multi-harness substrate contract (load the full target skill body; do not invent from memory).
 - Frontmatter `description` names triggers and bounds (imperative, user intent).
 - No harness-specific hard bounds in the skill body (Copilot/Claude-only syntax in the portable contract).
-- Root `apm.yml` keeps package identity `atlas`; the nested review skill keeps
-  frontmatter name `panel-review`. These names serve different scopes and must
-  not be forced to match.
+- Root `apm.yml` keeps package identity `atlas`; nested review skills keep their
+  own directory-matching names. These names serve different scopes and must not
+  be forced to match.
 - Skill frontmatter follows the supported skill contract (`name` and
   `description`; existing package metadata may remain). Do not request a
   `version` field in nested `SKILL.md`.

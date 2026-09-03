@@ -1,12 +1,12 @@
 ---
 name: panel-review
 description: >-
-  Use this skill when asked to review a pull request, run a panel review,
-  or perform a multi-lens code review in this Atlas repository. Apply even
-  when the user only asks to review the PR. Run a cost-aware advisory panel
-  over the relevant Atlas contract, Python CLI, skill/agent, and
-  security/gitops surfaces. Publish inline findings plus one evidence-backed
-  summary. Do not implement, merge, or set formal review state.
+  Use this skill when the code-review skill delegates an Atlas pull request to
+  the panel, or when the user explicitly asks for a panel or multi-lens review.
+  Run a cost-aware advisory panel over the relevant Atlas contract, Python CLI,
+  skill/agent, and security/gitops surfaces. Publish inline findings plus one
+  evidence-backed summary. Do not use it as the generic review entrypoint,
+  implement the reviewed change, merge, or set formal review state.
 license: Apache-2.0
 ---
 

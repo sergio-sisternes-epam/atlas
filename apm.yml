@@ -5,6 +5,7 @@ author: Sergio Sisternes
 license: Apache-2.0
 type: hybrid
 includes:
+  - .apm/skills/code-review/
   - .apm/skills/panel-review/
 dependencies:
   apm:

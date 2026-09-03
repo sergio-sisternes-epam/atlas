@@ -136,6 +136,24 @@ deployments:
   content_hash: sha256:29ceeed39b62914db2920a5970a06b5a93ca6c387873101cc1c28d205de004ce
 - kind: project-relative
   target: agents
+  value: .agents/skills/code-review
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/code-review/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:cac12add038b31377ec5f3a6999a0190969f38a3a4c3ee8433a8d89859339e63
+- kind: project-relative
+  target: agents
   value: .agents/skills/panel-review
   runtime: null
   scope: project
@@ -151,7 +169,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:3dee99dc75731b73ac6c523c5fb02235367b6c38f6ea1d4b72fba6bdabede6c3
+  content_hash: sha256:494ad3c3cc0e99ae1363453ad38d425eff1ff290a672d77fc0dc245c0a23761b
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/assets/panelist-receipt.schema.json
@@ -223,7 +241,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:3b7327d87b8f43e2a4b927200e4f0113799b829634d7ec9f314ff589a6909f4a
+  content_hash: sha256:7a5e6daae59a334ba21d9cd17b37db3e4ecbea898fff4da1468ed7e42bf7aa68
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/references/roster.md
@@ -243,6 +261,8 @@ deployments:
   active_owner: .
   content_hash: sha256:30adbbbdd1105ae321a6e4b044c417d9cd75f130618c5b1011a67685d534724d
 local_deployed_files:
+- .agents/skills/code-review
+- .agents/skills/code-review/SKILL.md
 - .agents/skills/panel-review
 - .agents/skills/panel-review/SKILL.md
 - .agents/skills/panel-review/assets/panelist-receipt.schema.json
@@ -256,7 +276,8 @@ local_deployed_files:
 - .agents/skills/panel-review/references/roster.md
 - .agents/skills/panel-review/references/synthesizer.md
 local_deployed_file_hashes:
-  .agents/skills/panel-review/SKILL.md: sha256:3dee99dc75731b73ac6c523c5fb02235367b6c38f6ea1d4b72fba6bdabede6c3
+  .agents/skills/code-review/SKILL.md: sha256:cac12add038b31377ec5f3a6999a0190969f38a3a4c3ee8433a8d89859339e63
+  .agents/skills/panel-review/SKILL.md: sha256:494ad3c3cc0e99ae1363453ad38d425eff1ff290a672d77fc0dc245c0a23761b
   .agents/skills/panel-review/assets/panelist-receipt.schema.json: sha256:c00f29da65cd875ed12b71d400a5497312a6e96a3f14d3ef648daa3c99fb1134
   .agents/skills/panel-review/assets/recommendation-template.md: sha256:b9fa0be14756c5da6ac374c24bf80dbdb5e8484b00ba44cb49209d3ecf2fb80a
   .agents/skills/panel-review/assets/synthesizer-receipt.schema.json: sha256:e2d54999e7fe9f0b653aa5450a3d60607d6940483f6d6f4949b108acf5f10dc5
@@ -264,6 +285,6 @@ local_deployed_file_hashes:
   .agents/skills/panel-review/references/lenses/atlas-contract.md: sha256:8ef67ccdc05537719f8d918cf8dc5c969ee0a40689d90a9dfdbf47ab7a4d5dde
   .agents/skills/panel-review/references/lenses/python-cli.md: sha256:03fcf3f9925f5692db2fa86243536027790fd96cd5c15b11207bbfd7570009b8
   .agents/skills/panel-review/references/lenses/security-gitops.md: sha256:a33c898b489fa2c64b3efa414e246fbe01786493ef64563da0d54609b68aa93d
-  .agents/skills/panel-review/references/lenses/skill-agent-contract.md: sha256:3b7327d87b8f43e2a4b927200e4f0113799b829634d7ec9f314ff589a6909f4a
+  .agents/skills/panel-review/references/lenses/skill-agent-contract.md: sha256:7a5e6daae59a334ba21d9cd17b37db3e4ecbea898fff4da1468ed7e42bf7aa68
   .agents/skills/panel-review/references/roster.md: sha256:0fb836e13e9b7aa8ed10dd86a7ad535464942246d97272ee702ab808d401fe7c
   .agents/skills/panel-review/references/synthesizer.md: sha256:30adbbbdd1105ae321a6e4b044c417d9cd75f130618c5b1011a67685d534724d
