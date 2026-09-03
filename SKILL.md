@@ -1,10 +1,10 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (mount, init, migrate, query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.12
+description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+version: 0.8.13
 status: active
-work_id: 2026-09-03-atlas-schema-governance
-plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md
+work_id: 2026-09-03-atlas-ci-activation-path
+plan_path: autogenesis/plans/2026-09-03-atlas-ci-activation-path.md
 activation_card: on
 ---
 
@@ -42,7 +42,7 @@ skill: atlas
 skill_path: /home/workdir/.grok/skills/atlas
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape | schema
+path: query | remember | work | landscape | schema | ci
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -95,6 +95,7 @@ Then **`read_file` `references/paths/migrate.md`**. Missing `atlas_id` ⇒ incom
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
+| **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount | `references/paths/ci.md` |
 
 Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) are tools used inside paths.
 
@@ -112,6 +113,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 10. **Thoughtful current-theory remember** — writing `lesson`, live `decision`, or `recipe` requires this skill’s remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
 11. **Write-home is the active git repo** — load path `mount` first. Mount-if-missing with no `--target`. Query and persist use `--root` on that mount. No git repository: refuse to persist. Never mount or write at `<skill>/references/atlas`.
 12. **SCHEMA mutations = path `schema` + CLI** — load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
+13. **CI layers stay distinct** — path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
 
 ## CLI surface
 
