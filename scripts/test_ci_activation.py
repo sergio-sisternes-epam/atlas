@@ -170,7 +170,12 @@ class CiActivationContractTests(unittest.TestCase):
             "github.event.pull_request.head.repo.full_name == github.repository",
             self.ci_workflow,
         )
-        self.assertIn("name: Audit committed APM state", self.ci_workflow)
+        self.assertIn("name: Restore frozen dependencies", self.ci_workflow)
+        self.assertIn(
+            "run: apm install --frozen --target agent-skills",
+            self.ci_workflow,
+        )
+        self.assertIn("name: Audit restored source integrity", self.ci_workflow)
         self.assertIn(
             "apm audit --ci --no-policy --no-fail-fast --no-drift",
             self.ci_workflow,
