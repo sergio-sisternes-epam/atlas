@@ -314,10 +314,14 @@ def run(
         warnings.extend(ov_warn)
         critical.extend(receipt_issues(r))
         schema = merged
-        for msg in validate_schema_shape(schema):
+        shape_msgs = validate_schema_shape(schema)
+        for msg in shape_msgs:
             critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
-        for msg in validate_against_contract(schema, load_contract()):
-            critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
+        if shape_msgs:
+            schema = None
+        else:
+            for msg in validate_against_contract(schema, load_contract()):
+                critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)

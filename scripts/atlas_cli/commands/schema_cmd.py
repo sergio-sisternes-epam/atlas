@@ -245,7 +245,15 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
             rel_parts = p.relative_to(root_res).parts
         except ValueError:
             continue
-        if rel_parts and rel_parts[0] in {SCHEMA_D, "templates"}:
+        if rel_parts and rel_parts[0] == SCHEMA_D:
+            p.unlink()
+            deleted.append("/".join(rel_parts))
+        elif (
+            len(rel_parts) == 2
+            and rel_parts[0] == "templates"
+            and rel_parts[1].endswith(".md")
+            and rel_parts[1][:-3] in gone_types
+        ):
             p.unlink()
             deleted.append("/".join(rel_parts))
     dest.unlink(missing_ok=True)
