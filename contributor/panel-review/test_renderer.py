@@ -71,7 +71,11 @@ class RendererSpecTest(unittest.TestCase):
         for field in ("coverage", "limitations"):
             with self.subTest(field=field):
                 payload = load_fixture("clean.json")
-                item = payload["panelists"][0][field][0]
+                item = (
+                    payload["panelists"][0][field][0]
+                    if field == "coverage"
+                    else "No material limitations."
+                )
                 payload["panelists"][0][field] = [item, item]
                 with self.assertRaisesRegex(ValueError, "unique"):
                     renderer.validate_payload(payload)
