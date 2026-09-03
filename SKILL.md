@@ -14,7 +14,7 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-**Default store (this skill):** `references/atlas/`
+**Default store:** the canonical process-memory Atlas is the separate repo `sergio-sisternes-epam/atlas-atlas`. In this package checkout, `references/atlas/` is a git submodule of that store. Author memory pages in atlas-atlas (or the live Grok working copy), not as ordinary files of the atlas package.
 
 ## Activation card (required)
 
@@ -55,7 +55,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 7. **Format-only questions** → skill **`okf`**.
 8. **Interim:** new process memory and knowledge ops for this substrate → **Atlas paths**, not okf-wiki (until migration work completes).
 9. **Wrong-frame correction** — if the user explicitly kills a comparison or thesis, load catalog skill **discuss** path `terminate` (recipe `references/recipes/terminate-wrong-path.md`). Do not keep writing the dead frame.
-10. **Thoughtful current-theory remember** — writing `lesson`, live `decision`, or `recipe` requires this skill’s remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision: `decisions/atlas-memory-layers.md`.
+10. **Thoughtful current-theory remember** — writing `lesson`, live `decision`, or `recipe` requires this skill’s remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
 
 ## CLI surface
 
