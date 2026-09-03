@@ -55,7 +55,7 @@ Adapters on any CI platform conform to these clauses.
 | M3 | The merge gate runs unfocused `atlas compile --root <root> --json`, without `--path` or `--type`. |
 | M4 | Compile exit `0` passes. Exit `1` passes with warnings retained as evidence. Exit `2` fails. Any other abnormal failure fails. |
 | M5 | The Atlas CLI comes from an immutable tag or commit SHA, never `main` or `master`. |
-| M6 | CLI acquisition happens before compile. Acquisition failure fails the job rather than skipping the gate. |
+| M6 | CLI acquisition and installation happen before compile from an exact dependency lock shipped with the pinned CLI. Any failure fails the job rather than skipping the gate. |
 | M7 | The gate runs on pull requests and pushes that include the default branch. |
 | M8 | The compile job has read-only mount permissions. |
 | M9 | Compile JSON is printed in logs and retained as an artifact even when the gate fails. |
@@ -115,7 +115,7 @@ Mark every item pass, fail, or not applicable.
 
 - [ ] C1. CLI source is the Atlas skill's `scripts/atlas.py`.
 - [ ] C2. CLI ref is a tag or SHA, not `main` or `master`.
-- [ ] C3. CLI dependencies are installed.
+- [ ] C3. CLI dependencies are installed from an exact lock shipped with the pinned CLI.
 - [ ] C4. Acquisition failure fails the job.
 - [ ] C5. Private source has a documented read token, or source is public.
 - [ ] C6. CLI acquisition directory is outside the compiled mount.

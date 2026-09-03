@@ -85,7 +85,7 @@ jobs:
           echo "ATLAS_CLI=$cli_dir" >> "$GITHUB_ENV"
 
       - name: Install Atlas CLI dependencies
-        run: python3 -m pip install -r "$ATLAS_CLI/scripts/requirements.txt"
+        run: python3 -m pip install -r "$ATLAS_CLI/scripts/requirements-ci.txt"
 
       - name: Compile Atlas
         id: atlas

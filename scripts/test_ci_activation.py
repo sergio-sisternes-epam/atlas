@@ -16,6 +16,7 @@ CALLER = ROOT / "references/ci/github-actions.caller.yml"
 REUSABLE = ROOT / ".github/workflows/atlas-compile.yml"
 PATH_CI = ROOT / "references/paths/ci.md"
 SCENARIO = ROOT / "references/scenarios/ci-activation-adversarial-v1.yaml"
+CI_REQUIREMENTS = ROOT / "scripts/requirements-ci.txt"
 
 
 class CiActivationContractTests(unittest.TestCase):
@@ -26,6 +27,7 @@ class CiActivationContractTests(unittest.TestCase):
         cls.reusable = REUSABLE.read_text(encoding="utf-8")
         cls.path_ci = PATH_CI.read_text(encoding="utf-8")
         cls.scenario = SCENARIO.read_text(encoding="utf-8")
+        cls.ci_requirements = CI_REQUIREMENTS.read_text(encoding="utf-8")
 
     def test_path_and_router_are_distinct_from_compile_path(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -82,6 +84,22 @@ class CiActivationContractTests(unittest.TestCase):
         for workflow in (self.copy, self.reusable):
             self.assertIn(token_env, workflow)
             self.assertEqual(2, workflow.count(auth_header))
+
+    def test_cli_dependencies_are_exactly_locked(self) -> None:
+        requirements = self.ci_requirements.splitlines()
+        self.assertTrue(requirements)
+        for requirement in requirements:
+            self.assertRegex(requirement, r"^[A-Za-z0-9_.-]+==[^\s]+$")
+        self.assertTrue(any(line.startswith("click==") for line in requirements))
+        self.assertTrue(
+            any(line.startswith("jsonschema==") for line in requirements)
+        )
+        for workflow in (self.copy, self.reusable):
+            self.assertIn("scripts/requirements-ci.txt", workflow)
+            self.assertNotIn(
+                'pip install -r "$ATLAS_CLI/scripts/requirements.txt"',
+                workflow,
+            )
 
     def test_cli_archive_ref_is_encoded_and_temp_file_is_unique(self) -> None:
         for workflow in (self.copy, self.reusable):
@@ -144,6 +162,7 @@ class CiActivationContractTests(unittest.TestCase):
             "exit-2-fails-exit-1-does-not",
             "missing-schema-not-success",
             "floating-main-pin-forbidden",
+            "dependency-closure-locked",
             "skill-pytest-not-mount-ci",
             "cli-not-in-workspace-root",
         ):

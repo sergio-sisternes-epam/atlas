@@ -24,6 +24,9 @@ smokes:
   - id: floating-main-pin-forbidden
     source: design pins 7 and 17
     expect: CLI ref is not main or master and third-party Actions use commit SHAs
+  - id: dependency-closure-locked
+    source: M6 reproducibility requirement
+    expect: adapters install the CLI runtime from an exact lock shipped with the pinned CLI
   - id: skill-pytest-not-mount-ci
     source: design pin 2 and X3
     expect: path ci adapters do not run Atlas skill unit tests
