@@ -1,0 +1,110 @@
+{
+  "content_evals": [
+    {
+      "id": "ordinary-pr-review-delegates",
+      "prompt": "Review this Atlas pull request.",
+      "with_skill": "Load the sibling panel-review skill and execute its procedure end-to-end.",
+      "without_skill": "A generic reviewer may perform a single-pass review without panel receipts or synthesis."
+    },
+    {
+      "id": "panel-unavailable-fails-closed",
+      "prompt": "Review this PR when the panel skill cannot be loaded.",
+      "with_skill": "Report that the panel is unavailable and do not claim a completed review.",
+      "without_skill": "A generic reviewer may silently substitute its own review process."
+    },
+    {
+      "id": "publication-owned-by-panel",
+      "prompt": "Run code review and publish the result.",
+      "with_skill": "Delegate all analysis and publication to panel-review without adding adapter comments.",
+      "without_skill": "Multiple review layers may emit duplicate or conflicting comments."
+    }
+  ],
+  "trigger_evals": [
+    {
+      "query": "Review this PR.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Copilot, review pull request #7.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Review the changes in the current pull request.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Find correctness defects in this pull request.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Review these Atlas code changes.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Give the current pull request a code review.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Assess the risks introduced by this PR.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Check this PR change set for review findings.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Run the panel on PR #7.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Summarize pull request #7.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Apply the reviewer feedback.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Explain the Atlas schema.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Merge the current pull request.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Review this paragraph for grammar.",
+      "should_trigger": false,
+      "split": "validation"
+    },
+    {
+      "query": "Create a code-review skill.",
+      "should_trigger": false,
+      "split": "validation"
+    },
+    {
+      "query": "What does the code-review skill do?",
+      "should_trigger": false,
+      "split": "validation"
+    }
+  ],
+  "validation_gate": {
+    "should_trigger_rate_minimum": 0.5,
+    "near_miss_trigger_rate_maximum_exclusive": 0.5,
+    "panel_load_required": true,
+    "generic_fallback_forbidden": true
+  }
+}
