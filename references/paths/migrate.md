@@ -6,7 +6,7 @@ path_id: migrate
 
 # Path: migrate
 
-Generic. For any skill that still vendors process memory at `<skill>/references/atlas`. Do **not** copy this file, `mount.md`, or `init.md`. Requires Atlas 0.8.11+. `atlas_id` comes from the card (from that skill’s `.gitmodules` url as `host/org/repo`). Missing `atlas_id` ⇒ incomplete Enter.
+Generic. For any skill that still vendors process memory at `<skill>/references/atlas`. Do **not** copy this file, `mount.md`, or `init.md`. Requires Atlas 0.8.12+. `atlas_id` comes from the card (from that skill’s `.gitmodules` url as `host/org/repo`). Missing `atlas_id` ⇒ incomplete Enter.
 
 Leave other subjects’ `<subject>/references/atlas/` until those skills run this path.
 

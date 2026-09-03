@@ -208,7 +208,7 @@ def main() -> int:
         )
 
         mesh = parent / "atlas-mesh.json"
-        mesh.unlink()
+        mesh.unlink(missing_ok=True)
         result = run(
             [
                 "mount",
