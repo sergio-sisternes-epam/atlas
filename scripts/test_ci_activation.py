@@ -40,9 +40,12 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertIn("version: 0.8.13", manifest)
 
     def test_gate_is_unfocused(self) -> None:
+        compile_gate = re.compile(
+            r'atlas\.py"?\s+compile\s+(?:\\\s*)?'
+            r'--root\s+"?\$ROOT"?\s+--json\b'
+        )
         for workflow in (self.copy, self.reusable):
-            self.assertIn(" compile \\", workflow)
-            self.assertIn("--root \"$ROOT\" --json", workflow)
+            self.assertRegex(workflow, compile_gate)
             self.assertNotIn("--path", workflow)
             self.assertNotIn("--type", workflow)
 
