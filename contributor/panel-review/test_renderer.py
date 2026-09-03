@@ -100,6 +100,7 @@ class RendererSpecTest(unittest.TestCase):
         self.assertIn("Nested skills use their own local references/assets", skill_lens)
         self.assertIn("Do not request a", skill_lens)
         self.assertIn("`version` field", skill_lens)
+        self.assertIn("Contributor panel evals stay outside", skill_lens)
 
     def test_contributor_eval_inventory_and_split(self):
         evals = json.loads((HERE / "evals.json").read_text(encoding="utf-8"))

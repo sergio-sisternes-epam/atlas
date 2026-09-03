@@ -22,6 +22,8 @@ Run only when the roster includes this lens.
 - Skill frontmatter follows the supported skill contract (`name` and
   `description`; existing package metadata may remain). Do not request a
   `version` field in nested `SKILL.md`.
+- Contributor panel evals stay outside the deployed skill bundle and remain
+  aligned with the runtime receipt schemas and recommendation template.
 
 ## Do not
 
