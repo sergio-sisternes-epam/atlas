@@ -3,7 +3,6 @@ __pycache__/
 .DS_Store
 .atlas/
 apm_modules/
-.agents/
 .claude/
 .codex/
 .cursor/
@@ -15,3 +14,4 @@ apm_modules/
 .github/agents/
 .github/instructions/
 .github/copilot-instructions.md
+.agents/skills/okf/

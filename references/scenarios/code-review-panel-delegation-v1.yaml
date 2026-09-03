@@ -1,0 +1,30 @@
+id: code-review-panel-delegation-v1
+work_id: 2026-09-03-code-review-panel-delegation
+adversarial: true
+packages: [atlas]
+expect:
+  review_focused_entrypoint: true
+  panel_load_mandatory: true
+  panel_execution_mandatory: true
+  unavailable_panel_fails_closed: true
+  panel_logic_not_duplicated: true
+  both_skills_deployed: true
+smokes:
+  - id: copilot-review-directory
+    source: GitHub agent skills documentation
+    expect: the broad review entrypoint lives at .apm/skills/code-review/SKILL.md and deploys to .agents/skills/code-review/SKILL.md
+  - id: sibling-load
+    source: operator direction 2026-09-03
+    expect: code-review loads panel-review through a relative Markdown link before review analysis
+  - id: mandatory-execution
+    source: operator direction 2026-09-03
+    expect: code-review executes the loaded panel procedure end-to-end
+  - id: fail-closed
+    source: nested skill execution uncertainty
+    expect: a missing panel or unavailable isolated reviewers stops the review without a generic fallback
+  - id: single-review-owner
+    source: panel-review redesign handoff
+    expect: panel-review alone owns roster, receipts, synthesis, inline findings, and summary publication
+  - id: no-dispatch-collision
+    source: agent skill description guidance
+    expect: code-review handles generic review requests while panel-review handles delegation and explicit panel requests

@@ -48,10 +48,10 @@ jobs:
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm install --frozen --target agent-skills
-      - name: Audit package integrity
+      - name: Audit source integrity
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm audit --ci --no-policy --no-fail-fast
+        run: apm audit --ci --no-policy --no-fail-fast --no-drift
 
   consumer:
     name: Consumer install (${{ matrix.name }})

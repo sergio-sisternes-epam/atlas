@@ -10,7 +10,10 @@ keywords:
   - knowledge-graph
   - agent-memory
   - okf
-includes: auto
+type: hybrid
+includes:
+  - .apm/skills/code-review/
+  - .apm/skills/panel-review/
 dependencies:
   apm:
     - sergio-sisternes-epam/okf#9088a99a613d9ccc53ec2a15341714139291633f

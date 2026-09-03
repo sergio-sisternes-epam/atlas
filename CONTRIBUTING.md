@@ -24,8 +24,12 @@ Then verify the pinned dependency and APM integrity:
 
 ```bash
 apm install --frozen --target agent-skills
-apm audit --ci --no-policy --no-fail-fast
+apm audit --ci --no-policy --no-fail-fast --no-drift
 ```
+
+The source audit omits install-replay drift because this repository combines a
+root skill bundle with local `.apm` review skills. CI runs the full drift audit
+after installing Atlas into each disposable consumer target.
 
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime

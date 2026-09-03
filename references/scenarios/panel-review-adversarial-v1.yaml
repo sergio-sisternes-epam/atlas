@@ -1,0 +1,73 @@
+id: panel-review-adversarial-v1
+work_id: 2026-09-03-pr-panel-review
+adversarial: true
+packages: [atlas]
+expect:
+  one_panel_skill_dir: true
+  apm_source_package: true
+  copilot_deployment: true
+  lazy_lenses: true
+  skip_python_on_docs: true
+  typical_lenses_max: 2
+  panelist_receipts_schema_first: true
+  clean_coverage_required: true
+  synthesizer_receipt_bounded: true
+  malformed_retry_limit: 1
+  evidence_required: true
+  partial_diff_absence_forbidden: true
+  okf_pages_distinguished_from_fixtures: true
+  deterministic_checks_reconcile_limitations: true
+  cross_file_lenses_use_full_reviewer: true
+  meta_review_findings_forbidden: true
+  contributor_evals_outside_skill: true
+  no_merge_gate_language: true
+  dispatch_name_panel_review: true
+smokes:
+  - id: apm-source-package
+    source: operator correction 2026-09-03
+    expect: source lives under .apm/skills/panel-review and root apm.yml declares a hybrid package
+  - id: copilot-deployment
+    source: operator correction 2026-09-03
+    expect: apm install --target copilot deploys code-review and panel-review for Copilot
+  - id: one-skill-not-four
+    source: A1 PANEL-WITHOUT-SYNTHESIS / pin 3
+    expect: panel-review remains one SKILL.md with no per-lens SKILL.md; the separate code-review skill is only a discovery adapter
+  - id: lenses-not-inlined
+    source: C1 EAGER BLOAT / CCR tutorial context limits
+    expect: SKILL.md does not contain the full text of any lens file
+  - id: docs-only-skips-python-cli
+    source: B2 skip rules / pin roster
+    expect: roster.md skip python-cli when diff is markdown-only under docs/README/recipes
+  - id: no-merge-gate-vocabulary
+    source: advisory regime / deprecated panel-review
+    expect: SKILL.md and recommendation-template.md use advisory language without formal review-state instructions
+  - id: dispatch-name-panel-review
+    source: operator correction 2026-09-03
+    expect: source directory and SKILL.md name are panel-review
+  - id: inline-plus-summary-table
+    source: operator 2026-09-03 output format
+    expect: SKILL.md requires inline comments plus exactly one summary; recommendation-template.md has Blocker/Recommended/Nits counts, per-lens details, and useful clean coverage
+  - id: deterministic-cost-aware-roster
+    source: panel-review redesign handoff cost contract
+    expect: roster selection is path and semantic classification in the parent with no router call; typical selection is one or two and maximum selection is four
+  - id: schema-first-receipts
+    source: panel-review redesign handoff receipt contract
+    expect: panelist and synthesizer JSON schemas bound required non-empty text, coverage, findings, top items, and recommendation
+  - id: malformed-retry-once
+    source: S4 validation decorator
+    expect: only a malformed slot retries and it retries at most once; valid slots never rerun
+  - id: evidence-and-scope-gate
+    source: real-task refinement 2026-09-03
+    expect: every finding includes evidence; parent rejects claims inferred from omitted diff context; OKF page rules do not apply to YAML scenario/eval fixtures
+  - id: deterministic-validation-fan-in
+    source: real-task refinement 2026-09-03
+    expect: synthesizer receives at most five relevant deterministic check results and resolves a panelist limitation only when a supplied check directly covers it
+  - id: cost-gradient-quality-floor
+    source: real-task refinement 2026-09-03
+    expect: atlas-contract may use the cheapest checklist reviewer; cross-file and security lenses use a full reviewer; no lens uses planner class
+  - id: no-meta-review-findings
+    source: real-task refinement 2026-09-03
+    expect: findings must be introduced by the PR and must never report mistakes in prior receipts, validation messages, or panel execution
+  - id: contributor-output-spec
+    source: composition audience boundary
+    expect: clean and needs-rework fixtures, trigger evals, renderer, and specification test live under contributor/panel-review outside .apm/skills/panel-review
