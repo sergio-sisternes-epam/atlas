@@ -8,10 +8,33 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from release_readiness import ROOT, SURFACES, manifest_version, validate_versions
+from release_readiness import (
+    ROOT,
+    SURFACES,
+    current_commit,
+    manifest_version,
+    validate_commit,
+    validate_versions,
+)
 
 
 class ReleaseReadinessTests(unittest.TestCase):
+    def test_candidate_commit_matches_checked_out_revision(self) -> None:
+        self.assertEqual([], validate_commit(current_commit()))
+
+    def test_mismatched_candidate_commit_blocks_readiness(self) -> None:
+        candidate = "0" * 40
+        errors = validate_commit(candidate)
+        self.assertEqual(1, len(errors))
+        self.assertIn("!= checked-out revision", errors[0])
+
+    def test_malformed_candidate_commit_blocks_readiness(self) -> None:
+        errors = validate_commit("main")
+        self.assertEqual(
+            ["candidate commit must be a 40-character SHA: main"],
+            errors,
+        )
+
     def test_repository_version_surfaces_are_consistent(self) -> None:
         version, errors = validate_versions()
         self.assertEqual(manifest_version(), version)

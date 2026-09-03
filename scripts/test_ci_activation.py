@@ -181,6 +181,13 @@ class CiActivationContractTests(unittest.TestCase):
                 "github.event.pull_request.head.repo.full_name == github.repository"
             ),
         )
+        self.assertEqual(
+            2,
+            self.ci_workflow.count(
+                "github.event_name == 'workflow_dispatch' &&\n"
+                "       github.ref == 'refs/heads/main'"
+            ),
+        )
         self.assertIn(
             "apm audit --ci --no-policy --no-fail-fast\n",
             self.ci_workflow,

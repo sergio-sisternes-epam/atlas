@@ -95,6 +95,16 @@ def current_commit(root: Path = ROOT) -> str:
     return result.stdout.strip()
 
 
+def validate_commit(candidate: str, root: Path = ROOT) -> list[str]:
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
+        return [f"candidate commit must be a 40-character SHA: {candidate}"]
+
+    actual = current_commit(root)
+    if candidate.lower() != actual.lower():
+        return [f"candidate commit {candidate} != checked-out revision {actual}"]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Release tag to compare with apm.yml")
@@ -105,6 +115,8 @@ def main() -> int:
     expected_tag = f"v{version}"
     if args.tag and args.tag != expected_tag:
         errors.append(f"release tag {args.tag} != {expected_tag}")
+    if args.commit:
+        errors.extend(validate_commit(args.commit))
 
     print(f"candidate_revision: {args.commit or current_commit()}")
     print(f"package_version: {version}")
