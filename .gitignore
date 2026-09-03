@@ -3,3 +3,15 @@ __pycache__/
 .DS_Store
 .atlas/
 apm_modules/
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.grok/
+.kiro/
+.opencode/
+.windsurf/
+.github/agents/
+.github/instructions/
+.github/copilot-instructions.md

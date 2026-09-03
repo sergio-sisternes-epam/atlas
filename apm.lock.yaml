@@ -1,0 +1,136 @@
+lockfile_version: '1'
+generated_at: '2026-09-03T14:08:31.551578+00:00'
+apm_version: 0.29.0
+dependencies:
+- repo_url: sergio-sisternes-epam/okf
+  name: okf
+  host: github.com
+  resolved_commit: 9088a99a613d9ccc53ec2a15341714139291633f
+  resolved_ref: 9088a99a613d9ccc53ec2a15341714139291633f
+  version: 0.2.1
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/okf
+  - .agents/skills/okf/.gitignore
+  - .agents/skills/okf/LICENSE
+  - .agents/skills/okf/NOTICE
+  - .agents/skills/okf/README.md
+  - .agents/skills/okf/SKILL.md
+  - .agents/skills/okf/apm.yml
+  - .agents/skills/okf/references/README.md
+  - .agents/skills/okf/references/modules/okf-authority.md
+  - .agents/skills/okf/references/modules/okf-export.md
+  - .agents/skills/okf/references/modules/okf-import.md
+  deployed_file_hashes:
+    .agents/skills/okf/.gitignore: sha256:1f8d25bc62672df25e92a9e77b9619c58297a2c62d06310403d3bd48c4770c19
+    .agents/skills/okf/LICENSE: sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+    .agents/skills/okf/NOTICE: sha256:256003fde184bd5be66918edbf9ba3abcb92300df7c19473195772cb2e822c86
+    .agents/skills/okf/README.md: sha256:a3d85c65da98198482905b50c5f497d4f51aceedb2a22d1ea63da938a4c7ae75
+    .agents/skills/okf/SKILL.md: sha256:c8b7ce2c0d640ca9dfc60ef8c9b2730920c5236f89b968c7d0c67661abe4f787
+    .agents/skills/okf/apm.yml: sha256:55cc13c3923a7e8f45e00be2b508f136e4d6887f2667958c349422efdd6051f7
+    .agents/skills/okf/references/README.md: sha256:8fbd006b9c02c96c6513bc8ba0dff4c02b983d3c7c644c1458994b3f31e15162
+    .agents/skills/okf/references/modules/okf-authority.md: sha256:8580ad41475361a7bd70a504240e7dd28837560332ac6df2ccb11a032cbddb3d
+    .agents/skills/okf/references/modules/okf-export.md: sha256:8fd59fedb96c7969aa522c3a93fef18fe9e931eccb0f18b2e6273184fce86919
+    .agents/skills/okf/references/modules/okf-import.md: sha256:29ceeed39b62914db2920a5970a06b5a93ca6c387873101cc1c28d205de004ce
+  content_hash: sha256:dd88f1e3e532bb5d06238e0a359f1c1b3cd71aa17337ef1cc393e1e28dc067ee
+  declared_license: Apache-2.0
+deployments:
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: null
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/.gitignore
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:1f8d25bc62672df25e92a9e77b9619c58297a2c62d06310403d3bd48c4770c19
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/LICENSE
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/NOTICE
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:256003fde184bd5be66918edbf9ba3abcb92300df7c19473195772cb2e822c86
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/README.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:a3d85c65da98198482905b50c5f497d4f51aceedb2a22d1ea63da938a4c7ae75
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:c8b7ce2c0d640ca9dfc60ef8c9b2730920c5236f89b968c7d0c67661abe4f787
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:55cc13c3923a7e8f45e00be2b508f136e4d6887f2667958c349422efdd6051f7
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/references/README.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:8fbd006b9c02c96c6513bc8ba0dff4c02b983d3c7c644c1458994b3f31e15162
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/references/modules/okf-authority.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:8580ad41475361a7bd70a504240e7dd28837560332ac6df2ccb11a032cbddb3d
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/references/modules/okf-export.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:8fd59fedb96c7969aa522c3a93fef18fe9e931eccb0f18b2e6273184fce86919
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/references/modules/okf-import.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:29ceeed39b62914db2920a5970a06b5a93ca6c387873101cc1c28d205de004ce

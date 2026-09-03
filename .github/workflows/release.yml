@@ -1,0 +1,44 @@
+name: Release Atlas
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  release:
+    name: Create source release
+    needs: validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Verify tag is releasable
+        run: |
+          version="$(awk '$1 == "version:" { print $2; exit }' apm.yml)"
+          if [ -z "$version" ] || [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error title=Version mismatch::Tag $GITHUB_REF_NAME does not match apm.yml version $version."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error title=Invalid release tag::Release tags must reference a commit reachable from main."
+            exit 1
+          fi
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          --verify-tag
+          --generate-notes
+          --title "$GITHUB_REF_NAME"
