@@ -1,4 +1,4 @@
-[submodule "references/atlas"]
-	path = references/atlas
+[submodule ".atlas/github.com/sergio-sisternes-epam/atlas-atlas"]
+	path = .atlas/github.com/sergio-sisternes-epam/atlas-atlas
 	url = https://github.com/sergio-sisternes-epam/atlas-atlas.git
 	branch = main

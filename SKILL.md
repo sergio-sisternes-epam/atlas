@@ -1,7 +1,7 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.5
+description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (mount, init, migrate, query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+version: 0.8.12
 status: active
 work_id: 2026-09-03-atlas-schema-governance
 plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md
@@ -14,11 +14,28 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-**Default store:** the canonical process-memory Atlas is the separate repo `sergio-sisternes-epam/atlas-atlas`. In this package checkout, `references/atlas/` is a git submodule of that store. Author memory pages in atlas-atlas (or the live Grok working copy), not as ordinary files of the atlas package.
+**Default store:** `github.com/sergio-sisternes-epam/atlas-atlas`. Load path **`mount`** (`references/paths/mount.md`) before query or persist. That module is not a store. The store mounts at `<git-root>/.atlas/github.com/sergio-sisternes-epam/atlas-atlas`. Do not write into the skill package.
 
 ## Activation card (required)
 
-Before formal query or any store mutation, emit:
+Before formal query or any store mutation, emit path **mount** first. This skill passes its own store on the card:
+
+```text
+skill: atlas
+skill_path: /home/workdir/.grok/skills/atlas
+mode: run | discussion
+subject: atlas | <project>
+path: mount
+path_module: references/paths/mount.md
+intent: <one line>
+atlas_id: github.com/sergio-sisternes-epam/atlas-atlas
+ref: main
+root: <set after resolve>
+```
+
+Then **`read_file` `references/paths/mount.md`** and follow it with those card fields. Missing `atlas_id` or unloaded module ⇒ incomplete Enter.
+
+After `root` is set, emit the operational card and load that module:
 
 ```text
 skill: atlas
@@ -28,15 +45,51 @@ subject: atlas | <project>
 path: query | remember | work | landscape | schema
 path_module: references/paths/<path>.md
 intent: <one line>
-root: <atlas root path>
+root: <atlas store root>
 ```
 
-Then **`read_file` the `path_module`** and follow it. Do not run from this router alone.
+Do not run from this router alone.
+
+To **create** a new Atlas, emit path **init** instead of mount. `remote` is required (existing git remote). Never create the host repository:
+
+```text
+skill: atlas
+skill_path: /home/workdir/.grok/skills/atlas
+mode: run
+subject: atlas | <project>
+path: init
+path_module: references/paths/init.md
+intent: <one line>
+remote: <existing git remote URL>
+ref: main
+root: <set after resolve>
+```
+
+If `remote` is missing, ask and stop. Then **`read_file` `references/paths/init.md`**.
+
+To **migrate** a skill off `<skill>/references/atlas`, emit path **migrate**. `atlas_id` is that skill’s store (`host/org/repo`):
+
+```text
+skill: atlas
+skill_path: /home/workdir/.grok/skills/atlas
+mode: run
+subject: <skill>
+path: migrate
+path_module: references/paths/migrate.md
+intent: <one line>
+atlas_id: <host/org/repo>
+ref: main
+```
+
+Then **`read_file` `references/paths/migrate.md`**. Missing `atlas_id` ⇒ incomplete Enter. One own store per Run.
 
 ## Path registry (load before execute)
 
 | path_id | When | Module |
 |---------|------|--------|
+| **mount** | Mount-if-missing and resolve `--root` | `references/paths/mount.md` |
+| **init** | New Atlas from an existing git remote; never creates the repo | `references/paths/init.md` |
+| **migrate** | Move a skill off `references/atlas` onto `.atlas/<id>/` | `references/paths/migrate.md` |
 | **query** | Find / answer from an Atlas | `references/paths/query.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
@@ -49,7 +102,7 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 
 1. **Formal lookup = path `query` + `atlas search`** — B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages.
 2. **`staging/` never answers** — compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** — `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links — not markdown headings. `index_md_present` and `index_md_listing` are warnings (`exit 1`), never critical. Listing checks concept `.md` pages and child folders with an index; media files are ignored. New page-contract misses are warnings until promoted.
+3. **Writes end on compile green** — `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links — not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored.
 4. **`relates_to` / `kind` are authoritative** — body `## Related` is optional mirror.
 5. **Work cluster** — pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** — append only for structural store changes (not every experience).
@@ -57,7 +110,8 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 8. **Interim:** new process memory and knowledge ops for this substrate → **Atlas paths**, not okf-wiki (until migration work completes).
 9. **Wrong-frame correction** — if the user explicitly kills a comparison or thesis, load catalog skill **discuss** path `terminate` (recipe `references/recipes/terminate-wrong-path.md`). Do not keep writing the dead frame.
 10. **Thoughtful current-theory remember** — writing `lesson`, live `decision`, or `recipe` requires this skill’s remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
-11. **SCHEMA mutations = path `schema` + CLI** — load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
+11. **Write-home is the active git repo** — load path `mount` first. Mount-if-missing with no `--target`. Query and persist use `--root` on that mount. No git repository: refuse to persist. Never mount or write at `<skill>/references/atlas`.
+12. **SCHEMA mutations = path `schema` + CLI** — load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
 
 ## CLI surface
 

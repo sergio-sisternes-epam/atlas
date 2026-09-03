@@ -156,6 +156,45 @@ def submodule_add(
     return code, _redact(err, token)
 
 
+def is_gitlink(parent: Path, dest: Path) -> bool:
+    try:
+        rel = os.path.relpath(dest, parent).replace("\\", "/")
+    except ValueError:
+        return False
+    code, out, _ = run_git(["ls-files", "-s", "--", rel], cwd=parent)
+    return code == 0 and out.startswith("160000")
+
+
+def submodule_register(
+    parent: Path,
+    dest: Path,
+    url: str,
+    ref: str | None,
+) -> tuple[int, str]:
+    """Register an existing checkout as a submodule of parent."""
+    rel = os.path.relpath(dest, parent).replace("\\", "/")
+    name = rel
+    for key, val in (
+        (f"submodule.{name}.path", rel),
+        (f"submodule.{name}.url", url),
+    ):
+        code, _, err = run_git(["config", "--file", ".gitmodules", key, val], cwd=parent)
+        if code != 0:
+            return code, err
+    if ref:
+        code, _, err = run_git(
+            ["config", "--file", ".gitmodules", f"submodule.{name}.branch", ref],
+            cwd=parent,
+        )
+        if code != 0:
+            return code, err
+    code, _, err = run_git(["add", "--", ".gitmodules", rel], cwd=parent)
+    if code != 0:
+        return code, err
+    code, _, err = run_git(["submodule", "absorbgitdirs", "--", rel], cwd=parent)
+    return code, err
+
+
 def submodule_init(
     parent: Path,
     dest: Path,
