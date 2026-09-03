@@ -14,10 +14,12 @@ repository.
 
 ## Validate a change
 
-Run the source test first:
+Run every repository-owned Python test and verify that all release-version
+surfaces agree:
 
 ```bash
-python3 scripts/test_schema_governance.py
+python3 scripts/run_tests.py
+python3 scripts/release_readiness.py
 ```
 
 Then verify the pinned dependency and APM integrity:
@@ -48,13 +50,38 @@ and OKF repositories. The workflow exposes it only through APM's
 
 ## Release handoff
 
-1. Update `version` in `apm.yml` and merge the validated change to `main`.
-2. Create the matching immutable tag, `vX.Y.Z`, where `X.Y.Z` equals the
-   `version` in `apm.yml`.
-3. The release workflow verifies that the tag is reachable from `main`, reruns
-   CI, checks manifest/tag alignment, and creates the GitHub release.
-4. Give the EPAM Marketplace maintainer the source repository, immutable tag or
+Atlas follows semantic versioning. While the package remains below `1.0.0`, use
+a patch increment for compatible fixes and documentation, and a minor increment
+for new capability or a compatibility-breaking package or CLI contract.
+
+1. Update the release version in `apm.yml`, `SKILL.md`,
+   `scripts/atlas_cli/__init__.py`, the reusable workflow default, and both
+   workflow examples under `references/ci/`.
+2. Run the validation commands above. `scripts/release_readiness.py` blocks
+   when any version surface disagrees.
+3. Merge through the normal review process.
+4. Run **Atlas CI** manually against the exact `main` commit intended for the
+   release. Its final **Release readiness decision** job must report the
+   candidate SHA and `pre_tag_decision=ready to tag`.
+5. Create and push the matching immutable tag, `vX.Y.Z`, against that exact
+   commit. Never tag a different commit merely because it has the same version.
+6. The release workflow reruns every repository test, frozen APM installation,
+   source audit, and disposable-consumer audit. It then checks version/tag
+   alignment and `main` ancestry before creating the GitHub release.
+7. Give the EPAM Marketplace maintainer the source repository, immutable tag or
    compatible version range, description, and tags.
+
+### Failed-tag recovery
+
+Pushed release tags are immutable: do not move, overwrite, or delete them. If
+validation fails for a pushed tag before a GitHub release is created, correct
+the problem on `main`, increment the package version, repeat the pre-tag gate,
+and publish a new tag. Leave the failed tag without a release and record the
+failure in the associated issue or pull request.
+
+If validation passed and only GitHub Release creation failed because of a
+provider outage or permission problem, rerun the failed workflow for the same
+tag after restoring the provider. Do not rebuild from a different commit.
 
 The source package workflow does not edit the marketplace catalog. Atlas is
 private, so the marketplace validation identity and intended consumers must
@@ -63,3 +90,8 @@ also receive read access before registration can pass.
 Atlas is distributed directly from its immutable Git tag. `apm pack` exports
 the dependency bundle for this root-skill project, not the Atlas skill itself,
 so release automation must not publish that output as an Atlas package.
+
+Generated release notes are the current baseline. A changelog, signed tags, and
+provenance attestations are optional hardening unless repository or
+organisational policy makes them mandatory. Archive checksums and marketplace
+artifacts are not applicable while Atlas publishes no release assets.
