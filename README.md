@@ -26,10 +26,11 @@ dependency because `discuss` already depends on Atlas.
 
 ## Install
 
-After the source owner publishes the immutable `v0.8.12` tag:
+After the source owner publishes an immutable tag matching the `version` in
+`apm.yml`:
 
 ```text
-apm install sergio-sisternes-epam/atlas#v0.8.12
+apm install sergio-sisternes-epam/atlas#vX.Y.Z
 ```
 
 APM deploys the skill to the consumer's selected target. The package does not

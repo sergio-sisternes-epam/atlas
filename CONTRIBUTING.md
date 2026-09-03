@@ -48,7 +48,8 @@ and OKF repositories. The workflow exposes it only through APM's
 ## Release handoff
 
 1. Update `version` in `apm.yml` and merge the validated change to `main`.
-2. Create the matching immutable tag, such as `v0.8.12`.
+2. Create the matching immutable tag, `vX.Y.Z`, where `X.Y.Z` equals the
+   `version` in `apm.yml`.
 3. The release workflow verifies that the tag is reachable from `main`, reruns
    CI, checks manifest/tag alignment, and creates the GitHub release.
 4. Give the EPAM Marketplace maintainer the source repository, immutable tag or
