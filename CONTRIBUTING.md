@@ -35,8 +35,8 @@ after installing Atlas into each disposable consumer target.
 
 Pull requests from branches in this repository run the Python tests, the APM
 baseline integrity checks, and full install-replay drift audits in disposable
-consumers. CI restores the frozen dependency deployment before the source audit
-because generated dependency files are not committed. The source audit uses
+consumers. The source audit receives `APM_READ_TOKEN` but does not run
+`apm install`, so the checked-out deployment remains unchanged. It uses
 `--no-drift` because this repository combines a root skill bundle with local
 `.apm` review skills; the disposable consumers provide the full drift evidence
 for both supported target sets. Pull requests from forks cannot receive

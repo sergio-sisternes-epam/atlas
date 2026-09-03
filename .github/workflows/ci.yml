@@ -51,10 +51,17 @@ jobs:
             exit 1
           fi
       - name: Restore frozen dependencies
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm install --frozen --target agent-skills
+      - name: Audit committed APM state
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
+        run: apm audit --ci --no-policy --no-fail-fast --no-drift
       - name: Audit restored source integrity
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm audit --ci --no-policy --no-fail-fast --no-drift
