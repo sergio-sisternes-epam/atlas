@@ -66,6 +66,7 @@ class RendererSpecTest(unittest.TestCase):
         self.assertIn("summary", panelist["required"])
         self.assertGreaterEqual(panelist["properties"]["summary"]["minLength"], 1)
         self.assertEqual(panelist["properties"]["coverage"]["minItems"], 1)
+        self.assertEqual(panelist["properties"]["coverage"]["items"]["maxLength"], 240)
         self.assertIn(
             "evidence",
             panelist["$defs"]["finding"]["required"],
