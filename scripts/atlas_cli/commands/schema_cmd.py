@@ -178,11 +178,25 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
     if not dest.is_file():
         _print(as_json, {"ok": False, "error": f"no overlay {cid}", "root": str(r)})
         return 2
-    rec = load_receipt(r, cid) or {}
+    rec, rec_err = load_receipt(r, cid)
+    notes: list[str] = []
+    if rec_err and receipt_path(r, cid).is_file():
+        _print(
+            as_json,
+            {
+                "ok": False,
+                "error": f"receipt unreadable; refusing uninstall so files are not silently left: {rec_err}",
+                "root": str(r),
+                "id": cid,
+            },
+        )
+        return 2
+    if rec is None:
+        notes.append("warning: no receipt — overlay file will be removed; other CLI writes cannot be cleaned up")
+        rec = {}
     written = [str(x) for x in (rec.get("written") or [])]
     ov, _ = load_overlay(r, cid)
     gone_types = added_types(ov) if ov else list(rec.get("added_types") or [])
-    notes: list[str] = []
     if gone_types:
         from ..core.frontmatter import read_page
         from ..core.paths import iter_concept_md

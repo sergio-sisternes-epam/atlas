@@ -78,9 +78,8 @@ def load_overlay(root: Path, cid: str) -> tuple[dict[str, Any] | None, str | Non
     return _read_json(overlay_path(root, cid))
 
 
-def load_receipt(root: Path, cid: str) -> dict[str, Any] | None:
-    data, err = _read_json(receipt_path(root, cid))
-    return None if err else data
+def load_receipt(root: Path, cid: str) -> tuple[dict[str, Any] | None, str | None]:
+    return _read_json(receipt_path(root, cid))
 
 
 def required_fingerprint(overlay: dict[str, Any]) -> dict[str, list[str]]:
@@ -277,10 +276,16 @@ def receipt_issues(root: Path) -> list[dict]:
     """Critical if a receipt lists a write outside schema.d and claimed prefixes."""
     issues: list[dict] = []
     for cid in list_overlays(root):
-        rec = load_receipt(root, cid)
+        rec, rec_err = load_receipt(root, cid)
         relp = f"{SCHEMA_D}/{cid}.receipt.json"
         if rec is None:
-            issues.append(_issue("overlay_receipt", relp, "missing receipt for installed overlay"))
+            issues.append(
+                _issue(
+                    "overlay_receipt",
+                    relp,
+                    rec_err or "missing receipt for installed overlay",
+                )
+            )
             continue
         written = rec.get("written") or []
         if not isinstance(written, list):
@@ -318,7 +323,7 @@ def orphan_type_warnings(root: Path, pages_types: set[str], effective: dict[str,
     known = set((((effective.get("templates") or {}).get("by_type")) or {}).keys())
     rec_types: set[str] = set()
     for cid in list_overlays(root):
-        rec = load_receipt(root, cid)
+        rec, _ = load_receipt(root, cid)
         if rec and isinstance(rec.get("added_types"), list):
             rec_types.update(str(x) for x in rec["added_types"])
         ov, _ = load_overlay(root, cid)
