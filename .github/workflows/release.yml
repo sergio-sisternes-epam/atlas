@@ -23,19 +23,23 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - name: Verify tag is releasable
+      - name: Verify release candidate
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
           tag_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
-          version="$(awk '$1 == "version:" { print $2; exit }' apm.yml)"
-          if [ -z "$version" ] || [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error title=Version mismatch::Tag $GITHUB_REF_NAME does not match apm.yml version $version."
-            exit 1
-          fi
+          python3 scripts/release_readiness.py \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$tag_commit"
           if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
             echo "::error title=Invalid release tag::Release tags must reference a commit reachable from main."
             exit 1
           fi
+          {
+            echo "tag=$GITHUB_REF_NAME"
+            echo "candidate_revision=$tag_commit"
+            echo "main_ancestry=pass"
+            echo "release_validation_decision=ready to publish"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -25,6 +25,9 @@ never write to the PR.
   merge-decision labels or implement the reviewed change.
 - **Lazy load:** load only selected lens files. Do not send one panelist another
   lens body.
+- **Honest topology:** prefer isolated children. When they are unavailable,
+  disclose the sequential fallback and its reduced context isolation; never
+  describe fallback receipts as independent child reviews.
 - A review lens is not an Atlas compile `--path`/`--type` focus lens.
 
 ## Procedure
@@ -34,14 +37,26 @@ never write to the PR.
    intent. Record selected lens ids and a reason for every skipped lens. This
    is not a model call. Select the minimum useful roster: normally one or two,
    never more than four.
-3. Load `assets/panelist-receipt.schema.json`. For each selected lens, start one
-   isolated, low-effort child. Use the cheapest checklist-capable reviewer for
-   `atlas-contract`. Use a full reviewer capable of cross-file reasoning for
-   `python-cli`, `skill-agent-contract`, and `security-gitops`; these lenses
-   reason across behavior or trust boundaries. Never use a planner/researcher
-   class. Give the child this compact brief, its lens file, the schema, and PR
-   context. Permit read-only access to the current versions of changed files
-   when omitted diff context must be resolved:
+3. Load `assets/panelist-receipt.schema.json` and probe whether isolated child
+   reviewers are available.
+
+   When available, start one isolated, low-effort child for each selected lens.
+   Use the cheapest checklist-capable reviewer for `atlas-contract`. Use a full
+   reviewer capable of cross-file reasoning for `python-cli`,
+   `skill-agent-contract`, and `security-gitops`; these lenses reason across
+   behavior or trust boundaries. Never use a planner/researcher class.
+
+   When isolated children are unavailable, set the execution mode to
+   `sequential fallback` and run one bounded lens pass at a time in roster
+   order. Before each pass, re-read the compact brief, load only that lens file,
+   and re-anchor on the original PR context. Do not consult findings from prior
+   slots while analysing the current lens. Emit and validate its receipt before
+   loading the next lens. Add `Sequential fallback: no child context isolation`
+   to that receipt's limitations.
+
+   In either mode, use this compact brief, the assigned lens file, the schema,
+   and PR context. Permit read-only access to the current versions of changed
+   files when omitted diff context must be resolved:
 
    ```text
    ROLE: <lens-id> reviewer. RESPOND JSON ONLY.
@@ -55,8 +70,6 @@ never write to the PR.
    RETURN: status, non-empty summary, coverage[1..3], findings[], limitations[].
    ```
 
-   If isolated children are unavailable, stop and explain that a true panel
-   cannot run. Do not simulate several lenses in one context.
 4. Validate each receipt before fan-in: parse JSON; apply the panelist schema;
    require the assigned `lens_id`; require useful, concrete summary and
    coverage; fact-check each finding's evidence against the current file or
@@ -73,9 +86,11 @@ never write to the PR.
    deterministic checks relevant to the review (for example existing CI status
    or commands already run by the orchestrator). Record command/check name,
    outcome, and scope; do not run unrelated broad suites just to fill this list.
-   Then load `assets/synthesizer-receipt.schema.json`. Start one
-   reviewer-class, low-effort synthesizer with validated receipts plus that
-   bounded validation evidence, never lens bodies:
+   Then load `assets/synthesizer-receipt.schema.json`. When isolated children
+   are available, start one reviewer-class, low-effort synthesizer. Otherwise,
+   re-anchor the orchestrator on the synthesizer brief and synthesize locally.
+   In both modes, provide validated receipts plus that bounded validation
+   evidence, never lens bodies:
 
    ```text
    ROLE: dissent-weighted panel synthesizer. RESPOND JSON ONLY.
@@ -94,6 +109,9 @@ never write to the PR.
    top items; never invent a technical finding.
 6. Load `assets/recommendation-template.md`. Render normal human-readable
    Markdown. Omit optional sections rather than leaving empty placeholders.
+   For `sequential fallback`, state immediately below the heading that isolated
+   children were unavailable and the lenses ran sequentially with reduced
+   context isolation.
 7. Using the deterministic GitHub publication tools, first publish one inline
    comment for each finding with a verified new-side diff location. Prefix it
    with **Blocker**, **Recommended**, or **Nit**, then include rationale and

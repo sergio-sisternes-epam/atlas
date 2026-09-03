@@ -6,7 +6,8 @@ expect:
   review_focused_entrypoint: true
   panel_load_mandatory: true
   panel_execution_mandatory: true
-  unavailable_panel_fails_closed: true
+  missing_panel_fails_closed: true
+  unavailable_children_use_sequential_fallback: true
   panel_logic_not_duplicated: true
   both_skills_deployed: true
 smokes:
@@ -19,9 +20,12 @@ smokes:
   - id: mandatory-execution
     source: operator direction 2026-09-03
     expect: code-review executes the loaded panel procedure end-to-end
-  - id: fail-closed
+  - id: missing-panel-fails-closed
     source: nested skill execution uncertainty
-    expect: a missing panel or unavailable isolated reviewers stops the review without a generic fallback
+    expect: a missing panel skill stops the review without a generic fallback
+  - id: sequential-runtime-fallback
+    source: Copilot review runtime without child reviewers
+    expect: unavailable isolated reviewers use bounded sequential lens receipts with reduced isolation disclosed
   - id: single-review-owner
     source: panel-review redesign handoff
     expect: panel-review alone owns roster, receipts, synthesis, inline findings, and summary publication

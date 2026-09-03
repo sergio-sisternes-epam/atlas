@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
   workflow_call:
 
 permissions:
@@ -23,13 +24,21 @@ jobs:
           cache-dependency-path: scripts/requirements.txt
       - name: Install Python dependencies
         run: python3 -m pip install -r scripts/requirements.txt
-      - name: Run schema governance tests
-        run: python3 scripts/test_schema_governance.py
+      - name: Run repository test suite
+        run: python3 scripts/run_tests.py
+      - name: Check release version surfaces
+        run: python3 scripts/release_readiness.py --commit "$GITHUB_SHA"
 
   package:
     name: APM package integrity
     needs: test
-    if: github.event_name != 'pull_request'
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name != 'pull_request' &&
+       github.event_name != 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -46,10 +55,17 @@ jobs:
             exit 1
           fi
       - name: Restore frozen dependencies
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm install --frozen --target agent-skills
-      - name: Audit source integrity
+      - name: Audit committed APM state
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
+        run: apm audit --ci --no-policy --no-fail-fast --no-drift
+      - name: Audit restored source integrity
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm audit --ci --no-policy --no-fail-fast --no-drift
@@ -57,7 +73,13 @@ jobs:
   consumer:
     name: Consumer install (${{ matrix.name }})
     needs: package
-    if: github.event_name != 'pull_request'
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name != 'pull_request' &&
+       github.event_name != 'workflow_dispatch')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,3 +106,44 @@ jobs:
           apm install "$GITHUB_WORKSPACE" --target "$TARGETS"
           test -f .agents/skills/atlas/SKILL.md
           apm audit --ci --no-policy --no-fail-fast
+
+  readiness:
+    name: Release readiness decision
+    needs:
+      - test
+      - package
+      - consumer
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record candidate decision
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          CONSUMER_RESULT: ${{ needs.consumer.result }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          CANDIDATE_REVISION: ${{ github.sha }}
+        run: |
+          {
+           echo "candidate_revision=$CANDIDATE_REVISION"
+           echo "repository_tests=$TEST_RESULT"
+           echo "package_integrity=$PACKAGE_RESULT"
+           echo "consumer_install=$CONSUMER_RESULT"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$TEST_RESULT" != success ] ||
+            [ "$PACKAGE_RESULT" != success ] ||
+            [ "$CONSUMER_RESULT" != success ]; then
+           echo "release_readiness_decision=blocked" | tee -a "$GITHUB_STEP_SUMMARY"
+           exit 1
+          fi
+          if [ "$REF_TYPE" = tag ]; then
+           echo "release_validation_decision=ready to publish" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+           if [ "$REF_NAME" != main ]; then
+             echo "release_readiness_decision=blocked: candidate is not main" |
+               tee -a "$GITHUB_STEP_SUMMARY"
+             exit 1
+           fi
+           echo "pre_tag_decision=ready to tag" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

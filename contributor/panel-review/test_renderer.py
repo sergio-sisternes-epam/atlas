@@ -195,10 +195,19 @@ class RendererSpecTest(unittest.TestCase):
             "Never report errors in a",
             skill_body,
         )
+        self.assertRegex(
+            skill_body,
+            r"full\s+reviewer capable of cross-file reasoning",
+        )
+        self.assertRegex(
+            skill_body,
+            r"execution mode to\s+`sequential fallback`",
+        )
         self.assertIn(
-            "full reviewer capable of cross-file reasoning",
+            "Sequential fallback: no child context isolation",
             skill_body,
         )
+        self.assertIn("synthesize locally", skill_body)
 
     def test_lenses_bound_page_and_nested_skill_rules(self):
         atlas_lens = (
@@ -209,13 +218,15 @@ class RendererSpecTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("YAML scenario/eval fixtures are not OKF pages", atlas_lens)
         self.assertIn("Nested skills use their own local references/assets", skill_lens)
+        self.assertIn("fails closed only when", skill_lens)
+        self.assertIn("Runtime topology fallback remains owned", skill_lens)
         self.assertIn("Do not request a", skill_lens)
         self.assertIn("`version` field", skill_lens)
         self.assertIn("Contributor panel evals stay outside", skill_lens)
 
     def test_contributor_eval_inventory_and_split(self):
         evals = json.loads((HERE / "evals.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(evals["content_evals"]), 3)
+        self.assertEqual(len(evals["content_evals"]), 4)
         triggers = evals["trigger_evals"]
         self.assertEqual(len(triggers), 16)
         self.assertEqual(sum(item["should_trigger"] for item in triggers), 8)

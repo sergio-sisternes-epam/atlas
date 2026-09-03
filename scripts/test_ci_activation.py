@@ -9,6 +9,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from release_readiness import manifest_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COPY = ROOT / "references/ci/github-actions.compile.yml"
@@ -17,6 +19,8 @@ REUSABLE = ROOT / ".github/workflows/atlas-compile.yml"
 PATH_CI = ROOT / "references/paths/ci.md"
 SCENARIO = ROOT / "references/scenarios/ci-activation-adversarial-v1.yaml"
 CI_REQUIREMENTS = ROOT / "scripts/requirements-ci.txt"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 
 class CiActivationContractTests(unittest.TestCase):
@@ -28,6 +32,9 @@ class CiActivationContractTests(unittest.TestCase):
         cls.path_ci = PATH_CI.read_text(encoding="utf-8")
         cls.scenario = SCENARIO.read_text(encoding="utf-8")
         cls.ci_requirements = CI_REQUIREMENTS.read_text(encoding="utf-8")
+        cls.ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+        cls.release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        cls.version = manifest_version()
 
     def test_path_and_router_are_distinct_from_compile_path(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -40,15 +47,15 @@ class CiActivationContractTests(unittest.TestCase):
     def test_version_is_consistent(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         manifest = (ROOT / "apm.yml").read_text(encoding="utf-8")
-        self.assertIn("version: 0.8.13", skill)
-        self.assertIn("version: 0.8.13", manifest)
+        self.assertIn(f"version: {self.version}", skill)
+        self.assertIn(f"version: {self.version}", manifest)
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/atlas.py"), "--version"],
             check=True,
             capture_output=True,
             text=True,
         )
-        self.assertEqual("atlas, version 0.8.13", result.stdout.strip())
+        self.assertEqual(f"atlas, version {self.version}", result.stdout.strip())
 
     def test_gate_is_unfocused(self) -> None:
         compile_gate = re.compile(
@@ -153,7 +160,45 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertNotIn("  push:", self.reusable)
         self.assertIn("  pull_request:", self.caller)
         self.assertIn("  push:", self.caller)
-        self.assertIn("@v0.8.13", self.caller)
+        self.assertIn(f"@v{self.version}", self.caller)
+
+    def test_ci_exercises_repository_release_gates(self) -> None:
+        self.assertIn("workflow_dispatch:", self.ci_workflow)
+        self.assertIn("python3 scripts/run_tests.py", self.ci_workflow)
+        self.assertIn("python3 scripts/release_readiness.py", self.ci_workflow)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            self.ci_workflow,
+        )
+        self.assertIn("name: Audit committed APM state", self.ci_workflow)
+        self.assertIn(
+            "apm audit --ci --no-policy --no-fail-fast --no-drift",
+            self.ci_workflow,
+        )
+        self.assertEqual(
+            2,
+            self.ci_workflow.count(
+                "github.event.pull_request.head.repo.full_name == github.repository"
+            ),
+        )
+        self.assertEqual(
+            2,
+            self.ci_workflow.count(
+                "github.event_name == 'workflow_dispatch' &&\n"
+                "       github.ref == 'refs/heads/main'"
+            ),
+        )
+        self.assertIn(
+            "apm audit --ci --no-policy --no-fail-fast\n",
+            self.ci_workflow,
+        )
+        self.assertIn("name: Release readiness decision", self.ci_workflow)
+        self.assertIn('if [ "$REF_NAME" != main ]', self.ci_workflow)
+
+    def test_release_verifies_metadata_before_publishing(self) -> None:
+        self.assertIn("python3 scripts/release_readiness.py", self.release_workflow)
+        self.assertIn('--tag "$GITHUB_REF_NAME"', self.release_workflow)
+        self.assertIn("release_validation_decision=ready to publish", self.release_workflow)
 
     def test_adversarial_contract_names_all_approved_smokes(self) -> None:
         for smoke in (
