@@ -27,6 +27,17 @@ def git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+def json_payload(result: subprocess.CompletedProcess[str]) -> tuple[dict, str]:
+    try:
+        return json.loads(result.stdout), ""
+    except json.JSONDecodeError as error:
+        detail = (
+            f"invalid JSON ({error}); stdout={result.stdout!r}; "
+            f"stderr={result.stderr!r}"
+        )
+        return {}, detail
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="atlas-mount-safety-"))
     failures: list[str] = []
@@ -54,13 +65,13 @@ def main() -> int:
             ],
             parent,
         )
-        payload = json.loads(result.stdout)
+        payload, parse_error = json_payload(result)
         check(
             "external-target-rejected",
             result.returncode == 2
             and "inside the active git repository" in payload.get("error", "")
             and not outside.exists(),
-            f"exit={result.returncode} payload={payload}",
+            parse_error or f"exit={result.returncode} payload={payload}",
         )
 
         existing = parent / "existing"
@@ -79,13 +90,13 @@ def main() -> int:
             ],
             parent,
         )
-        payload = json.loads(result.stdout)
+        payload, parse_error = json_payload(result)
         check(
             "dirty-existing-checkout-rejected-before-registration",
             result.returncode == 2
             and "dirty worktree" in payload.get("error", "")
             and not (parent / ".gitmodules").exists(),
-            f"exit={result.returncode} payload={payload}",
+            parse_error or f"exit={result.returncode} payload={payload}",
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

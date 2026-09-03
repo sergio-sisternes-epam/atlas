@@ -87,7 +87,7 @@ def mount_cmd(
     start: str | None,
     as_json: bool,
 ) -> None:
-    """Materialise a git-backed Atlas as a submodule under .atlas/<id>/ and write atlas-mesh.json."""
+    """Mount a git-backed Atlas in-repo; default: .atlas/<id>/."""
     raise SystemExit(cmd_mount.run(source, ref, target, ssh, start, as_json))
 
 
