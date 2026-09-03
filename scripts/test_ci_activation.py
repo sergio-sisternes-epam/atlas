@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -38,6 +40,13 @@ class CiActivationContractTests(unittest.TestCase):
         manifest = (ROOT / "apm.yml").read_text(encoding="utf-8")
         self.assertIn("version: 0.8.13", skill)
         self.assertIn("version: 0.8.13", manifest)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/atlas.py"), "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual("atlas, version 0.8.13", result.stdout.strip())
 
     def test_gate_is_unfocused(self) -> None:
         compile_gate = re.compile(
