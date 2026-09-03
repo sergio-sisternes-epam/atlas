@@ -13,6 +13,7 @@ from ..core.gitops import (
     inside_git,
     is_dirty,
     is_gitlink,
+    run_git,
     submodule_add,
     submodule_init,
     submodule_register,
@@ -70,7 +71,6 @@ def run(
 
     existing = dest / ".git"
     gitmodules_listed = _in_gitmodules(parent_git, dest)
-    in_parent = inside_git(parent_git, dest)
     registered = is_gitlink(parent_git, dest)
 
     if dest.exists() and existing.exists():
@@ -100,7 +100,7 @@ def run(
         code, err = submodule_init(parent_git, dest, token=token, host=host)
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
-    elif in_parent:
+    else:
         code, err = submodule_add(parent_git, url, dest, ref, token=token)
         if code != 0:
             return _fail(err or "submodule add failed", as_json)
@@ -126,7 +126,17 @@ def _in_gitmodules(parent: Path, dest: Path) -> bool:
         rel = str(dest.relative_to(parent)).replace("\\", "/")
     except ValueError:
         return False
-    return rel in gm.read_text(encoding="utf-8")
+    code, out, _ = run_git(
+        ["config", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
+        cwd=parent,
+    )
+    if code != 0:
+        return False
+    for line in out.splitlines():
+        parts = line.split(maxsplit=1)
+        if len(parts) == 2 and parts[1] == rel:
+            return True
+    return False
 
 
 def _finish(

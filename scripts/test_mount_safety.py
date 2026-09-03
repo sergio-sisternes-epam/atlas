@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from atlas_cli.commands.mount import _in_gitmodules
+
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 
@@ -97,6 +99,21 @@ def main() -> int:
             and "dirty worktree" in payload.get("error", "")
             and not (parent / ".gitmodules").exists(),
             parse_error or f"exit={result.returncode} payload={payload}",
+        )
+
+        (parent / ".gitmodules").write_text(
+            '[submodule "store-extra"]\n'
+            "\tpath = .atlas/github.com/example/store-extra\n"
+            "\turl = https://github.com/example/store-extra.git\n",
+            encoding="utf-8",
+        )
+        wanted = parent / ".atlas/github.com/example/store"
+        listed = parent / ".atlas/github.com/example/store-extra"
+        check(
+            "gitmodules-path-match-is-exact",
+            not _in_gitmodules(parent, wanted)
+            and _in_gitmodules(parent, listed),
+            "a submodule path must not match a longer path by substring",
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

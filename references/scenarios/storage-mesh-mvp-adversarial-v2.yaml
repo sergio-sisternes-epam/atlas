@@ -33,6 +33,9 @@ smokes:
   - id: dirty-existing-checkout-before-register
     source: safe existing-checkout registration
     expect: a dirty existing checkout exits non-zero without creating or staging .gitmodules
+  - id: exact-gitmodules-path
+    source: safe submodule initialization
+    expect: a mount path does not match a longer .gitmodules path by substring
   - id: unmounted-atlas-uri-is-non-blocking
     source: external dependencies may be transient
     expect: compile reports atlas_uri_unmounted and exits 0 when no actionable warning or critical issue exists
