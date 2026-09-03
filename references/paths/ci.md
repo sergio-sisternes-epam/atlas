@@ -132,7 +132,7 @@ Mark every item pass, fail, or not applicable.
 - [ ] E1. Compile JSON is printed in the log.
 - [ ] E2. Compile JSON is uploaded even on failure.
 - [ ] E3. Inputs and refs are passed as environment data, not interpolated into shell.
-- [ ] E4. GitHub Actions are pinned to commit SHAs; floating major tags grade partial.
+- [ ] E4. Third-party GitHub Actions are pinned to commit SHAs; floating major tags grade partial. The Atlas reusable workflow and CLI follow M5 and may use a release tag or commit SHA.
 
 ### F. Anti-patterns
 
@@ -165,7 +165,7 @@ Both implementations:
 - translate compile exit `1` to job success only after valid JSON exists;
 - fail on exit `2` or abnormal execution;
 - upload the JSON with `if: always()`;
-- use SHA-pinned GitHub Actions.
+- use SHA-pinned third-party GitHub Actions.
 
 For a private Atlas skill repository, configure `ATLAS_CLI_TOKEN` with
 read-only contents access. A public source can use `github.token`.

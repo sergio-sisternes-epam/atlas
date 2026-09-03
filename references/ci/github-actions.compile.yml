@@ -36,6 +36,15 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.ATLAS_CLI_TOKEN || github.token }}
         run: |
           case "$ATLAS_REF" in
+            refs/tags/*)
+              ATLAS_REF="${ATLAS_REF#refs/tags/}"
+              ;;
+            refs/*)
+              echo "ATLAS_REF must be a tag or 40-character commit SHA" >&2
+              exit 2
+              ;;
+          esac
+          case "$ATLAS_REF" in
             main|master|"")
               echo "ATLAS_REF must be a tag or 40-character commit SHA" >&2
               exit 2

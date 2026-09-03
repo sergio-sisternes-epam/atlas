@@ -104,6 +104,13 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertNotRegex(self.copy, floating_env_ref)
         self.assertNotRegex(self.reusable, floating_input_default)
 
+    def test_cli_ref_normalizes_tags_and_rejects_other_qualified_refs(self) -> None:
+        for workflow in (self.copy, self.reusable):
+            self.assertIn(
+                'ATLAS_REF="${ATLAS_REF#refs/tags/}"', workflow
+            )
+            self.assertIn("refs/*)", workflow)
+
     def test_third_party_actions_are_sha_pinned(self) -> None:
         external_use = re.compile(r"^\s*uses:\s+(?!\./)(\S+)", re.MULTILINE)
         sha_pinned = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
