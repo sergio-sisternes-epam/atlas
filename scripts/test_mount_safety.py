@@ -115,6 +115,33 @@ def main() -> int:
             and _in_gitmodules(parent, listed),
             "a submodule path must not match a longer path by substring",
         )
+
+        caller = tmp / "caller"
+        caller.mkdir()
+        relative_existing = parent / "relative-existing"
+        relative_existing.mkdir()
+        git(["init", "-q"], relative_existing)
+        (relative_existing / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
+        result = run(
+            [
+                "mount",
+                "github.com/example/store",
+                "--target",
+                "relative-existing",
+                "--cwd",
+                str(parent),
+                "--json",
+            ],
+            caller,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "relative-target-resolves-from-selected-repository",
+            result.returncode == 2
+            and "dirty worktree" in payload.get("error", "")
+            and str(relative_existing) in payload.get("error", ""),
+            parse_error or f"exit={result.returncode} payload={payload}",
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (mount, init, migrate, query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.8
+version: 0.8.9
 status: active
 work_id: 2026-09-03-atlas-schema-governance
 plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md

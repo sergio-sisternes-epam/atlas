@@ -49,7 +49,7 @@ def run(
         return _fail("no git repository (refuse to mount; persist requires an active repo)", as_json)
 
     project = parent_git
-    dest = Path(target).resolve() if target else default_mount(project, parsed.atlas_id)
+    dest = (project / target).resolve() if target else default_mount(project, parsed.atlas_id)
     if not inside_git(project, dest):
         return _fail(
             "target must be inside the active git repository; omit --target to use .atlas/<id>",

@@ -36,6 +36,9 @@ smokes:
   - id: exact-gitmodules-path
     source: safe submodule initialization
     expect: a mount path does not match a longer .gitmodules path by substring
+  - id: relative-target-uses-selected-repo
+    source: explicit --cwd semantics
+    expect: a relative --target resolves from the --cwd repository root, not the process working directory
   - id: unmounted-atlas-uri-is-non-blocking
     source: external dependencies may be transient
     expect: compile reports atlas_uri_unmounted and exits 0 when no actionable warning or critical issue exists
