@@ -1,0 +1,35 @@
+id: ci-activation-adversarial-v1
+work_id: 2026-09-03-atlas-ci-activation-path
+adversarial: true
+packages: [atlas]
+expect:
+  path_ci_not_compile: true
+  unfocused_gate: true
+  exit_2_fails: true
+  exit_1_passes_with_evidence: true
+  mount_not_skill_package: true
+smokes:
+  - id: not-path-compile
+    source: settled B1 compile-project-skill and design pin 1
+    expect: path_id ci is distinct from path compile
+  - id: focused-compile-forbidden-in-ci
+    source: compile-project-skill L1 and design pin 4
+    expect: merge-gate templates do not pass --path or --type
+  - id: exit-2-fails-exit-1-does-not
+    source: think-challenge disposition and warning-vs-critical pin A
+    expect: adapters retain valid warning JSON for exit 1 and fail on exit 2
+  - id: missing-schema-not-success
+    source: design pin 13
+    expect: adapters require root/SCHEMA.json before compile
+  - id: floating-main-pin-forbidden
+    source: design pins 7 and 17
+    expect: CLI ref is not main or master and third-party Actions use commit SHAs
+  - id: dependency-closure-locked
+    source: M6 reproducibility requirement
+    expect: adapters install the CLI runtime from an exact lock shipped with the pinned CLI
+  - id: skill-pytest-not-mount-ci
+    source: design pin 2 and X3
+    expect: path ci adapters do not run Atlas skill unit tests
+  - id: cli-not-in-workspace-root
+    source: think-challenge workspace-pollution counter and design pin 14
+    expect: CLI is acquired under RUNNER_TEMP rather than GITHUB_WORKSPACE

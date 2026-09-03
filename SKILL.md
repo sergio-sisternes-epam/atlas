@@ -1,6 +1,7 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, schema overlay, atlas init, schema install. Load a path module (mount, init, migrate, query, remember, work, landscape, schema) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+version: 0.8.13
 activation_card: on
 ---
 
@@ -40,7 +41,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape | schema
+path: query | remember | work | landscape | schema | ci
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -97,6 +98,7 @@ directory. Missing `atlas_id` means Enter is incomplete. One own store per Run.
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
+| **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount | `references/paths/ci.md` |
 
 Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, ...)
 are tools used inside paths.
@@ -111,10 +113,11 @@ are tools used inside paths.
 6. **`log.md`** - append only for structural store changes (not every experience).
 7. **Format-only questions** -> skill **`okf`**.
 8. **Interim:** new process memory and knowledge ops for this substrate -> **Atlas paths**, not okf-wiki (until migration work completes).
-9. **Wrong-frame correction** - if the user explicitly kills a comparison or thesis, activate the optional companion skill **discuss** and use its `terminate` path (recipe `references/recipes/terminate-wrong-path.md`). If `discuss` is unavailable, stop and tell the user that this path requires the companion skill; do not keep writing the dead frame.
+9. **Wrong-frame correction** - if the user explicitly kills a comparison or thesis, resolve and load the installed companion skill **discuss**, then use its `terminate` path (recipe `references/recipes/terminate-wrong-path.md`). If `discuss` is unavailable, stop and tell the user that this path requires the companion skill; do not infer its procedure or keep writing the dead frame.
 10. **Thoughtful current-theory remember** - writing `lesson`, live `decision`, or `recipe` requires this skill's remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
 11. **Write-home is the active git repo** - load path `mount` first. Mount-if-missing with no `--target`. Query and persist use `--root` on that mount. No git repository: refuse to persist. Never mount or write at `<skill>/references/atlas`.
 12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
+13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
 
 ## CLI surface
 
@@ -170,5 +173,5 @@ Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when i
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, query, remember, work, landscape, schema). SCHEMA and
-templates live under `references/`.
+(mount, init, migrate, query, remember, work, landscape, schema, ci). SCHEMA
+and templates live under `references/`.

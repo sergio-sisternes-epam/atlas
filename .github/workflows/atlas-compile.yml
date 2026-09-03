@@ -1,0 +1,116 @@
+name: Reusable Atlas compile
+
+on:
+  workflow_call:
+    inputs:
+      root:
+        description: SCHEMA.json parent in the caller repository
+        required: false
+        type: string
+        default: .
+      atlas_ref:
+        description: Immutable Atlas CLI tag or commit SHA
+        required: false
+        type: string
+        default: v0.8.13
+      atlas_repo:
+        description: Repository containing scripts/atlas.py
+        required: false
+        type: string
+        default: sergio-sisternes-epam/atlas
+    secrets:
+      ATLAS_CLI_TOKEN:
+        description: Read-only token required when atlas_repo is private
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    env:
+      ATLAS_ROOT: ${{ inputs.root }}
+      ATLAS_REF: ${{ inputs.atlas_ref }}
+      ATLAS_REPO: ${{ inputs.atlas_repo }}
+    steps:
+      - name: Checkout mount
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Require Atlas root
+        env:
+          ROOT: ${{ env.ATLAS_ROOT }}
+        run: test -f "$ROOT/SCHEMA.json"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Acquire pinned Atlas CLI
+        env:
+          ATLAS_TOKEN: ${{ secrets.ATLAS_CLI_TOKEN || github.token }}
+        run: |
+          case "$ATLAS_REF" in
+            refs/tags/*)
+              ATLAS_REF="${ATLAS_REF#refs/tags/}"
+              ;;
+            refs/*)
+              echo "ATLAS_REF must be a tag or 40-character commit SHA" >&2
+              exit 2
+              ;;
+          esac
+          case "$ATLAS_REF" in
+            main|master|"")
+              echo "ATLAS_REF must be a tag or 40-character commit SHA" >&2
+              exit 2
+              ;;
+          esac
+          archive_ref="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["ATLAS_REF"], safe=""))')"
+          if ! [[ "$ATLAS_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            curl --fail --location --silent --show-error \
+              --header "Authorization: Bearer $ATLAS_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$ATLAS_REPO/git/ref/tags/$archive_ref" \
+              --output /dev/null
+          fi
+          cli_dir="$(mktemp -d "$RUNNER_TEMP/atlas-cli.XXXXXX")"
+          archive="$(mktemp "$RUNNER_TEMP/atlas-cli.XXXXXX")"
+          curl --fail --location --silent --show-error \
+            --header "Authorization: Bearer $ATLAS_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$ATLAS_REPO/tarball/$archive_ref" \
+            --output "$archive"
+          tar -xzf "$archive" --strip-components=1 --directory "$cli_dir"
+          echo "ATLAS_CLI=$cli_dir" >> "$GITHUB_ENV"
+
+      - name: Install Atlas CLI dependencies
+        run: python3 -m pip install -r "$ATLAS_CLI/scripts/requirements-ci.txt"
+
+      - name: Compile Atlas
+        id: atlas
+        env:
+          ROOT: ${{ env.ATLAS_ROOT }}
+        run: |
+          set +e
+          python3 "$ATLAS_CLI/scripts/atlas.py" compile \
+            --root "$ROOT" --json > atlas-compile.json
+          status=$?
+          set -e
+          python3 -m json.tool atlas-compile.json >/dev/null
+          cat atlas-compile.json
+          echo "compile_exit=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -ge 2 ]; then
+            exit "$status"
+          fi
+          if [ "$status" -eq 1 ]; then
+            echo "::warning::Atlas compile completed with warnings"
+          fi
+
+      - name: Upload compile evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: atlas-compile-json
+          path: atlas-compile.json
+          if-no-files-found: warn

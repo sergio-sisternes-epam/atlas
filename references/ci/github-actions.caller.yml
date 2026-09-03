@@ -1,0 +1,19 @@
+# Preferred mount workflow when the Atlas repository grants reusable-workflow access.
+name: Atlas compile
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    uses: sergio-sisternes-epam/atlas/.github/workflows/atlas-compile.yml@v0.8.13
+    with:
+      root: .
+      atlas_ref: v0.8.13
+    secrets:
+      ATLAS_CLI_TOKEN: ${{ secrets.ATLAS_CLI_TOKEN }}
