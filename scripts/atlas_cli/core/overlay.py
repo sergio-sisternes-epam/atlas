@@ -24,6 +24,9 @@ FORBIDDEN_CORE = frozenset(
     }
 )
 ALLOW_UNION = frozenset({"types"})
+RESERVED_CORE_TYPES = frozenset(
+    {"experience", "decision", "work", "document", "protostar", "lesson", "recipe"}
+)
 
 
 def overlay_dir(root: Path) -> Path:
@@ -203,7 +206,8 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
             merged["templates"] = tmpl
     src_tmpl = core.get("templates") if isinstance(core, dict) else None
     src_by = src_tmpl.get("by_type") if isinstance(src_tmpl, dict) else None
-    core_type_names = frozenset(src_by.keys()) if isinstance(src_by, dict) else frozenset()
+    live = frozenset(src_by.keys()) if isinstance(src_by, dict) else frozenset()
+    core_type_names = RESERVED_CORE_TYPES | live
 
     for cid in list_overlays(root):
         ov, err = load_overlay(root, cid)

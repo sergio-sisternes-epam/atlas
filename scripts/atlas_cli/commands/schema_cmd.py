@@ -205,7 +205,13 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
         rec = {}
     written = [str(x) for x in (rec.get("written") or [])]
     ov, _ = load_overlay(r, cid)
-    gone_types = added_types(ov) if ov else list(rec.get("added_types") or [])
+    gone_types = set(added_types(ov) if ov else [])
+    for x in rec.get("added_types") or []:
+        if isinstance(x, (dict, list)):
+            continue
+        s = str(x).strip()
+        if s:
+            gone_types.add(s)
     if gone_types:
         from ..core.frontmatter import read_page
         from ..core.paths import iter_concept_md
