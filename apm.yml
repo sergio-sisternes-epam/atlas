@@ -1,9 +1,8 @@
 name: atlas
-version: 0.8.2
+version: 0.8.5
 description: Durable OKF v0.2 knowledge substrate for skill process memory, decisions, work hubs, and project knowledge graphs. Successor to okf-wiki operational layer. Format authority remains okf.
 author: Sergio Sisternes
 license: Apache-2.0
-type: skill
 dependencies:
   apm:
     - sergio-sisternes-epam/okf

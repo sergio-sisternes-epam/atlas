@@ -30,6 +30,7 @@ DEFAULT_SCHEMA = {
             "schema_present",
             "no_answerable_in_staging",
             "index_md_present",
+            "index_md_listing",
         ],
         "simplicity_budget": {
             "max_required_frontmatter_keys_per_type": 8,
