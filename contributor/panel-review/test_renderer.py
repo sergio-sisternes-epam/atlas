@@ -16,7 +16,8 @@ SKILL = ROOT / ".agents" / "skills" / "panel-review"
 SPEC = importlib.util.spec_from_file_location(
     "panel_renderer", HERE / "render_summary.py"
 )
-assert SPEC and SPEC.loader
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError("Unable to load panel renderer specification")
 renderer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(renderer)
 
