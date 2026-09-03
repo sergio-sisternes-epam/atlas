@@ -26,10 +26,10 @@ dependency because `discuss` already depends on Atlas.
 
 ## Install
 
-After the source owner publishes the immutable `v0.8.5` tag:
+After the source owner publishes the immutable `v0.8.12` tag:
 
 ```text
-apm install sergio-sisternes-epam/atlas#v0.8.5
+apm install sergio-sisternes-epam/atlas#v0.8.12
 ```
 
 APM deploys the skill to the consumer's selected target. The package does not
@@ -62,16 +62,15 @@ Process memory is **not** authored in this package. The canonical store is:
 
 https://github.com/sergio-sisternes-epam/atlas-atlas
 
-Its Git root is the OKF root (`SCHEMA.json`). Mount it at `references/atlas`:
+Git root **is** the OKF root (`SCHEMA.json`). Load path `mount` (`references/paths/mount.md`), then:
 
 ```text
 python3 <atlas-skill>/scripts/atlas.py mount \
   github.com/sergio-sisternes-epam/atlas-atlas \
-  --ref main \
-  --target references/atlas
+  --ref main
 ```
 
-Mount path = compile/query root: `references/atlas`
+Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-atlas` (compile/query root)
 
 ## Contents
 
@@ -109,3 +108,5 @@ GitHub documents `code-review` as the review-focused directory name that makes
 Copilot code review load a skill. GitHub does not document skill-to-skill
 execution as guaranteed, so this adapter fails closed if it cannot load or
 execute `panel-review`.
+
+See `references/paths/mount.md` for the mount protocol.

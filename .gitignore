@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 .DS_Store
-.atlas/
 apm_modules/
 .claude/
 .codex/
