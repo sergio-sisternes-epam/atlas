@@ -1,18 +1,22 @@
-id: code-review-adversarial-v1
+id: panel-review-adversarial-v1
 work_id: 2026-09-03-pr-panel-review
 adversarial: true
 packages: [atlas]
 expect:
   one_skill_dir: true
-  no_apm_package: true
+  apm_source_package: true
+  copilot_deployment: true
   lazy_lenses: true
   skip_python_on_docs: true
   no_merge_gate_language: true
-  dispatch_name_code_review: true
+  dispatch_name_panel_review: true
 smokes:
-  - id: no-apm-yml
-    source: user constraint / pin 2
-    expect: no apm.yml under .github/skills/code-review
+  - id: apm-source-package
+    source: operator correction 2026-09-03
+    expect: source lives under .apm/skills/panel-review and root apm.yml declares a hybrid package
+  - id: copilot-deployment
+    source: operator correction 2026-09-03
+    expect: apm install --target copilot deploys panel-review for Copilot
   - id: one-skill-not-four
     source: A1 PANEL-WITHOUT-SYNTHESIS / pin 3
     expect: exactly one SKILL.md for the panel; no per-lens SKILL.md
@@ -25,9 +29,9 @@ smokes:
   - id: no-approve-reject
     source: advisory regime / deprecated panel-review
     expect: SKILL.md and synthesizer.md contain no APPROVE/REJECT merge-gate instruction
-  - id: dispatch-name-code-review
-    source: GitHub CCR changelog 2026-06-02 / pin 1
-    expect: directory and SKILL.md name are code-review, not pr-panel-review
+  - id: dispatch-name-panel-review
+    source: operator correction 2026-09-03
+    expect: source directory and SKILL.md name are panel-review
   - id: inline-plus-summary-table
     source: operator 2026-09-03 output format
     expect: SKILL.md requires inline comments plus one summary; synthesizer.md has Blocker/Recommended/Nits table and per-lens details

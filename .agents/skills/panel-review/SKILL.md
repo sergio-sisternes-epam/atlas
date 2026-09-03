@@ -1,18 +1,17 @@
 ---
-name: code-review
+name: panel-review
 description: >-
-  Use this skill when GitHub Copilot code review runs, when reviewing a
-  pull request, or when asked to review code in this atlas repository.
-  Apply even if the user only says "review this PR" or "@copilot review".
-  Run an advisory multi-lens panel for atlas (SCHEMA/compile contract,
-  Python CLI, skill/path discipline, security/gitops). Leave inline
-  comments on findings and one summary table (Blocker / Recommended /
-  Nits) with per-lens expandable detail. Do not implement, merge, or
-  approve.
+  Use this skill when asked to review a pull request, run a panel review,
+  or perform a multi-lens code review in this atlas repository. Apply even
+  if the user only says "review this PR" or "@copilot review". Run an
+  advisory panel for atlas (SCHEMA/compile contract, Python CLI, skill/path
+  discipline, security/gitops). Leave inline comments on findings and one
+  summary table (Blocker / Recommended / Nits) with per-lens expandable
+  detail. Do not implement, merge, or approve.
 license: Apache-2.0
 ---
 
-# Atlas code review (advisory panel)
+# Atlas panel review
 
 You are the **orchestrator**. Specialists do not write to the PR. You are the sole public writer.
 
@@ -31,7 +30,7 @@ You are the **orchestrator**. Specialists do not write to the PR. You are the so
 2. Load `references/roster.md`. Compute **always-on ∪ conditional − skip**. Cap: 4 specialists + synthesizer. Typical: 2–3.
 3. Run each selected lens in **isolation**:
    - If child threads / sub-agents exist: spawn one thread per lens; each thread loads only its lens file + the diff.
-   - If not (Copilot code review): evaluate lenses **sequentially** but do **not** show later lenses earlier findings. Each pass returns only the finding schema.
+   - If isolated child threads are unavailable: stop and report that a true panel cannot run. Do not simulate multiple lenses in one context.
 4. Completeness gate: every selected lens returned (or recorded skip/fail). Then load `references/finding-schema.md` and `references/synthesizer.md`.
 5. Spawn or run the synthesizer with **findings only** (not lens bodies).
 6. **Inline comments:** one per finding that cites a line in the new-side diff. Prefix with **Blocker** / **Recommended** / **Nit**. Skip inline if the line is not in the diff (summary only).

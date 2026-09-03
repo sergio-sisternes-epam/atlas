@@ -3,8 +3,11 @@ version: 0.8.5
 description: Durable OKF v0.2 knowledge substrate for skill process memory, decisions, work hubs, and project knowledge graphs. Successor to okf-wiki operational layer. Format authority remains okf.
 author: Sergio Sisternes
 license: Apache-2.0
+type: hybrid
+includes:
+  - .apm/skills/panel-review/
 dependencies:
   apm:
-    - sergio-sisternes-epam/okf
+    - sergio-sisternes-epam/okf#9088a99a613d9ccc53ec2a15341714139291633f
   python:
     - jsonschema>=4.0

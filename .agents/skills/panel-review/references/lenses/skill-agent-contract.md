@@ -13,9 +13,9 @@ Run only when the roster includes this lens.
 - Nested skill calls use the multi-harness substrate contract (load the full target skill body; do not invent from memory).
 - Frontmatter `description` names triggers and bounds (imperative, user intent).
 - No harness-specific hard bounds in the skill body (Copilot/Claude-only syntax in the portable contract).
-- `apm.yml` identity (name/version) stays consistent with `SKILL.md` when the **atlas package** changes — this Copilot skill is not an APM package.
+- Root `apm.yml` identity (name/version) stays consistent with root `SKILL.md`; the nested `panel-review` skill keeps its own frontmatter name.
 
 ## Do not
 
-- Ask for a new APM package under `.github/skills/code-review/`.
+- Ask for a nested APM package inside the generated Copilot skill.
 - Re-check SCHEMA page-contract (atlas-contract).
