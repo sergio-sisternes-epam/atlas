@@ -1,0 +1,34 @@
+id: schema-governance-adversarial-v1
+work_id: 2026-09-03-atlas-schema-governance
+adversarial: true
+packages: [atlas]
+expect:
+  init_writes_core_schema_only: true
+  overlay_merge_throws_on_core_clash: true
+  undeclared_root_write_from_schema_cli_fails: true
+  schema_new_allowed_on_project_atlas: true
+smokes:
+  - id: init-core-only
+    source: pin F / pin 12
+    expect: init SCHEMA has no schema.d and no skill keys such as kva
+  - id: new-writes-schema-d
+    source: pin 6 project overlays
+    expect: schema.d/<id>.json exists after schema new
+  - id: undeclared-root-fails
+    source: pin 4 claimed prefixes; plugin namespace pollution
+    expect: extra root file from schema new or install → compile critical
+  - id: core-key-clash-fails
+    source: pin 7 fastify onConflict throw
+    expect: overlay setting atlas_id → compile critical
+  - id: overlay-key-clash-fails
+    source: pin 7
+    expect: two overlays same extra key → compile critical
+  - id: uninstall-removes-overlay
+    source: pin 11
+    expect: schema.d/<id>.json gone; compile does not merge it
+  - id: knowledge-folder-ok
+    source: pin 8 OKF free layout
+    expect: free-layout folder not written by CLI stays compile-ok
+  - id: hand-edit-not-a-writer
+    source: pin 9 fail-closed
+    expect: path schema does not treat hand-edited SCHEMA as a legal writer

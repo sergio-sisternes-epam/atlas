@@ -14,7 +14,8 @@
     "reserved_names": [
       "index.md",
       "log.md",
-      "staging"
+      "staging",
+      "schema.d"
     ]
   },
   "compile": {
