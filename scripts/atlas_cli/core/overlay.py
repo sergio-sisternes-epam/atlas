@@ -83,9 +83,9 @@ def load_receipt(root: Path, cid: str) -> tuple[dict[str, Any] | None, str | Non
 
 
 def required_fingerprint(overlay: dict[str, Any]) -> dict[str, list[str]]:
-    by_type = ((overlay.get("templates") or {}).get("by_type")) or {}
+    by_type, err = overlay_by_type(overlay)
     out: dict[str, list[str]] = {}
-    if not isinstance(by_type, dict):
+    if err or not isinstance(by_type, dict):
         return out
     for tname, block in by_type.items():
         if not isinstance(block, dict):
@@ -197,11 +197,16 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
         if err or ov is None:
             critical.append(_issue("overlay_json", relp, err or "unreadable overlay"))
             continue
+        id_err = validate_id(cid)
+        if id_err:
+            critical.append(_issue("overlay_id", relp, id_err))
+            continue
         oid = str(ov.get("contribution_id") or cid).strip()
         if oid != cid:
             critical.append(
                 _issue("overlay_id", relp, f"contribution_id {oid!r} does not match filename {cid}")
             )
+            continue
         claimed = ov.get("claimed_folders") or []
         if claimed and not isinstance(claimed, list):
             critical.append(_issue("overlay_claimed", relp, "claimed_folders must be a list"))

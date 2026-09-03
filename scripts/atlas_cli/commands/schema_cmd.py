@@ -20,7 +20,7 @@ from ..core.overlay import (
     write_receipt,
 )
 from ..core.paths import rel, store_root
-from ..core.schema import load_schema
+from ..core.schema import load_schema, staging_dir_name
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -210,7 +210,7 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
         from ..core.paths import iter_concept_md
 
         schema, _ = load_schema(r)
-        staging = "staging"
+        staging = staging_dir_name(schema)
         orphans: list[str] = []
         for path in iter_concept_md(r, staging):
             meta, _ = read_page(path)
