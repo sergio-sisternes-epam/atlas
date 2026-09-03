@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+"""Contract tests for the Atlas CI activation path and GitHub adapters."""
+
 from __future__ import annotations
 
 import re
@@ -57,7 +60,7 @@ class CiActivationContractTests(unittest.TestCase):
     def test_cli_is_acquired_outside_workspace(self) -> None:
         for workflow in (self.copy, self.reusable):
             self.assertIn('$RUNNER_TEMP/atlas-cli.', workflow)
-            self.assertNotIn("$GITHUB_WORKSPACE/.atlas-cli", workflow)
+            self.assertNotIn("$GITHUB_WORKSPACE", workflow)
 
     def test_cli_default_ref_is_not_a_floating_branch(self) -> None:
         floating_env_ref = re.compile(

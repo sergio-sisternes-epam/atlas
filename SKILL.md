@@ -4,7 +4,7 @@ description: Use for durable OKF v0.2 knowledge stores — skill process memory,
 version: 0.8.13
 status: active
 work_id: 2026-09-03-atlas-ci-activation-path
-plan_path: autogenesis/plans/2026-09-03-atlas-ci-activation-path.md
+plan_path: references/atlas/autogenesis/plans/2026-09-03-atlas-ci-activation-path.md
 activation_card: on
 ---
 
