@@ -232,7 +232,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:be1360a132eee3ca0813e16f21a7a535f606bc9b42d611bcafea14cf92f49130
+  content_hash: sha256:0fb836e13e9b7aa8ed10dd86a7ad535464942246d97272ee702ab808d401fe7c
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/references/synthesizer.md
@@ -265,5 +265,5 @@ local_deployed_file_hashes:
   .agents/skills/panel-review/references/lenses/python-cli.md: sha256:03fcf3f9925f5692db2fa86243536027790fd96cd5c15b11207bbfd7570009b8
   .agents/skills/panel-review/references/lenses/security-gitops.md: sha256:a33c898b489fa2c64b3efa414e246fbe01786493ef64563da0d54609b68aa93d
   .agents/skills/panel-review/references/lenses/skill-agent-contract.md: sha256:0e3deb17d8a2c6887c2e5ccb77316f6ed107740dfd3190505a48ce4862c00fc5
-  .agents/skills/panel-review/references/roster.md: sha256:be1360a132eee3ca0813e16f21a7a535f606bc9b42d611bcafea14cf92f49130
+  .agents/skills/panel-review/references/roster.md: sha256:0fb836e13e9b7aa8ed10dd86a7ad535464942246d97272ee702ab808d401fe7c
   .agents/skills/panel-review/references/synthesizer.md: sha256:30adbbbdd1105ae321a6e4b044c417d9cd75f130618c5b1011a67685d534724d
