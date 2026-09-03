@@ -1,9 +1,9 @@
 ---
 name: atlas
 description: Use for durable OKF v0.2 knowledge stores — skill process memory, decisions, work hubs, and project knowledge graphs. Triggers on atlas, atlas search, atlas compile, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (query, remember, work) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.8.2
+version: 0.8.4
 status: active
-work_id: 2026-08-27-atlas-search-nav-signals
+work_id: 2026-09-03-human-memory-model
 plan_path: /home/workdir/artifacts/autogenesis-plans/2026-08-23-atlas-agentic-integration-v1.md
 activation_card: on
 ---
@@ -14,15 +14,7 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-Process memory is **not** authored in this repo. Canonical store: `github.com/sergio-sisternes-epam/atlas-atlas`. Git root **is** the OKF root (`SCHEMA.json`).
-
-```text
-atlas mount github.com/sergio-sisternes-epam/atlas-atlas --ref main --target references/atlas
-```
-
-**Canonical store (this skill):** `references/atlas`
-
-Always pass that path as card `root` / `--root`. The CLI does not default `--root` to the mount (omit = cwd).
+**Default store (this skill):** `references/atlas/`
 
 ## Activation card (required)
 
@@ -63,13 +55,14 @@ Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, …) 
 7. **Format-only questions** → skill **`okf`**.
 8. **Interim:** new process memory and knowledge ops for this substrate → **Atlas paths**, not okf-wiki (until migration work completes).
 9. **Wrong-frame correction** — if the user explicitly kills a comparison or thesis, load catalog skill **discuss** path `terminate` (recipe `references/recipes/terminate-wrong-path.md`). Do not keep writing the dead frame.
+10. **Thoughtful current-theory remember** — writing `lesson`, live `decision`, or `recipe` requires this skill’s remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision: `decisions/atlas-memory-layers.md`.
 
 ## CLI surface
 
 ```text
 python3 scripts/atlas.py init --root <atlas> [--force]
 python3 scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
-python3 scripts/atlas.py search "…" --root <atlas> [--engine grep|bm25] [--include-exits]
+python3 scripts/atlas.py search "…" --root <atlas> [--engine grep|bm25] [--include_exits]
          # query tokens: type: kva: status: work_id: path:
 python3 scripts/atlas.py id <pointer>
 python3 scripts/atlas.py auth [--host github.com] [--ssh]
