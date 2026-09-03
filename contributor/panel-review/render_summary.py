@@ -79,7 +79,15 @@ def validate_panelist(receipt: Any) -> None:
                 raise ValueError("finding line must be a positive integer")
         if "path" in finding:
             path = _text(finding["path"], "finding path", 300)
-            if path.startswith("/") or ".." in Path(path).parts:
+            has_drive_prefix = (
+                len(path) >= 2 and path[0].isalpha() and path[1] == ":"
+            )
+            if (
+                path.startswith("/")
+                or "\\" in path
+                or has_drive_prefix
+                or ".." in path.split("/")
+            ):
                 raise ValueError("finding path must be repo-relative")
         if "evidence" in finding:
             _text(finding["evidence"], "finding evidence", 500)
@@ -162,8 +170,12 @@ def _safe(value: str) -> str:
     return html.escape(value, quote=False)
 
 
+def _single_line(value: str) -> str:
+    return " ".join(_safe(value).splitlines())
+
+
 def _table(value: str) -> str:
-    return _safe(value).replace("|", "\\|").replace("\n", " ")
+    return _single_line(value).replace("|", "\\|")
 
 
 def render_summary(payload: dict[str, Any]) -> str:
@@ -220,7 +232,7 @@ def render_summary(payload: dict[str, Any]) -> str:
                 "",
                 "<details>",
                 f"<summary>{panelist['lens_id']} - "
-                f"{_safe(panelist['summary'])}</summary>",
+                f"{_single_line(panelist['summary'])}</summary>",
                 "",
                 "**Coverage**",
                 "",

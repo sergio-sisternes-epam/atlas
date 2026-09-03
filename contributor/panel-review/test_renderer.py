@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -17,7 +18,7 @@ SPEC = importlib.util.spec_from_file_location(
     "panel_renderer", HERE / "render_summary.py"
 )
 if SPEC is None or SPEC.loader is None:
-    raise RuntimeError("Unable to load panel renderer specification")
+    raise ImportError("Unable to load panel renderer specification")
 renderer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(renderer)
 
@@ -48,6 +49,15 @@ class RendererSpecTest(unittest.TestCase):
         self.assertIn("`scripts/atlas_cli/compile.py:88`", rendered)
         self.assertLessEqual(len(payload["synthesizer"]["top_items"]), 3)
         self.assertEqual(len(renderer.inline_findings(payload)), 1)
+
+    def test_multiline_summary_stays_inside_html_summary(self):
+        payload = load_fixture("clean.json")
+        payload["panelists"][0]["summary"] = "First line\nSecond line"
+        rendered = renderer.render_summary(payload)
+        self.assertIn(
+            "<summary>atlas-contract - First line Second line</summary>",
+            rendered,
+        )
 
     def test_malformed_receipt_is_rejected(self):
         payload = load_fixture("malformed-receipt.json")
@@ -81,6 +91,14 @@ class RendererSpecTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unique"):
                     renderer.validate_payload(payload)
 
+    def test_non_posix_finding_paths_are_rejected(self):
+        for path in (r"..\secret.py", r"C:\repo\file.py", r"src\file.py"):
+            with self.subTest(path=path):
+                payload = load_fixture("needs-rework.json")
+                payload["panelists"][0]["findings"][0]["path"] = path
+                with self.assertRaisesRegex(ValueError, "repo-relative"):
+                    renderer.validate_payload(payload)
+
     def test_runtime_schema_and_template_contract(self):
         self.assertEqual(
             (SOURCE_SKILL / "SKILL.md").read_text(),
@@ -101,6 +119,10 @@ class RendererSpecTest(unittest.TestCase):
             "evidence",
             panelist["$defs"]["finding"]["required"],
         )
+        path_pattern = panelist["$defs"]["finding"]["properties"]["path"]["pattern"]
+        self.assertIsNotNone(re.fullmatch(path_pattern, "src/module.py"))
+        for path in (r"..\secret.py", r"C:\repo\file.py", r"src\file.py"):
+            self.assertIsNone(re.fullmatch(path_pattern, path))
         self.assertEqual(synthesizer["properties"]["top_items"]["maxItems"], 3)
         self.assertIn("| Lens | Blocker | Recommended | Nits | Takeaway |", template)
         self.assertIn("Retry only a malformed slot once", (SKILL / "SKILL.md").read_text())

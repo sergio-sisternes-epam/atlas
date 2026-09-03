@@ -58,10 +58,11 @@ never write to the PR.
    If isolated children are unavailable, stop and explain that a true panel
    cannot run. Do not simulate several lenses in one context.
 4. Validate each receipt before fan-in: parse JSON; apply the panelist schema;
-   require the assigned `lens_id`;    require useful, concrete summary and coverage; fact-check each finding's
-   evidence against the current file or diff; reject findings based on omitted
-   diff context, outside the assigned lens, or about the review process rather
-   than the PR; and verify any `path` plus `line` is a new-side diff location.
+   require the assigned `lens_id`; require useful, concrete summary and
+   coverage; fact-check each finding's evidence against the current file or
+   diff; reject findings based on omitted diff context, outside the assigned
+   lens, or about the review process rather than the PR; and verify any `path`
+   plus `line` is a new-side diff location.
    Require `path` plus `line` when a changed line can carry the finding; omit
    them only for repository-level findings with no eligible changed line.
    Retry only a malformed slot once, providing its validation errors. If the
