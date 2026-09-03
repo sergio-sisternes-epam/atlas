@@ -67,6 +67,15 @@ class RendererSpecTest(unittest.TestCase):
         payload["panelists"][0]["coverage"][0] = "x" * 240
         renderer.validate_payload(payload)
 
+    def test_duplicate_panelist_evidence_is_rejected(self):
+        for field in ("coverage", "limitations"):
+            with self.subTest(field=field):
+                payload = load_fixture("clean.json")
+                item = payload["panelists"][0][field][0]
+                payload["panelists"][0][field] = [item, item]
+                with self.assertRaisesRegex(ValueError, "unique"):
+                    renderer.validate_payload(payload)
+
     def test_runtime_schema_and_template_contract(self):
         self.assertEqual(
             (SOURCE_SKILL / "SKILL.md").read_text(),

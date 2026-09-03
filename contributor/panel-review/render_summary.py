@@ -47,6 +47,8 @@ def validate_panelist(receipt: Any) -> None:
         raise ValueError("coverage must contain one to three checks")
     for item in coverage:
         _text(item, "coverage item", 240)
+    if len(coverage) != len(set(coverage)):
+        raise ValueError("coverage items must be unique")
     findings = receipt["findings"]
     if not isinstance(findings, list) or len(findings) > 10:
         raise ValueError("findings must be a list of at most ten items")
@@ -86,6 +88,8 @@ def validate_panelist(receipt: Any) -> None:
         raise ValueError("limitations must be a list of at most three items")
     for item in limitations:
         _text(item, "limitation", 200)
+    if len(limitations) != len(set(limitations)):
+        raise ValueError("limitations must be unique")
 
 
 def validate_synthesizer(receipt: Any, panelists: list[dict[str, Any]]) -> None:
