@@ -7,7 +7,7 @@ description: >-
   advisory panel for atlas (SCHEMA/compile contract, Python CLI, skill/path
   discipline, security/gitops). Leave inline comments on findings and one
   summary table (Blocker / Recommended / Nits) with per-lens expandable
-  detail. Do not implement, merge, or approve.
+  detail. Do not implement, merge, or set a formal review state.
 license: Apache-2.0
 ---
 

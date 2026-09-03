@@ -52,7 +52,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:ee52f0641fcfa37a197eca39ae26af56ceeb3f1b9ebb72e0734afd5d6c782ffd
+  content_hash: sha256:eadbf722acfb9bd6fd58ea0f891257cce1d38df06c3faae3aa3740730bf5e440
 - kind: project-relative
   target: agents
   value: .agents/skills/panel-review/references/finding-schema.md
@@ -226,7 +226,7 @@ local_deployed_files:
 - .agents/skills/panel-review/references/roster.md
 - .agents/skills/panel-review/references/synthesizer.md
 local_deployed_file_hashes:
-  .agents/skills/panel-review/SKILL.md: sha256:ee52f0641fcfa37a197eca39ae26af56ceeb3f1b9ebb72e0734afd5d6c782ffd
+  .agents/skills/panel-review/SKILL.md: sha256:eadbf722acfb9bd6fd58ea0f891257cce1d38df06c3faae3aa3740730bf5e440
   .agents/skills/panel-review/references/finding-schema.md: sha256:79227ae2d0c840409117dccdaca958530c01a931416101c7a0f07cd86ce75ac9
   .agents/skills/panel-review/references/lenses/atlas-contract.md: sha256:a67ee600703c9f8c0387231fe8064e2396fe86977b9984bc26ed84b91a107738
   .agents/skills/panel-review/references/lenses/python-cli.md: sha256:640257a171cd693c01ec778ef7303a47e464f3a866322f3ea790509ccdeef2e0
