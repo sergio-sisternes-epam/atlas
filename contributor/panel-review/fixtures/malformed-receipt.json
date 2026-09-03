@@ -1,0 +1,21 @@
+{
+  "panelists": [
+    {
+      "lens_id": "wrong-lens",
+      "status": "ran",
+      "summary": "",
+      "coverage": [],
+      "findings": [],
+      "limitations": []
+    }
+  ],
+  "synthesizer": {
+    "headline": "Invalid fixture",
+    "synthesis": "This fixture must be rejected before synthesis.",
+    "top_items": [],
+    "ship_recommendation": {
+      "stance": "needs discussion",
+      "rationale": "The panelist receipt is malformed."
+    }
+  }
+}

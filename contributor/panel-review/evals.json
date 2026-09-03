@@ -1,0 +1,110 @@
+{
+  "content_evals": [
+    {
+      "id": "clean-skill-apm-pr",
+      "prompt": "Review a clean Atlas skill and APM pull request.",
+      "with_skill": "Run atlas-contract and skill-agent-contract, return concrete coverage, and explain the clean recommendation.",
+      "without_skill": "A generic review may return an unsupported looks-good response."
+    },
+    {
+      "id": "python-path-boundary",
+      "prompt": "Review a Python CLI change that can escape an Atlas path boundary.",
+      "with_skill": "Run atlas-contract, python-cli, and security-gitops; publish the diff-backed Blocker inline and prioritize it in the summary.",
+      "without_skill": "A generic review may miss Atlas root-escape and focused-compile invariants."
+    },
+    {
+      "id": "documentation-only",
+      "prompt": "Review a documentation-only Atlas pull request.",
+      "with_skill": "Run only atlas-contract and provide a concise evidence-backed recommendation.",
+      "without_skill": "A generic review has no deterministic roster or cost evidence."
+    }
+  ],
+  "trigger_evals": [
+    {
+      "query": "Review this PR.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Run the panel on PR #7.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Give this Atlas pull request a multi-lens review.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Check this branch before I ask for review.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Look for contract and security issues in this PR.",
+      "should_trigger": true,
+      "split": "train"
+    },
+    {
+      "query": "Have the Atlas reviewers inspect these changes.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Review the current pull request and summarize the risk.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Panel-review this diff.",
+      "should_trigger": true,
+      "split": "validation"
+    },
+    {
+      "query": "Explain the Atlas schema.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Fix this Python test.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Summarize PR #7.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Draft a pull request description.",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "What is the panel-review skill?",
+      "should_trigger": false,
+      "split": "train"
+    },
+    {
+      "query": "Review this single paragraph for grammar.",
+      "should_trigger": false,
+      "split": "validation"
+    },
+    {
+      "query": "Implement the reviewer feedback.",
+      "should_trigger": false,
+      "split": "validation"
+    },
+    {
+      "query": "Merge the current pull request.",
+      "should_trigger": false,
+      "split": "validation"
+    }
+  ],
+  "validation_gate": {
+    "should_trigger_rate_minimum": 0.5,
+    "near_miss_trigger_rate_maximum_exclusive": 0.5,
+    "clean_fixture_is_ship_gate": true,
+    "malformed_receipt_retry_limit": 1
+  }
+}

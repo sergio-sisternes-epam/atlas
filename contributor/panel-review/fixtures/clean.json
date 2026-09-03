@@ -1,0 +1,35 @@
+{
+  "panelists": [
+    {
+      "lens_id": "atlas-contract",
+      "status": "ran",
+      "summary": "Atlas compile and knowledge-store contracts remain intact.",
+      "coverage": [
+        "Checked SCHEMA.json authority and required page relationships.",
+        "Verified staging remains excluded from answerable content."
+      ],
+      "findings": [],
+      "limitations": []
+    },
+    {
+      "lens_id": "skill-agent-contract",
+      "status": "ran",
+      "summary": "The skill keeps dispatch, disclosure, and source boundaries coherent.",
+      "coverage": [
+        "Checked the imperative dispatch description and advisory boundary.",
+        "Checked lazy lens loading and APM source versus deployment ownership."
+      ],
+      "findings": [],
+      "limitations": []
+    }
+  ],
+  "synthesizer": {
+    "headline": "The focused skill change is ready to ship.",
+    "synthesis": "Both selected lenses completed concrete contract checks and found no actionable issue.",
+    "top_items": [],
+    "ship_recommendation": {
+      "stance": "ship now",
+      "rationale": "The reviewed Atlas and skill contracts are preserved, with no unresolved limitation."
+    }
+  }
+}

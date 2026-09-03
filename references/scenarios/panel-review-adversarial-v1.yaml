@@ -8,6 +8,12 @@ expect:
   copilot_deployment: true
   lazy_lenses: true
   skip_python_on_docs: true
+  typical_lenses_max: 2
+  panelist_receipts_schema_first: true
+  clean_coverage_required: true
+  synthesizer_receipt_bounded: true
+  malformed_retry_limit: 1
+  contributor_evals_outside_skill: true
   no_merge_gate_language: true
   dispatch_name_panel_review: true
 smokes:
@@ -28,10 +34,22 @@ smokes:
     expect: roster.md skip python-cli when diff is markdown-only under docs/README/recipes
   - id: no-merge-gate-vocabulary
     source: advisory regime / deprecated panel-review
-    expect: SKILL.md and synthesizer.md use advisory language without merge-decision tokens or formal review-state instructions
+    expect: SKILL.md and recommendation-template.md use advisory language without formal review-state instructions
   - id: dispatch-name-panel-review
     source: operator correction 2026-09-03
     expect: source directory and SKILL.md name are panel-review
   - id: inline-plus-summary-table
     source: operator 2026-09-03 output format
-    expect: SKILL.md requires inline comments plus one summary; synthesizer.md has Blocker/Recommended/Nits table and per-lens details
+    expect: SKILL.md requires inline comments plus exactly one summary; recommendation-template.md has Blocker/Recommended/Nits counts, per-lens details, and useful clean coverage
+  - id: deterministic-cost-aware-roster
+    source: panel-review redesign handoff cost contract
+    expect: roster selection is path and semantic classification in the parent with no router call; typical selection is one or two and maximum selection is four
+  - id: schema-first-receipts
+    source: panel-review redesign handoff receipt contract
+    expect: panelist and synthesizer JSON schemas bound required non-empty text, coverage, findings, top items, and recommendation
+  - id: malformed-retry-once
+    source: S4 validation decorator
+    expect: only a malformed slot retries and it retries at most once; valid slots never rerun
+  - id: contributor-output-spec
+    source: composition audience boundary
+    expect: clean and needs-rework fixtures, trigger evals, renderer, and specification test live under contributor/panel-review outside .apm/skills/panel-review

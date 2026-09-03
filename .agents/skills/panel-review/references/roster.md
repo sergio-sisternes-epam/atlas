@@ -6,14 +6,22 @@ name: review-lens roster
 
 These are **review lenses**. Not atlas compile `--path`/`--type` focus lenses.
 
-| id | File | When | Skip |
-|----|------|------|------|
-| atlas-contract | `references/lenses/atlas-contract.md` | **always** | never |
-| python-cli | `references/lenses/python-cli.md` | any changed path under `scripts/`, `*.py`, `fixtures/`, `references/scenarios/` | docs-only / SKILL-only / recipes-templates-only diffs (no Python, no fixtures, no scenarios) |
-| skill-agent-contract | `references/lenses/skill-agent-contract.md` | `SKILL.md`, `references/paths/`, `references/recipes/`, `references/templates/`, `apm.yml` | pure Python internals with none of those files |
-| security-gitops | `references/lenses/security-gitops.md` | `auth*`, `gitops`, `mount`, credentials, `staging`, `--path` / path-escape | otherwise |
-| synthesizer | `references/synthesizer.md` | after specialists return | n/a |
+| id | File | Select when |
+|----|------|-------------|
+| atlas-contract | `references/lenses/atlas-contract.md` | Always. |
+| python-cli | `references/lenses/python-cli.md` | Python or CLI behavior changes: `scripts/`, `*.py`, `fixtures/`, or a scenario that exercises CLI/compile behavior. |
+| skill-agent-contract | `references/lenses/skill-agent-contract.md` | Skill, agent, APM, instruction, path procedure, recipe, or template changes. |
+| security-gitops | `references/lenses/security-gitops.md` | Behavioral changes to auth, credentials, git/mount, submodules, staging answerability, or filesystem boundaries. |
 
-Load **only** the files for lenses that run. Do not preload skipped lenses.
+Select from changed paths plus the concise PR intent. A mention of a security
+term in review documentation is not a behavioral change and does not select the
+security lens. A scenario selects `python-cli` only when it exercises CLI or
+compile behavior.
 
-Always-on count is 1 (`atlas-contract`). Worst case is 4 specialists + synthesizer.
+Load only selected lens files. Record why each other lens was skipped. Do not
+make a separate model call for routing.
+
+The always-on count is one. A docs-only PR normally runs only
+`atlas-contract`; a focused code or skill PR normally runs two lenses. Use all
+four only for a cross-cutting, high-risk change. The hard maximum is four
+panelists plus one synthesizer.

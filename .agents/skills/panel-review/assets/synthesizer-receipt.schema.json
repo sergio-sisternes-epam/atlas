@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "synthesizer-receipt.schema.json",
+  "title": "Atlas panel synthesizer receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "headline",
+    "synthesis",
+    "top_items",
+    "ship_recommendation"
+  ],
+  "properties": {
+    "headline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": ".*\\S.*"
+    },
+    "synthesis": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 700,
+      "pattern": ".*\\S.*"
+    },
+    "dissent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400,
+      "pattern": ".*\\S.*"
+    },
+    "top_items": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lens_id",
+          "severity",
+          "title",
+          "why"
+        ],
+        "properties": {
+          "lens_id": {
+            "enum": [
+              "atlas-contract",
+              "python-cli",
+              "skill-agent-contract",
+              "security-gitops"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "Blocker",
+              "Recommended",
+              "Nit"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": ".*\\S.*"
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "pattern": ".*\\S.*"
+          }
+        }
+      }
+    },
+    "ship_recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stance",
+        "rationale"
+      ],
+      "properties": {
+        "stance": {
+          "enum": [
+            "ship now",
+            "ship with follow-ups",
+            "needs discussion",
+            "needs rework"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": ".*\\S.*"
+        }
+      }
+    }
+  }
+}

@@ -19,3 +19,12 @@ Run only when the roster includes this lens.
 
 - Ask for a nested APM package inside the generated Copilot skill.
 - Re-check SCHEMA page-contract (atlas-contract).
+
+## Receipt
+
+Return JSON only against the supplied panelist schema. Set `lens_id` to
+`skill-agent-contract`. The non-empty summary states the lens takeaway. Provide
+one to three concrete coverage statements naming the dispatch, disclosure,
+path, or APM contracts checked, even when `findings` is empty. Use
+`status: failed` only when the rubric could not be reviewed, and explain the
+limitation.

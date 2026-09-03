@@ -19,3 +19,11 @@ Run only when the roster includes this lens.
 
 - Nitpick formatting that linters own.
 - Duplicate security-gitops (secrets, auth store) unless the bug is CLI exit-code / path-escape.
+
+## Receipt
+
+Return JSON only against the supplied panelist schema. Set `lens_id` to
+`python-cli`. The non-empty summary states the lens takeaway. Provide one to
+three concrete coverage statements such as the CLI paths, fail-closed behavior,
+or fixtures checked, even when `findings` is empty. Use `status: failed` only
+when the rubric could not be reviewed, and explain the limitation.

@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "panelist-receipt.schema.json",
+  "title": "Atlas panelist receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "lens_id",
+    "status",
+    "summary",
+    "coverage",
+    "findings",
+    "limitations"
+  ],
+  "properties": {
+    "lens_id": {
+      "enum": [
+        "atlas-contract",
+        "python-cli",
+        "skill-agent-contract",
+        "security-gitops"
+      ]
+    },
+    "status": {
+      "enum": [
+        "ran",
+        "failed"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": ".*\\S.*"
+    },
+    "coverage": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "pattern": ".*\\S.*"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "pattern": ".*\\S.*"
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "title",
+        "rationale",
+        "follow_up"
+      ],
+      "dependentRequired": {
+        "line": [
+          "path"
+        ]
+      },
+      "properties": {
+        "severity": {
+          "enum": [
+            "Blocker",
+            "Recommended",
+            "Nit"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": ".*\\S.*"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": ".*\\S.*"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+\\S.*$"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "follow_up": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": ".*\\S.*"
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": ".*\\S.*"
+        }
+      }
+    }
+  }
+}

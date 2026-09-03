@@ -18,3 +18,13 @@ Run only when the roster includes this lens. Higher stakes.
 
 - Generic web-OWASP theatre unrelated to this CLI.
 - Style nits.
+
+## Receipt
+
+Return JSON only against the supplied panelist schema. Set `lens_id` to
+`security-gitops`. The non-empty summary states the security takeaway. Provide
+one to three concrete coverage statements naming the trust boundary, credential
+flow, or fail-closed behavior checked, even when `findings` is empty. Use full
+sentences where compression could make a warning ambiguous. Use
+`status: failed` only when the rubric could not be reviewed, and explain the
+limitation.

@@ -1,0 +1,55 @@
+{
+  "panelists": [
+    {
+      "lens_id": "atlas-contract",
+      "status": "ran",
+      "summary": "The compile change weakens the staging exclusion contract.",
+      "coverage": [
+        "Traced staging discovery through the compile gate.",
+        "Checked focused compile behavior against SCHEMA.json."
+      ],
+      "findings": [
+        {
+          "severity": "Blocker",
+          "title": "Staging content can pass focused compile",
+          "rationale": "A focused path bypasses the non-empty staging hard failure.",
+          "path": "scripts/atlas_cli/compile.py",
+          "line": 88,
+          "follow_up": "Run the staging gate before applying focus filters.",
+          "evidence": "The new early return precedes the staging check."
+        }
+      ],
+      "limitations": []
+    },
+    {
+      "lens_id": "python-cli",
+      "status": "ran",
+      "summary": "CLI filtering works, but the gate ordering must be corrected.",
+      "coverage": [
+        "Checked focused path parsing and exit status.",
+        "Compared gate ordering with the adversarial fixtures."
+      ],
+      "findings": [],
+      "limitations": [
+        "No Windows path fixture was present."
+      ]
+    }
+  ],
+  "synthesizer": {
+    "headline": "The focused compile path needs rework before adoption.",
+    "synthesis": "One diff-backed Blocker allows staging content to bypass a required hard failure.",
+    "dissent": "The Python lens found filtering itself correct, but that does not outweigh the Atlas contract failure.",
+    "top_items": [
+      {
+        "lens_id": "atlas-contract",
+        "severity": "Blocker",
+        "title": "Staging content can pass focused compile",
+        "why": "It violates a repository-wide answerability boundary."
+      }
+    ],
+    "ship_recommendation": {
+      "stance": "needs rework",
+      "rationale": "Move the staging gate before focus filtering and rerun the adversarial compile scenarios."
+    }
+  }
+}
