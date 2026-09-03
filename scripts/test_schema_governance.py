@@ -242,6 +242,12 @@ def main() -> int:
         )
         r = run(["schema", "install", str(contrib), "--root", str(store), "--force", "--json"])
         check("install-force-ok", r.returncode == 0, f"exit={r.returncode} {r.stdout[:180]}")
+        r = run(["schema", "install", str(contrib), "--root", str(store), "--json"])
+        check(
+            "install-same-fingerprint-no-force",
+            r.returncode == 0,
+            f"exit={r.returncode} {r.stdout[:180]}",
+        )
 
         write(
             contrib / "templates" / "star.md",

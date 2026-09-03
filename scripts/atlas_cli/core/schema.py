@@ -104,6 +104,13 @@ def validate_schema_shape(schema: dict) -> list[str]:
             errs.append(f"SCHEMA missing required field: {key}")
     if "atlas_id" in schema and not str(schema.get("atlas_id") or "").strip():
         errs.append("SCHEMA atlas_id is empty")
+    tmpl = schema.get("templates")
+    if tmpl is not None and not isinstance(tmpl, dict):
+        errs.append("SCHEMA.templates must be an object")
+    elif isinstance(tmpl, dict):
+        by = tmpl.get("by_type")
+        if by is not None and not isinstance(by, dict):
+            errs.append("SCHEMA.templates.by_type must be an object")
     structure = schema.get("structure") or {}
     if not isinstance(structure, dict):
         errs.append("SCHEMA.structure must be an object")
@@ -114,7 +121,8 @@ def validate_schema_shape(schema: dict) -> list[str]:
     if budget:
         max_keys = budget.get("max_required_frontmatter_keys_per_type")
         max_secs = budget.get("max_required_sections_per_type")
-        templates = (schema.get("templates") or {}).get("by_type") or {}
+        tmpl_obj = schema.get("templates") if isinstance(schema.get("templates"), dict) else {}
+        templates = tmpl_obj.get("by_type") if isinstance(tmpl_obj.get("by_type"), dict) else {}
         if isinstance(templates, dict):
             for tname, tdef in templates.items():
                 if not isinstance(tdef, dict):

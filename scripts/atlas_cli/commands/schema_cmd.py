@@ -120,26 +120,29 @@ def run_install(
             _print(as_json, {"ok": False, "error": t_err, "root": str(r), "id": cid})
             return 2
     if dest.is_file() and not force:
-        existing, _ = load_overlay(r, cid)
-        if existing is not None:
-            old_fp = required_fingerprint(existing)
-            new_fp = required_fingerprint(ov)
-            if old_fp != new_fp:
-                _print(
-                    as_json,
-                    {
-                        "ok": False,
-                        "error": "overlay required keys changed; pass --force to replace",
-                        "root": str(r),
-                        "id": cid,
-                    },
-                )
-                return 2
-        _print(
-            as_json,
-            {"ok": False, "error": f"{SCHEMA_D}/{cid}.json already exists; pass --force", "root": str(r)},
-        )
-        return 2
+        existing, ex_err = load_overlay(r, cid)
+        if existing is None:
+            _print(
+                as_json,
+                {
+                    "ok": False,
+                    "error": f"existing overlay unreadable; pass --force to replace ({ex_err})",
+                    "root": str(r),
+                    "id": cid,
+                },
+            )
+            return 2
+        if required_fingerprint(existing) != required_fingerprint(ov):
+            _print(
+                as_json,
+                {
+                    "ok": False,
+                    "error": "overlay required keys changed; pass --force to replace",
+                    "root": str(r),
+                    "id": cid,
+                },
+            )
+            return 2
     write_json(dest, ov)
     written = [f"{SCHEMA_D}/{cid}.json"]
     # Copy templates for types this overlay adds (not core types).

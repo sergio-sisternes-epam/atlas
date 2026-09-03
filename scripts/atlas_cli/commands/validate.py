@@ -290,6 +290,8 @@ def run(
         schema = None
     else:
         assert schema is not None
+        for msg in validate_schema_shape(schema):
+            critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
         merged, ov_crit, ov_warn = merge_overlays(schema, r)
         critical.extend(ov_crit)
         warnings.extend(ov_warn)
