@@ -96,13 +96,13 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertNotRegex(self.reusable, floating_input_default)
 
     def test_third_party_actions_are_sha_pinned(self) -> None:
-        action_ref = re.compile(
-            r"uses:\s+actions/(?:checkout|setup-python|upload-artifact)"
-            r"@([0-9a-f]{40})"
-        )
+        external_use = re.compile(r"^\s*uses:\s+(?!\./)(\S+)", re.MULTILINE)
+        sha_pinned = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
         for workflow in (self.copy, self.reusable):
-            refs = action_ref.findall(workflow)
-            self.assertEqual(3, len(refs))
+            refs = external_use.findall(workflow)
+            self.assertTrue(refs)
+            for ref in refs:
+                self.assertRegex(ref, sha_pinned)
 
     def test_reusable_and_caller_have_separate_triggers(self) -> None:
         self.assertIn("workflow_call:", self.reusable)
