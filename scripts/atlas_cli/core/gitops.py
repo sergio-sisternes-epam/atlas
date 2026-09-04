@@ -91,23 +91,12 @@ def _auth_args(
     """Auth for clone / submodule add / submodule update.
 
     Never set http.extraHeader=Authorization — GitHub rejects that for
-    private HTTPS clone/submodule add (invalid credentials). Prefer the
-    gh credential helper when gh is on PATH (including machines that also
-    have GH_TOKEN). Token insteadOf is only the no-gh / CI fallback, and
-    rewrites the same host as the remote (not only github.com).
-    Drop GH_TOKEN/GITHUB_TOKEN so a stale env token cannot override gh.
+    private HTTPS clone/submodule add (invalid credentials). An explicitly
+    resolved token is authoritative and uses a process-local URL rewrite for
+    the remote host. Drop GH_TOKEN/GITHUB_TOKEN on that path so they cannot
+    affect credential handling. With no token, use the gh credential helper
+    when available and preserve its environment.
     """
-    drop = ("GH_TOKEN", "GITHUB_TOKEN")
-    if shutil.which("gh"):
-        return (
-            [
-                "-c",
-                "credential.helper=",
-                "-c",
-                "credential.helper=!gh auth git-credential",
-            ],
-            drop,
-        )
     if token:
         injected = f"https://x-access-token:{token}@{host}/"
         return (
@@ -117,7 +106,17 @@ def _auth_args(
                 "-c",
                 f"url.{injected}.insteadOf=https://{host}/",
             ],
-            drop,
+            ("GH_TOKEN", "GITHUB_TOKEN"),
+        )
+    if shutil.which("gh"):
+        return (
+            [
+                "-c",
+                "credential.helper=",
+                "-c",
+                "credential.helper=!gh auth git-credential",
+            ],
+            (),
         )
     return [], ()
 

@@ -64,7 +64,7 @@ def run(
     if auth.error:
         auth = AuthResult(backend="none", host=host, token=None, ssh=ssh, error=auth.error)
     url = remote_url(pointer, auth)
-    token = None if auth.ssh else auth.token
+    token = _explicit_git_token(auth)
 
     if dest.exists() and not dest.is_dir():
         return _fail(f"target is not a directory: {dest}", as_json)
@@ -130,6 +130,10 @@ def _infer_subpath(dest: Path) -> str:
     if (dest / "references" / "atlas" / "SCHEMA.json").is_file():
         return "references/atlas"
     return ""
+
+
+def _explicit_git_token(auth: AuthResult) -> str | None:
+    return auth.token if auth.backend == "token" and not auth.ssh else None
 
 
 def _in_gitmodules(parent: Path, dest: Path) -> bool:
