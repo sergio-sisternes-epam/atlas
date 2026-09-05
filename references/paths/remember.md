@@ -12,7 +12,16 @@ Capture an experience, decision, lesson, recipe, document, or other durable conc
 
 ## Enter
 
-Prefer activation card with `path: remember`, `path_module: references/paths/remember.md`, and `root: <atlas root>`.
+```text
+skill: atlas
+skill_path: <atlas skill root>
+mode: run
+subject: atlas | <project>
+path: remember
+path_module: references/paths/remember.md
+intent: <one line>
+root: <atlas store root>
+```
 
 ## Procedure
 

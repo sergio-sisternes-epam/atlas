@@ -14,10 +14,13 @@ User asks to refresh landscape, update competitors, find partners / symbionts, o
 
 ```text
 skill: atlas
+skill_path: <atlas skill root>
+mode: run
+subject: atlas | <project>
 path: landscape
 path_module: references/paths/landscape.md
-root: <atlas root>
 intent: refresh catalogue and/or symbiosis
+root: <atlas store root>
 ```
 
 Optional extra names are additive only.

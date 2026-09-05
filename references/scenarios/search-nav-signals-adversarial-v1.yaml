@@ -34,6 +34,7 @@ smokes:
     source: kva-signals-challenge
   - id: card-required-for-query
     source: B17
+    expect: query Enter card is emitted inside a fenced text block
   - id: glossary-rewrite-kept
     source: 0.7.7 query-harness-hubs
     expect: query.md still has rewrite at most once from glossary Search aliases
