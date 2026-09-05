@@ -91,6 +91,7 @@ Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-
 
 | Resource | Purpose |
 | --- | --- |
+| `CHANGELOG.md` | Unreleased user-visible changes |
 | `SKILL.md` | Runtime router, invariants, and CLI surface |
 | `references/paths/` | Query, remember, work, landscape, and schema procedures |
 | `references/templates/` | OKF content templates |

@@ -104,7 +104,8 @@ Atlas is distributed directly from its immutable Git tag. `apm pack` exports
 the dependency bundle for this root-skill project, not the Atlas skill itself,
 so release automation must not publish that output as an Atlas package.
 
-Generated release notes are the current baseline. A changelog, signed tags, and
-provenance attestations are optional hardening unless repository or
-organisational policy makes them mandatory. Archive checksums and marketplace
-artifacts are not applicable while Atlas publishes no release assets.
+Record user-visible changes under `Unreleased` in `CHANGELOG.md`. GitHub release
+notes remain generated from merged pull requests. Signed tags and provenance
+attestations are optional hardening unless repository or organisational policy
+makes them mandatory. Archive checksums and marketplace artifacts are not
+applicable while Atlas publishes no release assets.
