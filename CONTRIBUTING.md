@@ -12,6 +12,13 @@ The APM dependency is private. Configure an APM GitHub credential with
 read-only access to `sergio-sisternes-epam/okf`; do not store tokens in this
 repository.
 
+Atlas mount credentials are host-scoped. Generic public GitHub tokens apply
+only to `github.com` and `*.ghe.com`. For GHES automation, set `GH_HOST` to the
+exact server hostname and use `GH_ENTERPRISE_TOKEN` or
+`GITHUB_ENTERPRISE_TOKEN`; a stored `gh auth login --hostname <host>`
+credential is also supported. Never broaden a generic token to an arbitrary
+mount host.
+
 ## Validate a change
 
 Run every repository-owned Python test and verify that all release-version

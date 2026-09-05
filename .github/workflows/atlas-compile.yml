@@ -12,7 +12,7 @@ on:
         description: Immutable Atlas CLI tag or commit SHA
         required: false
         type: string
-        default: v0.8.14
+        default: v0.8.15
       atlas_repo:
         description: Repository containing scripts/atlas.py
         required: false

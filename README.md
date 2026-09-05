@@ -57,6 +57,20 @@ python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
 The skill emits an activation card and loads exactly one procedure from
 `references/paths/` before acting.
 
+### Mount credentials
+
+Atlas applies `ATLAS_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_APM_PAT`
+only to `github.com` and GitHub Enterprise Cloud (`*.ghe.com`). For GitHub
+Enterprise Server automation, set `GH_HOST` to the exact server hostname and
+use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; `ATLAS_PAT` and
+`GITHUB_APM_PAT` are also accepted when paired with that exact `GH_HOST`.
+Credentials stored by `gh auth login --hostname <host>` remain supported.
+
+For any unmatched host, Atlas attempts anonymous HTTPS with credential helpers
+disabled. It never forwards generic GitHub environment tokens to that host.
+Use `--ssh` or authenticate the exact host with `gh` when anonymous access is
+not sufficient.
+
 ## Process-memory store
 
 Process memory is **not** authored in this package. The canonical store is:

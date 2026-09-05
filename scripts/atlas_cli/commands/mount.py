@@ -111,11 +111,24 @@ def run(
     dest_empty = dest.is_dir() and not any(dest.iterdir())
     dest.parent.mkdir(parents=True, exist_ok=True)
     if gitmodules_listed and (not dest.exists() or dest_empty):
-        code, err = submodule_init(parent_git, dest, token=token, host=host)
+        code, err = submodule_init(
+            parent_git,
+            dest,
+            token=token,
+            host=host,
+            backend=auth.backend,
+        )
         if code != 0:
             return _fail(err or "submodule update failed", as_json)
     else:
-        code, err = submodule_add(parent_git, url, dest, ref, token=token)
+        code, err = submodule_add(
+            parent_git,
+            url,
+            dest,
+            ref,
+            token=token,
+            backend=auth.backend,
+        )
         if code != 0:
             return _fail(err or "submodule add failed", as_json)
     landed = current_branch(dest) or ref or ""
