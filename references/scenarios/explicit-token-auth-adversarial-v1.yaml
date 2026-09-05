@@ -1,0 +1,30 @@
+id: explicit-token-auth-adversarial-v1
+work_id: 2026-09-05-gh-12-atlas-explicit-token-auth
+adversarial: true
+packages: [atlas]
+expect:
+  explicit_token_authoritative: true
+  credentials_not_persisted: true
+  failures_redacted: true
+smokes:
+  - id: explicit-token-outranks-installed-gh
+    source: discuss exact-main run 33918540976 and design pin 2
+    expect: mocked gh on PATH does not select the gh helper when backend=token
+  - id: gh-token-is-not-explicit-token
+    source: backend-provenance challenge and design pin 1
+    expect: backend=gh selects the gh helper rather than the token URL rewrite
+  - id: explicit-token-drops-conflicting-gh-env
+    source: GitHub CLI environment precedence and design pin 5
+    expect: explicit-token child Git has no GH_TOKEN or GITHUB_TOKEN
+  - id: gh-fallback-preserves-env
+    source: GitHub CLI environment reference and design pin 5
+    expect: no explicit token means the gh helper receives its inherited environment
+  - id: all-shared-git-operations-use-token-path
+    source: shared gitops call graph and design acceptance 5
+    expect: clone, submodule add, and submodule update use the same explicit-token configuration
+  - id: token-error-is-redacted
+    source: least-exposure challenge and design pin 4
+    expect: a fake token echoed by Git stderr is returned only as three asterisks
+  - id: token-config-is-not-persisted
+    source: process-local credential boundary and design pin 4
+    expect: failing fake Git leaves no repository or global Git configuration containing the token
