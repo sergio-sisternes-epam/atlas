@@ -12,7 +12,16 @@ Start, update status, or close a unit of effort tracked by `work_id`.
 
 ## Enter
 
-Prefer activation card with `path: work`, `path_module: references/paths/work.md`, and `root: <atlas root>`.
+```text
+skill: atlas
+skill_path: <atlas skill root>
+mode: run
+subject: atlas | <project>
+path: work
+path_module: references/paths/work.md
+intent: <one line>
+root: <atlas store root>
+```
 
 ## Procedure
 

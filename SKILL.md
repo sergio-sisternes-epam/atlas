@@ -15,6 +15,10 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 ## Activation card (required)
 
+Render every activation card in the assistant response as a fenced Markdown
+code block with the `text` info string. The opening and closing fences are part
+of the required output contract; an unfenced field list is incomplete.
+
 Before formal query or any store mutation, emit path **mount** first. This skill passes its own store on the card:
 
 ```text

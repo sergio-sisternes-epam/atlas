@@ -18,7 +18,7 @@ smokes:
     expect: "New experience under a work_id includes relates_to work hub with kind implements"
   - id: activation-card-when-on
     source: "B17 / card pattern"
-    expect: "activation_card on; store-changing or formal query Run documents Enter card with path_module"
+    expect: "activation_card on; store-changing or formal query Run emits Enter card with path_module inside a fenced text block"
   - id: path-modules-present
     source: "Implement acceptance"
     expect: "references/paths/query.md, remember.md, work.md exist and are linked from SKILL path registry"
