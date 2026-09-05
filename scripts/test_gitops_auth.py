@@ -289,6 +289,28 @@ class GitAuthArgumentTests(unittest.TestCase):
                     run_git.call_args.kwargs["drop_keys"],
                 )
 
+    def test_remote_empty_check_uses_auth_and_surfaces_failure(self) -> None:
+        with patch.object(
+            gitops,
+            "run_git",
+            return_value=(128, "", f"fatal: rejected {TOKEN}"),
+        ) as run_git:
+            code, empty, error = gitops.remote_is_empty(
+                f"https://{HOST}/example/store.git",
+                token=TOKEN,
+            )
+
+        command = run_git.call_args.args[0]
+        self.assertEqual(128, code)
+        self.assertFalse(empty)
+        self.assertEqual("fatal: rejected ***", error)
+        self.assertIn(TOKEN_CONFIG, command)
+        self.assertIn("ls-remote", command)
+        self.assertEqual(
+            auth.TOKEN_ENV_KEYS,
+            run_git.call_args.kwargs["drop_keys"],
+        )
+
 
 class MountAuthDispatchTests(unittest.TestCase):
     def test_arbitrary_host_mount_dispatches_anonymous_git(self) -> None:
@@ -322,6 +344,66 @@ class MountAuthDispatchTests(unittest.TestCase):
         self.assertEqual(2, code)
         self.assertIsNone(add.call_args.kwargs["token"])
         self.assertEqual("none", add.call_args.kwargs["backend"])
+
+    def test_empty_checkout_is_not_bootstrapped_when_remote_check_fails(self) -> None:
+        attacker = "attacker.example"
+        with tempfile.TemporaryDirectory(prefix="atlas-mount-verify-") as raw_tmp:
+            project = Path(raw_tmp)
+            code, _, error = gitops.run_git(
+                ["init", "-q", "--initial-branch=main"],
+                cwd=project,
+            )
+            self.assertEqual(0, code, error)
+            target = project / ".atlas" / attacker / "org" / "repo"
+            target.mkdir(parents=True)
+            code, _, error = gitops.run_git(
+                ["init", "-q", "--initial-branch=main"],
+                cwd=target,
+            )
+            self.assertEqual(0, code, error)
+            code, _, error = gitops.run_git(
+                [
+                    "remote",
+                    "add",
+                    "origin",
+                    f"https://{attacker}/org/repo.git",
+                ],
+                cwd=target,
+            )
+            self.assertEqual(0, code, error)
+            no_auth = AuthResult(
+                backend="none",
+                host=attacker,
+                token=None,
+                ssh=False,
+                error=f"no credentials for {attacker}",
+            )
+            with (
+                patch.object(mount, "has_git", return_value=True),
+                patch.object(mount, "git_root", return_value=project),
+                patch.object(mount, "lookup", return_value=None),
+                patch.object(mount, "resolve_auth", return_value=no_auth),
+                patch.object(mount, "is_gitlink", return_value=False),
+                patch.object(
+                    mount,
+                    "remote_is_empty",
+                    return_value=(128, False, "authentication failed"),
+                ),
+                patch.object(mount, "bootstrap_empty_repository") as bootstrap,
+                patch.object(mount, "submodule_register") as register,
+            ):
+                result = mount.run(
+                    f"{attacker}/org/repo",
+                    ref="main",
+                    target=None,
+                    ssh=False,
+                    start=str(project),
+                    as_json=True,
+                )
+
+        self.assertEqual(2, result)
+        bootstrap.assert_not_called()
+        register.assert_not_called()
 
 
 class GitAuthProcessBoundaryTests(unittest.TestCase):

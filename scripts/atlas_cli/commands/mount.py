@@ -7,12 +7,18 @@ from pathlib import Path
 from ..core.auth import AuthResult, resolve_auth
 from ..core.authstore import lookup
 from ..core.gitops import (
+    SubmoduleSnapshot,
+    bootstrap_empty_repository,
+    capture_submodule_state,
     current_branch,
     git_root,
     has_git,
     inside_git,
+    is_empty_repository,
     is_dirty,
     is_gitlink,
+    remote_is_empty,
+    rollback_submodule_state,
     run_git,
     submodule_add,
     submodule_init,
@@ -84,11 +90,55 @@ def run(
                 as_json,
             )
         if not registered:
+            snapshot = capture_submodule_state(parent_git, dest)
+            if is_empty_repository(dest):
+                verify_code, remote_empty, verify_error = remote_is_empty(
+                    url,
+                    token=token,
+                    backend=auth.backend,
+                )
+                if verify_code != 0 or not remote_empty:
+                    cleanup = rollback_submodule_state(snapshot)
+                    detail = (
+                        verify_error
+                        if verify_code != 0
+                        else "remote contains refs but the checkout has no commit"
+                    )
+                    return _fail_with_cleanup(
+                        detail or "unable to verify empty remote",
+                        cleanup,
+                        as_json,
+                    )
+                branch = ref or current_branch(dest)
+                if not branch:
+                    return _fail("empty repository has no branch; pass --ref", as_json)
+                code, err = bootstrap_empty_repository(dest, branch)
+                if code != 0:
+                    cleanup = rollback_submodule_state(snapshot)
+                    return _fail_with_cleanup(
+                        err or "empty repository bootstrap failed",
+                        cleanup,
+                        as_json,
+                    )
             code, err = submodule_register(parent_git, dest, url, ref)
             if code != 0:
-                return _fail(err or "submodule register failed", as_json)
+                cleanup = rollback_submodule_state(snapshot)
+                return _fail_with_cleanup(
+                    err or "submodule register failed",
+                    cleanup,
+                    as_json,
+                )
             landed = current_branch(dest) or ref or ""
-            return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
+            result = _finish(
+                project,
+                dest,
+                parsed.atlas_id,
+                landed,
+                as_json,
+                "mounted",
+                snapshot,
+            )
+            return result
         stored = None
         try:
             row = find_store(project, parsed.atlas_id)
@@ -109,6 +159,10 @@ def run(
         )
 
     dest_empty = dest.is_dir() and not any(dest.iterdir())
+    if dest.is_dir() and not dest_empty:
+        return _fail(f"target directory is not empty: {dest}", as_json)
+
+    snapshot = capture_submodule_state(parent_git, dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if gitmodules_listed and (not dest.exists() or dest_empty):
         code, err = submodule_init(
@@ -119,7 +173,12 @@ def run(
             backend=auth.backend,
         )
         if code != 0:
-            return _fail(err or "submodule update failed", as_json)
+            cleanup = rollback_submodule_state(snapshot)
+            return _fail_with_cleanup(
+                err or "submodule update failed",
+                cleanup,
+                as_json,
+            )
     else:
         code, err = submodule_add(
             parent_git,
@@ -130,9 +189,57 @@ def run(
             backend=auth.backend,
         )
         if code != 0:
-            return _fail(err or "submodule add failed", as_json)
+            actual_id = None
+            if (dest / ".git").exists():
+                actual_id, _ = _checkout_atlas_id(dest)
+            if actual_id == parsed.atlas_id and is_empty_repository(dest):
+                verify_code, remote_empty, verify_error = remote_is_empty(
+                    url,
+                    token=token,
+                    backend=auth.backend,
+                )
+                if verify_code == 0 and remote_empty:
+                    branch = ref or current_branch(dest)
+                    if not branch:
+                        cleanup = rollback_submodule_state(snapshot)
+                        return _fail_with_cleanup(
+                            "empty repository has no branch; pass --ref",
+                            cleanup,
+                            as_json,
+                        )
+                    code, bootstrap_error = bootstrap_empty_repository(dest, branch)
+                    if code == 0:
+                        code, register_error = submodule_register(
+                            parent_git,
+                            dest,
+                            url,
+                            ref,
+                        )
+                        if code == 0:
+                            err = ""
+                        else:
+                            err = register_error or "submodule register failed"
+                    else:
+                        err = bootstrap_error or "empty repository bootstrap failed"
+                elif verify_code != 0 and verify_error:
+                    err = f"{err}; remote verification failed: {verify_error}"
+            if code != 0:
+                cleanup = rollback_submodule_state(snapshot)
+                return _fail_with_cleanup(
+                    err or "submodule add failed",
+                    cleanup,
+                    as_json,
+                )
     landed = current_branch(dest) or ref or ""
-    return _finish(project, dest, parsed.atlas_id, landed, as_json, "mounted")
+    return _finish(
+        project,
+        dest,
+        parsed.atlas_id,
+        landed,
+        as_json,
+        "mounted",
+        snapshot,
+    )
 
 
 def _infer_subpath(dest: Path) -> str:
@@ -171,13 +278,27 @@ def _in_gitmodules(parent: Path, dest: Path) -> bool:
 
 
 def _checkout_atlas_id(dest: Path) -> tuple[str | None, str | None]:
-    code, origin, error = run_git(["remote", "get-url", "origin"], cwd=dest)
-    if code != 0 or not origin:
-        return None, error or "origin remote is missing"
-    try:
-        return parse_pointer(origin).atlas_id, None
-    except IdentityError as exc:
-        return None, f"origin remote is invalid ({exc})"
+    code, raw_origin, raw_error = run_git(
+        ["config", "--get", "remote.origin.url"],
+        cwd=dest,
+    )
+    if code != 0 or not raw_origin:
+        return None, raw_error or "origin remote is missing"
+
+    _, expanded_origin, expanded_error = run_git(
+        ["remote", "get-url", "origin"],
+        cwd=dest,
+    )
+    errors: list[str] = []
+    for origin in dict.fromkeys((raw_origin, expanded_origin)):
+        if not origin:
+            continue
+        try:
+            return parse_pointer(origin).atlas_id, None
+        except IdentityError as exc:
+            errors.append(str(exc))
+    detail = "; ".join(errors) or expanded_error or "unparseable origin"
+    return None, f"origin remote is invalid ({detail})"
 
 
 def _finish(
@@ -187,6 +308,7 @@ def _finish(
     landed: str,
     as_json: bool,
     status: str,
+    snapshot: SubmoduleSnapshot | None = None,
 ) -> int:
     try:
         rel = dest.relative_to(project)
@@ -203,7 +325,8 @@ def _finish(
             },
         )
     except MeshFileError as e:
-        return _fail(str(e), as_json)
+        cleanup = rollback_submodule_state(snapshot) if snapshot else []
+        return _fail_with_cleanup(str(e), cleanup, as_json)
     return _ok(str(dest), atlas_id, landed, as_json, status)
 
 
@@ -213,6 +336,12 @@ def _fail(msg: str, as_json: bool) -> int:
     else:
         print(f"atlas mount: {msg}", file=sys.stderr)
     return 2
+
+
+def _fail_with_cleanup(msg: str, cleanup: list[str], as_json: bool) -> int:
+    if cleanup:
+        msg = f"{msg}; rollback failed: {'; '.join(cleanup)}"
+    return _fail(msg, as_json)
 
 
 def _ok(path: str, atlas_id: str, ref: str, as_json: bool, status: str) -> int:
