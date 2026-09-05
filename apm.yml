@@ -1,5 +1,5 @@
 name: atlas
-version: 0.8.14
+version: 0.8.15
 description: Durable OKF v0.2 knowledge substrate for process memory, schema governance, project knowledge graphs, and canonical CI gates on Atlas mounts. Successor to okf-wiki operational layer. Format authority remains okf.
 author: Sergio Sisternes
 license: Apache-2.0

@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .auth import TOKEN_ENV_KEYS
+
 
 def has_git() -> bool:
     return shutil.which("git") is not None
@@ -86,16 +88,19 @@ def _redact(err: str, token: str | None) -> str:
 
 
 def _auth_args(
-    token: str | None, host: str = "github.com"
+    token: str | None,
+    host: str = "github.com",
+    backend: str = "none",
 ) -> tuple[list[str], tuple[str, ...]]:
     """Auth for clone / submodule add / submodule update.
 
     Never set http.extraHeader=Authorization — GitHub rejects that for
     private HTTPS clone/submodule add (invalid credentials). An explicitly
     resolved token is authoritative and uses a process-local URL rewrite for
-    the remote host. Drop GH_TOKEN/GITHUB_TOKEN on that path so they cannot
-    affect credential handling. With no token, use the gh credential helper
-    when available and preserve its environment.
+    the already-authorized remote host. The gh backend uses its credential
+    helper with token environment variables removed, so it can only select a
+    stored credential for the host requested by Git. Anonymous HTTPS disables
+    helpers rather than exposing generic credentials to an arbitrary host.
     """
     if token:
         injected = f"https://x-access-token:{token}@{host}/"
@@ -106,9 +111,9 @@ def _auth_args(
                 "-c",
                 f"url.{injected}.insteadOf=https://{host}/",
             ],
-            ("GH_TOKEN", "GITHUB_TOKEN"),
+            TOKEN_ENV_KEYS,
         )
-    if shutil.which("gh"):
+    if backend == "gh":
         return (
             [
                 "-c",
@@ -116,9 +121,11 @@ def _auth_args(
                 "-c",
                 "credential.helper=!gh auth git-credential",
             ],
-            (),
+            TOKEN_ENV_KEYS,
         )
-    return [], ()
+    if backend == "ssh":
+        return [], ()
+    return ["-c", "credential.helper="], TOKEN_ENV_KEYS
 
 
 def clone(
@@ -127,9 +134,10 @@ def clone(
     ref: str | None,
     extra_env: dict | None = None,
     token: str | None = None,
+    backend: str = "none",
 ) -> tuple[int, str]:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    auth, drop = _auth_args(token, host=_https_host(url))
+    auth, drop = _auth_args(token, host=_https_host(url), backend=backend)
     args = [*auth, "clone"]
     if ref:
         args.extend(["--branch", ref])
@@ -144,9 +152,10 @@ def submodule_add(
     dest: Path,
     ref: str | None,
     token: str | None = None,
+    backend: str = "none",
 ) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    auth, drop = _auth_args(token, host=_https_host(url))
+    auth, drop = _auth_args(token, host=_https_host(url), backend=backend)
     args = [*auth, "submodule", "add"]
     if ref:
         args.extend(["-b", ref])
@@ -199,9 +208,10 @@ def submodule_init(
     dest: Path,
     token: str | None = None,
     host: str = "github.com",
+    backend: str = "none",
 ) -> tuple[int, str]:
     rel = os.path.relpath(dest, parent)
-    auth, drop = _auth_args(token, host=host)
+    auth, drop = _auth_args(token, host=host, backend=backend)
     code, _out, err = run_git(
         [*auth, "submodule", "update", "--init", "--", rel],
         cwd=parent,

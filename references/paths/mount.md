@@ -33,6 +33,11 @@ root: <set after resolve>
    python3 <atlas-skill>/scripts/atlas.py resolve <atlas_id>
    ```
 
+   Generic GitHub token variables apply only to `github.com` and `*.ghe.com`.
+   GHES environment credentials require an exact `GH_HOST` match. An unmatched
+   host uses anonymous HTTPS with credential helpers disabled; use `--ssh` or
+   `gh auth login --hostname <host>` for private repositories.
+
 3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (query, remember, work, landscape).
 
 Do not write into the calling skill package. This file is not a store.
