@@ -66,7 +66,7 @@ def current_branch(repo: Path) -> str:
 
 
 def is_empty_repository(repo: Path) -> bool:
-    """True only for an unborn repository with no local or remote refs."""
+    """True for an unborn checkout with no locally recorded refs."""
     code, _, _ = run_git(["rev-parse", "--verify", "HEAD"], cwd=repo)
     if code == 0:
         return False
@@ -75,6 +75,20 @@ def is_empty_repository(repo: Path) -> bool:
         cwd=repo,
     )
     return code == 0 and not out
+
+
+def remote_is_empty(
+    url: str,
+    token: str | None = None,
+    backend: str = "none",
+) -> tuple[int, bool, str]:
+    """Check the remote directly; authentication or network errors are failures."""
+    auth, drop = _auth_args(token, host=_https_host(url), backend=backend)
+    code, out, err = run_git(
+        [*auth, "ls-remote", url],
+        drop_keys=drop,
+    )
+    return code, code == 0 and not out, _redact(err, token)
 
 
 def bootstrap_empty_repository(repo: Path, branch: str) -> tuple[int, str]:

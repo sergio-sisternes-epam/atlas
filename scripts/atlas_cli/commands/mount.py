@@ -17,6 +17,7 @@ from ..core.gitops import (
     is_empty_repository,
     is_dirty,
     is_gitlink,
+    remote_is_empty,
     rollback_submodule_state,
     run_git,
     submodule_add,
@@ -91,6 +92,23 @@ def run(
         if not registered:
             snapshot = capture_submodule_state(parent_git, dest)
             if is_empty_repository(dest):
+                verify_code, remote_empty, verify_error = remote_is_empty(
+                    url,
+                    token=token,
+                    backend=auth.backend,
+                )
+                if verify_code != 0 or not remote_empty:
+                    cleanup = rollback_submodule_state(snapshot)
+                    detail = (
+                        verify_error
+                        if verify_code != 0
+                        else "remote contains refs but the checkout has no commit"
+                    )
+                    return _fail_with_cleanup(
+                        detail or "unable to verify empty remote",
+                        cleanup,
+                        as_json,
+                    )
                 branch = ref or current_branch(dest)
                 if not branch:
                     return _fail("empty repository has no branch; pass --ref", as_json)
@@ -175,28 +193,36 @@ def run(
             if (dest / ".git").exists():
                 actual_id, _ = _checkout_atlas_id(dest)
             if actual_id == parsed.atlas_id and is_empty_repository(dest):
-                branch = ref or current_branch(dest)
-                if not branch:
-                    cleanup = rollback_submodule_state(snapshot)
-                    return _fail_with_cleanup(
-                        "empty repository has no branch; pass --ref",
-                        cleanup,
-                        as_json,
-                    )
-                code, bootstrap_error = bootstrap_empty_repository(dest, branch)
-                if code == 0:
-                    code, register_error = submodule_register(
-                        parent_git,
-                        dest,
-                        url,
-                        ref,
-                    )
+                verify_code, remote_empty, verify_error = remote_is_empty(
+                    url,
+                    token=token,
+                    backend=auth.backend,
+                )
+                if verify_code == 0 and remote_empty:
+                    branch = ref or current_branch(dest)
+                    if not branch:
+                        cleanup = rollback_submodule_state(snapshot)
+                        return _fail_with_cleanup(
+                            "empty repository has no branch; pass --ref",
+                            cleanup,
+                            as_json,
+                        )
+                    code, bootstrap_error = bootstrap_empty_repository(dest, branch)
                     if code == 0:
-                        err = ""
+                        code, register_error = submodule_register(
+                            parent_git,
+                            dest,
+                            url,
+                            ref,
+                        )
+                        if code == 0:
+                            err = ""
+                        else:
+                            err = register_error or "submodule register failed"
                     else:
-                        err = register_error or "submodule register failed"
-                else:
-                    err = bootstrap_error or "empty repository bootstrap failed"
+                        err = bootstrap_error or "empty repository bootstrap failed"
+                elif verify_code != 0 and verify_error:
+                    err = f"{err}; remote verification failed: {verify_error}"
             if code != 0:
                 cleanup = rollback_submodule_state(snapshot)
                 return _fail_with_cleanup(
