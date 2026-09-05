@@ -27,6 +27,12 @@ smokes:
   - id: default-mount-is-submodule
     source: skill-mount-home
     expect: default mount under .atlas/<id>/ is a git submodule listed in .gitmodules
+  - id: empty-remote-is-initializable
+    source: new Atlas init lifecycle
+    expect: mounting a ref from a completely empty remote creates a deterministic local bootstrap commit and registered submodule; atlas init then writes the store without caller repair
+  - id: failed-mount-rolls-back
+    source: safe submodule initialization
+    expect: a failed mount restores the target, .gitmodules, index, local Git configuration, and submodule git directory to their pre-mount state
   - id: reject-external-target
     source: active repository write-home
     expect: an explicit --target outside the active git repository exits non-zero without creating it

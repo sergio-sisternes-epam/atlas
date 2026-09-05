@@ -38,6 +38,14 @@ root: <set after resolve>
    host uses anonymous HTTPS with credential helpers disabled; use `--ssh` or
    `gh auth login --hostname <host>` for private repositories.
 
+   A completely empty remote is a valid new-Atlas mount. Because Git cannot
+   register a submodule without a commit, `atlas mount` creates a deterministic
+   local empty bootstrap commit on `ref`, registers the gitlink, and leaves the
+   remote untouched. Continue through path `init` before committing the
+   consumer repository. A non-empty remote that lacks `ref` still fails; Atlas
+   does not create a divergent branch. Failed mounts roll back the target,
+   submodule metadata, index, and local Git configuration.
+
 3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (query, remember, work, landscape).
 
 Do not write into the calling skill package. This file is not a store.

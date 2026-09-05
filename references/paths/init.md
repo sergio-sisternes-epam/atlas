@@ -38,12 +38,18 @@ If `remote` is missing: **ask** for an existing git remote and **stop**. Do not 
    ```
 
    If clone/mount fails because the remote does not exist: tell the human to create the repository themselves, then retry. Do not create it.
+   A completely empty remote succeeds: mount creates the deterministic local
+   bootstrap commit needed to register the submodule, without pushing it.
 4. If the mount has no `SCHEMA.json`:
 
    ```text
    python3 <atlas-skill>/scripts/atlas.py init --root <root>
    ```
 
-5. Set card `root`. Further query/persist is skill atlas on that root.
+5. For an empty remote, commit and push the initialized Atlas from `<root>` on
+   `ref` before committing the consumer repository's gitlink. This publishes
+   the bootstrap commit and initialized content as one branch history; callers
+   must not manually recreate or reinitialize the nested checkout.
+6. Set card `root`. Further query/persist is skill atlas on that root.
 
 Do not write the new store into a skill package. Do not `--target references/atlas`.
