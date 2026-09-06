@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-09-06
+
 ### Fixed
 
 - Support mounting and initializing a completely empty Atlas remote by creating
