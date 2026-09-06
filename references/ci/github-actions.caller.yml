@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   compile:
-    uses: sergio-sisternes-epam/atlas/.github/workflows/atlas-compile.yml@v0.8.15
+    uses: sergio-sisternes-epam/atlas/.github/workflows/atlas-compile.yml@v0.9.0
     with:
       root: .
-      atlas_ref: v0.8.15
+      atlas_ref: v0.9.0
     secrets:
       ATLAS_CLI_TOKEN: ${{ secrets.ATLAS_CLI_TOKEN }}
