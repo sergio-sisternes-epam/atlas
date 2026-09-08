@@ -1,5 +1,5 @@
 name: atlas
-version: 0.9.0
+version: 0.9.1
 description: Durable OKF v0.2 knowledge substrate for process memory, schema governance, project knowledge graphs, and canonical CI gates on Atlas mounts. Successor to okf-wiki operational layer. Format authority remains okf.
 author: Sergio Sisternes
 license: Apache-2.0
@@ -16,7 +16,8 @@ includes:
   - .apm/skills/panel-review/
 dependencies:
   apm:
-    - sergio-sisternes-epam/okf#9088a99a613d9ccc53ec2a15341714139291633f
+    - name: okf
+      marketplace: sergio-sisternes-epam
   python:
     - jsonschema>=4.0
     - click>=8.0
