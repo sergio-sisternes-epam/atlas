@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.1 - 2026-09-08
+
 ### Changed
 
 - Resolve the `okf` format-authority dependency through the
