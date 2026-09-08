@@ -170,10 +170,22 @@ class CiActivationContractTests(unittest.TestCase):
             "github.event.pull_request.head.repo.full_name == github.repository",
             self.ci_workflow,
         )
-        self.assertIn("name: Audit committed APM state", self.ci_workflow)
+        self.assertIn("name: Scan committed APM primitives", self.ci_workflow)
+        self.assertIn("apm audit --no-policy --no-drift", self.ci_workflow)
+        self.assertNotIn("apm install --frozen", self.ci_workflow)
+        self.assertEqual(
+            2,
+            self.ci_workflow.count('apm-version: "0.30.0"'),
+        )
         self.assertIn(
-            "apm audit --ci --no-policy --no-fail-fast --no-drift",
+            "apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam",
             self.ci_workflow,
+        )
+        self.assertEqual(
+            2,
+            self.ci_workflow.count(
+                "apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam"
+            ),
         )
         self.assertEqual(
             2,

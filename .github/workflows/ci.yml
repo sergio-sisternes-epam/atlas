@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1
         with:
-          apm-version: "0.29.0"
+          apm-version: "0.30.0"
           setup-only: true
       - name: Require private dependency credential
         env:
@@ -54,21 +54,12 @@ jobs:
             echo "::error title=Missing APM credential::Configure the APM_READ_TOKEN Actions secret with Contents: read access to Atlas and OKF."
             exit 1
           fi
-      - name: Restore frozen dependencies
-        if: github.event_name != 'pull_request'
+      - name: Register APM marketplace
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm install --frozen --target agent-skills
-      - name: Audit committed APM state
-        if: github.event_name == 'pull_request'
-        env:
-          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm audit --ci --no-policy --no-fail-fast --no-drift
-      - name: Audit restored source integrity
-        if: github.event_name != 'pull_request'
-        env:
-          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm audit --ci --no-policy --no-fail-fast --no-drift
+        run: apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+      - name: Scan committed APM primitives
+        run: apm audit --no-policy --no-drift
 
   consumer:
     name: Consumer install (${{ matrix.name }})
@@ -93,8 +84,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1
         with:
-          apm-version: "0.29.0"
+          apm-version: "0.30.0"
           setup-only: true
+      - name: Register APM marketplace
+        env:
+          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
+        run: apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
       - name: Install checked-out package into a disposable consumer
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}

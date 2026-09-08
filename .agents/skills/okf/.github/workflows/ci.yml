@@ -1,0 +1,134 @@
+name: OKF CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check release version surfaces
+        env:
+          CANDIDATE_REVISION: ${{ github.sha }}
+        run: python3 scripts/release_readiness.py --commit "$CANDIDATE_REVISION"
+
+  package:
+    name: APM package integrity
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1
+        with:
+          apm-version: "0.29.0"
+          setup-only: true
+      - name: Audit tracked source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            apm audit --file "$file" --no-policy
+          done < <(git ls-files -z)
+
+  consumer:
+    name: Consumer install (${{ matrix.name }})
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent-skills
+            target: agent-skills
+          - name: stable-runtimes
+            target: claude,codex,copilot,cursor,gemini,grok-build,kiro,opencode,windsurf
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1
+        with:
+          apm-version: "0.29.0"
+          setup-only: true
+      - name: Install checked-out package into a disposable consumer
+        env:
+          CONSUMER_NAME: ${{ matrix.name }}
+          TARGETS: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/okf-consumer-$CONSUMER_NAME"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          apm install "$GITHUB_WORKSPACE" --target "$TARGETS"
+          skill_path="$(
+            find .agents/skills -mindepth 2 -maxdepth 2 \
+              -name SKILL.md -print -quit
+          )"
+          test -n "$skill_path"
+          grep -Fx "name: okf" "$skill_path"
+          version="$(awk '$1 == "version:" { print $2; exit }' "$GITHUB_WORKSPACE/apm.yml")"
+          test -n "$version"
+          grep -Fx "version: $version" "$skill_path"
+          apm audit --ci --no-policy --no-fail-fast
+
+  readiness:
+    name: Release readiness decision
+    needs:
+      - metadata
+      - package
+      - consumer
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Record candidate decision
+        env:
+          METADATA_RESULT: ${{ needs.metadata.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          CONSUMER_RESULT: ${{ needs.consumer.result }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          CANDIDATE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          main_revision="$(git rev-parse refs/remotes/origin/main)"
+          {
+            echo "candidate_revision=$CANDIDATE_REVISION"
+            echo "main_revision=$main_revision"
+            echo "release_metadata=$METADATA_RESULT"
+            echo "package_integrity=$PACKAGE_RESULT"
+            echo "consumer_install=$CONSUMER_RESULT"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$METADATA_RESULT" != success ] ||
+            [ "$PACKAGE_RESULT" != success ] ||
+            [ "$CONSUMER_RESULT" != success ]; then
+            echo "release_readiness_decision=blocked" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$REF_TYPE" = tag ]; then
+            echo "release_validation_decision=ready to publish" |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$REF_NAME" != main ]; then
+            echo "release_readiness_decision=blocked: candidate is not main" |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$CANDIDATE_REVISION" != "$main_revision" ]; then
+            echo "release_readiness_decision=blocked: candidate is not current main" |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "pre_tag_decision=ready to tag" | tee -a "$GITHUB_STEP_SUMMARY"

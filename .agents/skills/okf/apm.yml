@@ -3,4 +3,12 @@ version: 0.2.1
 description: Open Knowledge Format — pure format standard and validator for OKF bundles
 author: Sergio Sisternes
 license: Apache-2.0
+homepage: https://github.com/sergio-sisternes-epam/okf
+repository: https://github.com/sergio-sisternes-epam/okf
+keywords:
+  - knowledge-format
+  - knowledge-management
+  - validation
+  - okf
 type: skill
+includes: auto

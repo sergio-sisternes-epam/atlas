@@ -2,15 +2,22 @@
 
 ## Local setup
 
-Use Python 3.10 or newer and APM CLI 0.29.0 or newer.
+Use Python 3.10 or newer and APM CLI 0.30.0 or newer.
 
 ```bash
 python3 -m pip install -r scripts/requirements.txt
 ```
 
-The APM dependency is private. Configure an APM GitHub credential with
-read-only access to `sergio-sisternes-epam/okf`; do not store tokens in this
-repository.
+Register the catalog before installing dependencies:
+
+```bash
+apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+```
+
+The `--name` flag is required. Do not use alias `me` or the default
+`apm-marketplace` name. OKF remains private; configure an APM GitHub credential
+with read-only access to `sergio-sisternes-epam/okf` and do not store tokens in
+this repository.
 
 Atlas mount credentials are host-scoped. Generic public GitHub tokens apply
 only to `github.com` and `*.ghe.com`. For GHES automation, set `GH_HOST` to the
@@ -29,26 +36,24 @@ python3 scripts/run_tests.py
 python3 scripts/release_readiness.py
 ```
 
-Then verify the pinned dependency and APM integrity:
+Then register the catalog. APM 0.30.0 records marketplace plugins under
+`_marketplace/<catalog>/<name>` in the manifest but writes git coordinates into
+`apm.lock.yaml`, so source `apm install --frozen` and `apm audit --ci` cannot
+round-trip this pin. CI therefore scans committed primitives in the source
+checkout and runs full lockfile plus install-replay drift audits after
+installing Atlas into each disposable consumer:
 
 ```bash
-apm install --frozen --target agent-skills
-apm audit --ci --no-policy --no-fail-fast --no-drift
+apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+apm audit --no-policy --no-drift
 ```
 
-The source audit omits install-replay drift because this repository combines a
-root skill bundle with local `.apm` review skills. CI runs the full drift audit
-after installing Atlas into each disposable consumer target.
-
-Pull requests from branches in this repository run the Python tests, the APM
-baseline integrity checks, and full install-replay drift audits in disposable
-consumers. The source audit receives `APM_READ_TOKEN` but does not run
-`apm install`, so the checked-out deployment remains unchanged. It uses
-`--no-drift` because this repository combines a root skill bundle with local
-`.apm` review skills; the disposable consumers provide the full drift evidence
-for both supported target sets. Pull requests from forks cannot receive
-repository secrets and therefore skip the APM and consumer gates; they still
-run the Python tests.
+Pull requests from branches in this repository run the Python tests, the source
+primitive scan, and full install-replay drift audits in disposable consumers.
+The source scan receives `APM_READ_TOKEN` but does not run `apm install`, so the
+checked-out deployment remains unchanged. Pull requests from forks cannot
+receive repository secrets and therefore skip the APM and consumer gates; they
+still run the Python tests.
 
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime

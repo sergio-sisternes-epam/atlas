@@ -1,17 +1,22 @@
 lockfile_version: '1'
-generated_at: '2026-09-03T14:17:10.921145+00:00'
-apm_version: 0.29.0
+generated_at: '2026-09-08T09:19:25.018735+00:00'
+apm_version: 0.30.0
 dependencies:
 - repo_url: sergio-sisternes-epam/okf
   name: okf
   host: github.com
-  resolved_commit: 9088a99a613d9ccc53ec2a15341714139291633f
-  resolved_ref: 9088a99a613d9ccc53ec2a15341714139291633f
+  resolved_commit: 5246f7b193b58a32ac8a15fc76aedf37c42b042c
+  resolved_ref: 5246f7b193b58a32ac8a15fc76aedf37c42b042c
   version: 0.2.1
   package_type: hybrid
   deployed_files:
   - .agents/skills/okf
+  - .agents/skills/okf/.github/release.yml
+  - .agents/skills/okf/.github/workflows/ci.yml
+  - .agents/skills/okf/.github/workflows/release.yml
   - .agents/skills/okf/.gitignore
+  - .agents/skills/okf/CHANGELOG.md
+  - .agents/skills/okf/CONTRIBUTING.md
   - .agents/skills/okf/LICENSE
   - .agents/skills/okf/NOTICE
   - .agents/skills/okf/README.md
@@ -21,18 +26,27 @@ dependencies:
   - .agents/skills/okf/references/modules/okf-authority.md
   - .agents/skills/okf/references/modules/okf-export.md
   - .agents/skills/okf/references/modules/okf-import.md
+  - .agents/skills/okf/scripts/release_readiness.py
   deployed_file_hashes:
+    .agents/skills/okf/.github/release.yml: sha256:bc63e76d9b4b8ecdcaa494dd5f0342f9b6d030decc7c71cc03c21bf629ae108d
+    .agents/skills/okf/.github/workflows/ci.yml: sha256:429494cae24797b540b9a3085b4fc4ad6db09dcb3e133728f639fa18cfea3d37
+    .agents/skills/okf/.github/workflows/release.yml: sha256:d7b36525d8a605a7048347bb083d157a519abb9bd9893790004e68af95c6621c
     .agents/skills/okf/.gitignore: sha256:1f8d25bc62672df25e92a9e77b9619c58297a2c62d06310403d3bd48c4770c19
+    .agents/skills/okf/CHANGELOG.md: sha256:fb0b75167131a8dca377c660aa5aac7dbde60d8bf8f9463d3bcd7d8cd59139b4
+    .agents/skills/okf/CONTRIBUTING.md: sha256:588e4043d3f3e2aec706abca7ae9575d07d94faec854c3b912393b94df4b00d1
     .agents/skills/okf/LICENSE: sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
     .agents/skills/okf/NOTICE: sha256:256003fde184bd5be66918edbf9ba3abcb92300df7c19473195772cb2e822c86
-    .agents/skills/okf/README.md: sha256:a3d85c65da98198482905b50c5f497d4f51aceedb2a22d1ea63da938a4c7ae75
+    .agents/skills/okf/README.md: sha256:2edd015e3ba0bb92a94f66be41b04b7da0359e7278802be0d276839bb42bd312
     .agents/skills/okf/SKILL.md: sha256:c8b7ce2c0d640ca9dfc60ef8c9b2730920c5236f89b968c7d0c67661abe4f787
-    .agents/skills/okf/apm.yml: sha256:55cc13c3923a7e8f45e00be2b508f136e4d6887f2667958c349422efdd6051f7
+    .agents/skills/okf/apm.yml: sha256:4b608508b3947169ec5433c0d7b3a0441adcc6a7fb8944caa5cbbfc267a380b5
     .agents/skills/okf/references/README.md: sha256:8fbd006b9c02c96c6513bc8ba0dff4c02b983d3c7c644c1458994b3f31e15162
     .agents/skills/okf/references/modules/okf-authority.md: sha256:8580ad41475361a7bd70a504240e7dd28837560332ac6df2ccb11a032cbddb3d
     .agents/skills/okf/references/modules/okf-export.md: sha256:8fd59fedb96c7969aa522c3a93fef18fe9e931eccb0f18b2e6273184fce86919
     .agents/skills/okf/references/modules/okf-import.md: sha256:29ceeed39b62914db2920a5970a06b5a93ca6c387873101cc1c28d205de004ce
-  content_hash: sha256:dd88f1e3e532bb5d06238e0a359f1c1b3cd71aa17337ef1cc393e1e28dc067ee
+    .agents/skills/okf/scripts/release_readiness.py: sha256:274332a5ba5b6e3450487c9d98d66169414d7570731cd7604746e396945866ad
+  content_hash: sha256:48d5e79752e6a448975da0fef2981938f7c6149810e30aca805a77cf123a10d8
+  discovered_via: sergio-sisternes-epam
+  marketplace_plugin_name: okf
   declared_license: Apache-2.0
 deployments:
 - kind: project-relative
@@ -46,6 +60,33 @@ deployments:
   content_hash: null
 - kind: project-relative
   target: agent-skills
+  value: .agents/skills/okf/.github/release.yml
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:bc63e76d9b4b8ecdcaa494dd5f0342f9b6d030decc7c71cc03c21bf629ae108d
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/.github/workflows/ci.yml
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:429494cae24797b540b9a3085b4fc4ad6db09dcb3e133728f639fa18cfea3d37
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/.github/workflows/release.yml
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:d7b36525d8a605a7048347bb083d157a519abb9bd9893790004e68af95c6621c
+- kind: project-relative
+  target: agent-skills
   value: .agents/skills/okf/.gitignore
   runtime: null
   scope: project
@@ -53,6 +94,24 @@ deployments:
   - sergio-sisternes-epam/okf
   active_owner: sergio-sisternes-epam/okf
   content_hash: sha256:1f8d25bc62672df25e92a9e77b9619c58297a2c62d06310403d3bd48c4770c19
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/CHANGELOG.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:fb0b75167131a8dca377c660aa5aac7dbde60d8bf8f9463d3bcd7d8cd59139b4
+- kind: project-relative
+  target: agent-skills
+  value: .agents/skills/okf/CONTRIBUTING.md
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:588e4043d3f3e2aec706abca7ae9575d07d94faec854c3b912393b94df4b00d1
 - kind: project-relative
   target: agent-skills
   value: .agents/skills/okf/LICENSE
@@ -79,7 +138,7 @@ deployments:
   owners:
   - sergio-sisternes-epam/okf
   active_owner: sergio-sisternes-epam/okf
-  content_hash: sha256:a3d85c65da98198482905b50c5f497d4f51aceedb2a22d1ea63da938a4c7ae75
+  content_hash: sha256:2edd015e3ba0bb92a94f66be41b04b7da0359e7278802be0d276839bb42bd312
 - kind: project-relative
   target: agent-skills
   value: .agents/skills/okf/SKILL.md
@@ -97,7 +156,7 @@ deployments:
   owners:
   - sergio-sisternes-epam/okf
   active_owner: sergio-sisternes-epam/okf
-  content_hash: sha256:55cc13c3923a7e8f45e00be2b508f136e4d6887f2667958c349422efdd6051f7
+  content_hash: sha256:4b608508b3947169ec5433c0d7b3a0441adcc6a7fb8944caa5cbbfc267a380b5
 - kind: project-relative
   target: agent-skills
   value: .agents/skills/okf/references/README.md
@@ -135,7 +194,16 @@ deployments:
   active_owner: sergio-sisternes-epam/okf
   content_hash: sha256:29ceeed39b62914db2920a5970a06b5a93ca6c387873101cc1c28d205de004ce
 - kind: project-relative
-  target: agents
+  target: agent-skills
+  value: .agents/skills/okf/scripts/release_readiness.py
+  runtime: null
+  scope: project
+  owners:
+  - sergio-sisternes-epam/okf
+  active_owner: sergio-sisternes-epam/okf
+  content_hash: sha256:274332a5ba5b6e3450487c9d98d66169414d7570731cd7604746e396945866ad
+- kind: project-relative
+  target: legacy
   value: .agents/skills/code-review
   runtime: null
   scope: project
@@ -144,7 +212,7 @@ deployments:
   active_owner: .
   content_hash: null
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/code-review/SKILL.md
   runtime: null
   scope: project
@@ -153,7 +221,7 @@ deployments:
   active_owner: .
   content_hash: sha256:6fbd9c15f70b072319139d76adc8cc8f1daf4c31cf94cbfdc3eb13c97ec64e61
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review
   runtime: null
   scope: project
@@ -162,7 +230,7 @@ deployments:
   active_owner: .
   content_hash: null
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/SKILL.md
   runtime: null
   scope: project
@@ -171,7 +239,7 @@ deployments:
   active_owner: .
   content_hash: sha256:d2b08df910575ef5a67d7f0a9d817e46305a9c1dc8f19e1b3bef9040099d2cd7
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/assets/panelist-receipt.schema.json
   runtime: null
   scope: project
@@ -180,7 +248,7 @@ deployments:
   active_owner: .
   content_hash: sha256:2488ef6954c5e3297cb7094081a08098c8efc045d7ad9dda58c105e06d3e410b
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/assets/recommendation-template.md
   runtime: null
   scope: project
@@ -189,7 +257,7 @@ deployments:
   active_owner: .
   content_hash: sha256:b9fa0be14756c5da6ac374c24bf80dbdb5e8484b00ba44cb49209d3ecf2fb80a
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/assets/synthesizer-receipt.schema.json
   runtime: null
   scope: project
@@ -198,7 +266,7 @@ deployments:
   active_owner: .
   content_hash: sha256:32f0ef8867437e90b69713a82268728e6743e7ff87fae7bc7e80815dc47e21db
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/finding-schema.md
   runtime: null
   scope: project
@@ -207,7 +275,7 @@ deployments:
   active_owner: .
   content_hash: sha256:42a29d22b0eb7c4357d2e12a7958fb7334eb504687040d49df4fadaf3603df08
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/lenses/atlas-contract.md
   runtime: null
   scope: project
@@ -216,7 +284,7 @@ deployments:
   active_owner: .
   content_hash: sha256:8ef67ccdc05537719f8d918cf8dc5c969ee0a40689d90a9dfdbf47ab7a4d5dde
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/lenses/python-cli.md
   runtime: null
   scope: project
@@ -225,7 +293,7 @@ deployments:
   active_owner: .
   content_hash: sha256:03fcf3f9925f5692db2fa86243536027790fd96cd5c15b11207bbfd7570009b8
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/lenses/security-gitops.md
   runtime: null
   scope: project
@@ -234,7 +302,7 @@ deployments:
   active_owner: .
   content_hash: sha256:a33c898b489fa2c64b3efa414e246fbe01786493ef64563da0d54609b68aa93d
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/lenses/skill-agent-contract.md
   runtime: null
   scope: project
@@ -243,7 +311,7 @@ deployments:
   active_owner: .
   content_hash: sha256:1a73d5a35dee6cf8e5609e5eab07a51303be4c417a1f4460aaac26662c9f6568
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/roster.md
   runtime: null
   scope: project
@@ -252,7 +320,7 @@ deployments:
   active_owner: .
   content_hash: sha256:0fb836e13e9b7aa8ed10dd86a7ad535464942246d97272ee702ab808d401fe7c
 - kind: project-relative
-  target: agents
+  target: legacy
   value: .agents/skills/panel-review/references/synthesizer.md
   runtime: null
   scope: project
