@@ -201,7 +201,10 @@ def list_profiles(effective: dict[str, Any] | None = None) -> dict[str, dict[str
         if isinstance(extra, dict):
             for name, body in extra.items():
                 if isinstance(body, dict):
-                    profiles[str(name)] = copy.deepcopy(body)
+                    key = str(name)
+                    if key in BUILTIN_PROFILES:
+                        continue
+                    profiles[key] = copy.deepcopy(body)
     return profiles
 
 

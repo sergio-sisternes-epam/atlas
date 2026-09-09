@@ -311,6 +311,15 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                     qn = str(raw_name)
                     if ":" not in qn:
                         qn = f"{cid}:{qn}"
+                    elif not qn.startswith(f"{cid}:"):
+                        critical.append(
+                            _issue(
+                                "overlay_namespace",
+                                relp,
+                                f"{key} '{qn}' must be in contribution namespace '{cid}:'",
+                            )
+                        )
+                        continue
                     if qn in dest and dest[qn] != body:
                         critical.append(
                             _issue(

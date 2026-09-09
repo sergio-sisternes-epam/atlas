@@ -72,6 +72,43 @@ class RecallConfigTests(unittest.TestCase):
                 }
             )
 
+    def test_list_profiles_keeps_builtins(self) -> None:
+        profiles = list_profiles(
+            {
+                "presets": {
+                    "atlas:ranked": {"coarse": {"driver": "scan"}},
+                    "demo:explore": {"coarse": {"driver": "scan"}},
+                }
+            }
+        )
+        self.assertEqual(profiles["atlas:ranked"]["coarse"]["driver"], "sqlite-fts5")
+        self.assertEqual(profiles["demo:explore"]["coarse"]["driver"], "scan")
+
+    def test_overlay_cannot_shadow_builtin_preset(self) -> None:
+        from atlas_cli.core.overlay import merge_overlays
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-ov-"))
+        store = tmp / "store"
+        (store / "schema.d").mkdir(parents=True)
+        (store / "schema.d" / "demo-skill.json").write_text(
+            json.dumps(
+                {
+                    "contribution_id": "demo-skill",
+                    "claimed_folders": [],
+                    "presets": {
+                        "atlas:ranked": {
+                            "coarse": {"driver": "scan"},
+                            "rank": {"driver": "scan"},
+                            "retrieve": {"driver": "pages-graph"},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        _, crit, _ = merge_overlays({"schema_version": "2.0"}, store)
+        self.assertTrue(any(i.get("id") == "overlay_namespace" for i in crit), crit)
+
     def test_install_is_not_activation(self) -> None:
         profiles = list_profiles({"presets": {"demo:explore": {"coarse": {"driver": "scan"}}}})
         self.assertIn("demo:explore", profiles)
