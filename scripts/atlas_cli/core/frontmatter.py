@@ -157,9 +157,12 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
         seen: set[Any] = set()
         for key_node, _ in node.value:
             key = loader.construct_object(key_node, deep=deep)
-            if key in seen:
-                raise FrontmatterError(f"duplicate key {key!r}")
-            seen.add(key)
+            try:
+                if key in seen:
+                    raise FrontmatterError(f"duplicate key {key!r}")
+                seen.add(key)
+            except TypeError as e:
+                raise FrontmatterError("mapping keys must be hashable strings") from e
             tag = getattr(key_node, "tag", "") or ""
             if tag.startswith("!") and not tag.startswith("tag:yaml.org,2002:"):
                 raise FrontmatterError(f"unsafe YAML tag {tag}")

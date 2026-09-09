@@ -153,6 +153,30 @@ class RecallConfigTests(unittest.TestCase):
         }
         self.assertFalse(validate_store_v2(data))
 
+    def test_pointer_db_rejects_escape(self) -> None:
+        from atlas_cli.core import recall_index
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-ptr-"))
+        store = tmp / "store"
+        (store / ".atlas-index" / "recall").mkdir(parents=True)
+        evil = tmp / "evil.sqlite"
+        evil.write_bytes(b"not-a-db")
+        pointer = {
+            "complete": True,
+            "corpus_digest": "digest-x",
+            "cheap_fingerprint": "fp",
+            "db": str(evil),
+        }
+        (store / ".atlas-index" / "recall" / "current.json").write_text(
+            json.dumps(pointer), encoding="utf-8"
+        )
+        self.assertIsNone(recall_index.matching_generation(store, "digest-x"))
+        pointer["db"] = "../evil.sqlite"
+        (store / ".atlas-index" / "recall" / "current.json").write_text(
+            json.dumps(pointer), encoding="utf-8"
+        )
+        self.assertIsNone(recall_index.matching_generation(store, "digest-x"))
+
 
 if __name__ == "__main__":
     unittest.main()

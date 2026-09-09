@@ -128,12 +128,23 @@ def publish_generation(
     return {"published": True, **pointer}
 
 
+def _pointer_db(store: Path, raw: object) -> Path | None:
+    text = str(raw or "").strip()
+    if not text or Path(text).is_absolute() or Path(text).anchor:
+        return None
+    candidate = (store / text).resolve()
+    try:
+        candidate.relative_to(index_root(store).resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def matching_generation(store: Path, digest: str) -> Path | None:
     cur = load_current(store)
     if not cur or cur.get("corpus_digest") != digest or not cur.get("complete"):
         return None
-    db = store / str(cur.get("db") or "")
-    return db if db.is_file() else None
+    return _pointer_db(store, cur.get("db"))
 
 
 def matching_fast_path(store: Path, schema: dict[str, Any] | None) -> Path | None:
@@ -142,8 +153,7 @@ def matching_fast_path(store: Path, schema: dict[str, Any] | None) -> Path | Non
         return None
     if cur.get("cheap_fingerprint") != cheap_fingerprint(store, schema):
         return None
-    db = store / str(cur.get("db") or "")
-    return db if db.is_file() else None
+    return _pointer_db(store, cur.get("db"))
 
 
 def pages_from_db(db_path: Path) -> list[ProjectedPage]:

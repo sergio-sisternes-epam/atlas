@@ -35,6 +35,11 @@ class FrontmatterV2Tests(unittest.TestCase):
         with self.assertRaises(FrontmatterError):
             split_fm_v2(text)
 
+    def test_unhashable_mapping_key_fails_closed(self) -> None:
+        text = "---\n? [a, b]\n: x\n---\n\nbody\n"
+        with self.assertRaises(FrontmatterError):
+            split_fm_v2(text)
+
     def test_v1_parser_unchanged_for_yes(self) -> None:
         text = "---\ntitle: yes\n---\n\nbody\n"
         meta, _ = split_fm(text)

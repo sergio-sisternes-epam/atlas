@@ -131,14 +131,13 @@ Resolve `<atlas-skill>` to this skill's installed `skill_path`; do not resolve
 the following commands relative to the consumer project.
 
 ```text
-python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force]
+python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force] [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
 python3 <atlas-skill>/scripts/atlas.py search "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
                        # query tokens: type: kva: status: work_id: path:
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py recall index build --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]
