@@ -270,7 +270,7 @@ def _grep_search(
             "title": title or path.stem,
             "type": str(meta.get("type") or ""),
             "terms": hit_terms,
-            "snippet": _snippet(body or text, tokens or [next(iter(filters.values()), "")]),
+            "snippet": _snippet(body, tokens or [next(iter(filters.values()), "")]),
             "relates_to": _relates_preview(meta),
         }
         for key in ("kva", "status", "work_id", "growth"):

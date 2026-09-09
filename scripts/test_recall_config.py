@@ -302,6 +302,19 @@ class RecallConfigTests(unittest.TestCase):
         self.assertFalse(any("bad.md" in (p or "") for p in paths), paths)
         self.assertTrue(any("frontmatter:" in w and "bad.md" in w for w in warns), warns)
 
+    def test_grep_search_empty_body_no_nameerror(self) -> None:
+        from atlas_cli.commands.search import _grep_search
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-grep-"))
+        store = tmp / "store"
+        (store / "decisions").mkdir(parents=True)
+        (store / "decisions" / "empty.md").write_text(
+            "---\ntype: decision\ntitle: Ranking empty\n---\n",
+            encoding="utf-8",
+        )
+        hits, _ = _grep_search(store, "Ranking", "staging", 10, False, "2.0")
+        self.assertTrue(any("empty.md" in (h.get("path") or "") for h in hits))
+
     def test_open_db_uri_encodes_special_chars(self) -> None:
         import sqlite3
 
