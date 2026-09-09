@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from .projection import ProjectedPage
@@ -49,10 +50,12 @@ def neighbourhood(
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
     truncated = False
-    frontier = [(sid, 0) for sid in seeds if sid in by_id]
+    frontier: deque[tuple[str, int]] = deque(
+        (sid, 0) for sid in seeds if sid in by_id
+    )
     seen = set(seeds)
     while frontier:
-        current, hop = frontier.pop(0)
+        current, hop = frontier.popleft()
         page = by_id.get(current)
         if page is None or not _visible(page, include_exits):
             continue

@@ -33,12 +33,18 @@ def search(
     WHERE pages_fts MATCH ?
     ORDER BY rank ASC, pages.id ASC
     """
-    cur = conn.execute(
-        sql,
-        (w.get("primary", 5.0), w.get("secondary", 2.0), w.get("body", 1.0), q),
-    )
+    params: list[Any] = [
+        w.get("primary", 5.0),
+        w.get("secondary", 2.0),
+        w.get("body", 1.0),
+        q,
+    ]
+    if limit and limit > 0:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    cur = conn.execute(sql, params)
     out: list[dict[str, Any]] = []
-    for row in cur.fetchall():
+    for row in cur:
         out.append(
             {
                 "path": row[1],
@@ -50,6 +56,4 @@ def search(
                 "driver": "sqlite-fts5",
             }
         )
-        if limit and len(out) >= limit:
-            break
     return out
