@@ -99,6 +99,24 @@ def publish_generation(
         projection = project_store(store, schema, allow_partial=False)
     if not projection.get("complete"):
         return {"published": False, "reason": "incomplete"}
+    digest = projection["corpus_digest"]
+    cur = load_current(store)
+    if cur and cur.get("complete") and cur.get("corpus_digest") == digest:
+        db = _pointer_db(store, cur.get("db"))
+        if db is not None:
+            pointer = {
+                "generation": cur.get("generation"),
+                "corpus_digest": digest,
+                "cheap_fingerprint": cheap_fingerprint(store, schema),
+                "db": cur.get("db"),
+                "complete": True,
+                "count": cur.get("count"),
+            }
+            ptr_tmp = current_pointer(store).with_suffix(".json.tmp")
+            ptr_tmp.parent.mkdir(parents=True, exist_ok=True)
+            ptr_tmp.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
+            os.replace(ptr_tmp, current_pointer(store))
+            return {"published": True, "reused": True, **pointer}
     gen_id = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     dest_dir = index_root(store) / "generations" / gen_id
     dest_dir.mkdir(parents=True, exist_ok=True)

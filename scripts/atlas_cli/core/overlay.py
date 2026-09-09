@@ -299,8 +299,14 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                     continue
                 dest = merged.setdefault(key, {})
                 if not isinstance(dest, dict):
-                    dest = {}
-                    merged[key] = dest
+                    critical.append(
+                        _issue(
+                            "overlay_bindings",
+                            relp,
+                            f"host {key} must be an object",
+                        )
+                    )
+                    continue
                 for raw_name, body in val.items():
                     qn = str(raw_name)
                     if ":" not in qn:

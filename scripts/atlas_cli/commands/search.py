@@ -318,6 +318,18 @@ def run(
         else:
             print(payload["error"])
         return 2
+    if engine_override and recall_enabled(effective):
+        payload = {
+            "ok": False,
+            "error": "--engine cannot be used while recall is enabled; disable recall or pass --profile",
+            "root": str(r),
+            "query": query,
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["error"])
+        return 2
     use_smr = bool(profile) or recall_enabled(effective)
     if use_smr:
         payload, code = run_recall(

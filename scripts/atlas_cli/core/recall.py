@@ -68,7 +68,8 @@ def _eligible(page: ProjectedPage, filters: dict[str, str], include_exits: bool)
                 return False
     if filters.get("path"):
         prefix = filters["path"].replace("\\", "/").strip("/")
-        if prefix and not page.path.replace("\\", "/").startswith(prefix):
+        hay = page.path.replace("\\", "/").lstrip("/")
+        if prefix and hay != prefix and not hay.startswith(prefix + "/"):
             return False
     return True
 
