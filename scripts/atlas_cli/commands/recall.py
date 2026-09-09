@@ -156,7 +156,7 @@ def run_status(root: str | None, as_json: bool = False) -> int:
         print(json.dumps(payload, indent=2))
     else:
         print(f"schema={payload['schema_version']} enabled={payload['enabled']}")
-        print(f"tgrep: {payload['tgrep']['reason']}")
+        print(f"tgrep: {payload['tgrep'].get('reason') or payload['tgrep'].get('binary') or 'unavailable'}")
         gen = payload["generation"]
         if gen:
             print(f"generation: {gen.get('generation')} digest={gen.get('corpus_digest')}")

@@ -274,13 +274,16 @@ def schema_uninstall_cmd(cid: str, root: str | None, as_json: bool) -> None:
 @schema_group.command("upgrade")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
 @click.option("--to", "to_version", default="2.0", show_default=True)
-@click.option("--dry-run", "dry_run", is_flag=True, default=True, help="preview (default)")
-@click.option("--apply", "apply_upgrade", is_flag=True, help="write SCHEMA 2.0 and compatibility overlay")
+@click.option(
+    "--apply/--dry-run",
+    "apply_upgrade",
+    default=False,
+    help="write SCHEMA 2.0 and compatibility overlay / preview (default)",
+)
 @click.option("--json", "as_json", is_flag=True)
 def schema_upgrade_cmd(
     root: str | None,
     to_version: str,
-    dry_run: bool,
     apply_upgrade: bool,
     as_json: bool,
 ) -> None:

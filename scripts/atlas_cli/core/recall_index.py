@@ -41,8 +41,9 @@ def load_current(store: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> None:
+def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
     conn = sqlite3.connect(str(path))
+    inserted = 0
     try:
         conn.execute(
             "CREATE TABLE pages (id TEXT PRIMARY KEY, path TEXT, role TEXT, digest TEXT, title TEXT, description TEXT, body TEXT, meta_json TEXT, edges_json TEXT)"
@@ -75,11 +76,13 @@ def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> None:
                     "INSERT INTO pages_fts(id, title, description, body) VALUES (?,?,?,?)",
                     (page.page_id, page.title, page.description, page.body),
                 )
+            inserted += 1
         conn.execute("INSERT INTO meta VALUES ('corpus_digest', ?)", (digest,))
-        conn.execute("INSERT INTO meta VALUES ('page_count', ?)", (str(len(pages)),))
+        conn.execute("INSERT INTO meta VALUES ('page_count', ?)", (str(inserted),))
         conn.commit()
     finally:
         conn.close()
+    return inserted
 
 
 def publish_generation(
@@ -100,9 +103,11 @@ def publish_generation(
     dest_dir = index_root(store) / "generations" / gen_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     db_path = dest_dir / "projection.sqlite"
-    tmp = Path(tempfile.mkstemp(prefix="atlas-recall-", suffix=".sqlite")[1])
+    fd, tmp_name = tempfile.mkstemp(prefix="atlas-recall-", suffix=".sqlite")
+    os.close(fd)
+    tmp = Path(tmp_name)
     try:
-        _write_sqlite(tmp, projection["pages"], projection["corpus_digest"])
+        inserted = _write_sqlite(tmp, projection["pages"], projection["corpus_digest"])
         os.replace(tmp, db_path)
     except Exception:
         if tmp.exists():
@@ -114,7 +119,7 @@ def publish_generation(
         "cheap_fingerprint": cheap_fingerprint(store, schema),
         "db": str(db_path.relative_to(store)),
         "complete": True,
-        "count": len(projection["pages"]),
+        "count": inserted,
     }
     ptr_tmp = current_pointer(store).with_suffix(".json.tmp")
     ptr_tmp.parent.mkdir(parents=True, exist_ok=True)

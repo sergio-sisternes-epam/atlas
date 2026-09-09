@@ -85,6 +85,8 @@ def run_recall(
     schema, err, effective = _effective(root)
     if schema is None:
         return {"ok": False, "error": err or "missing schema"}, 2
+    if err:
+        return {"ok": False, "error": err}, 2
     version = schema_version(schema)
     if version != "2.0":
         if profile:

@@ -39,6 +39,7 @@ def find_binary() -> Path | None:
 
 def capability(binary: Path | None | object = ...) -> dict[str, Any]:
     resolved = find_binary() if binary is ... else binary
+    present = bool(resolved)
     return {
         "id": "tgrep",
         "stages": ["coarse"],
@@ -48,6 +49,7 @@ def capability(binary: Path | None | object = ...) -> dict[str, Any]:
         "requires": ["disk_only_indexed_search", "tgrep_binary"],
         "serve": False,
         "index": f".atlas-index/{INDEX_NAME}",
+        "reason": "ok" if present else "tgrep binary not on PATH",
     }
 
 
