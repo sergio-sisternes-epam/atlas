@@ -4,12 +4,14 @@ import json
 import re
 from pathlib import Path
 
-from ..core.frontmatter import is_just_links, read_page
+from ..core.frontmatter import FrontmatterError, is_just_links, read_page
 from ..core.paths import RESERVED, iter_concept_md, rel, staging_files, store_root
 from ..core.mesh import consolidate as mesh_consolidate
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
+from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
+from ..core.recall_index import IndexError_, publish_generation
 from ..core.schema import (
     by_type_map,
     load_contract,
@@ -323,6 +325,9 @@ def run(
         else:
             for msg in validate_against_contract(schema, load_contract()):
                 critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
+            if schema is not None and schema_version(schema) == "2.0":
+                for msg in validate_store_v2(schema):
+                    critical.append({"id": "schema_v2", "path": "SCHEMA.json", "msg": msg})
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
@@ -359,7 +364,13 @@ def run(
             break
         text = path.read_text(encoding="utf-8", errors="replace")
         ignores = _ignores_in(text)
-        meta, body = read_page(path)
+        try:
+            meta, body = read_page(path, schema_version(schema) if schema else "1.0")
+        except FrontmatterError as e:
+            critical.append(
+                {"id": "frontmatter", "path": rel(r, path), "msg": str(e)}
+            )
+            continue
 
         if path.name in RESERVED:
             # index.md / log.md are allowed; they should not be ordinary concepts
@@ -453,6 +464,19 @@ def run(
             {"id": "index_md_present", "path": "index.md", "msg": "root index.md missing"}
         )
 
+    index_info = None
+    if not focused and not critical and recall_enabled(schema):
+        try:
+            index_info = publish_generation(r, schema, focused=False)
+        except (IndexError_, Exception) as e:
+            critical.append(
+                {
+                    "id": "recall_index",
+                    "path": ".atlas-index/recall",
+                    "msg": f"failed to publish recall generation: {e}",
+                }
+            )
+
     result = {
         "root": str(r),
         "ok": len(critical) == 0,
@@ -470,6 +494,7 @@ def run(
             "atlas_count": mesh_result.get("atlas_count"),
             "note": mesh_result.get("note"),
         },
+        "recall_index": index_info,
     }
 
     if as_json:

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/contribution-v1",
+  "title": "Atlas SCHEMA contribution v1",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["contribution_id"],
+  "properties": {
+    "contribution_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "claimed_folders": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "templates": { "type": "object" },
+    "types": { "type": "object" },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/binding" }
+    },
+    "presets": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/preset" }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["text", "facet", "predicate", "edge", "page_contract"]
+        },
+        "applies_to": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "types": { "type": "array", "items": { "type": "string" } },
+            "path_prefixes": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "pointer": { "type": "string" },
+        "slot": { "type": "string", "enum": ["primary", "secondary", "body"] },
+        "value_type": {
+          "type": "string",
+          "enum": ["string", "boolean", "integer", "number", "date-string"]
+        },
+        "cardinality": { "type": "string", "enum": ["scalar", "array"] },
+        "direction": { "type": "string", "enum": ["outgoing", "incoming"] },
+        "target_pointer": { "type": "string" },
+        "kind_pointer": { "type": "string" },
+        "predicate": { "type": "object" }
+      }
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "coarse": { "type": "object" },
+        "rank": { "type": "object" },
+        "retrieve": { "type": "object" },
+        "limits": { "type": "object" },
+        "bindings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

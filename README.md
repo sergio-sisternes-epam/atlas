@@ -6,7 +6,7 @@ root APM skill bundle; the `okf` package remains the format authority.
 
 ## What it provides
 
-- Query, remember, work, landscape, and schema workflows selected by intent.
+- Query, remember, work, landscape, schema, and configure workflows selected by intent.
 - A deterministic Python CLI for Atlas creation, validation, search, mounting,
   migration, promotion, and schema governance.
 - Templates and reference procedures for durable OKF stores.

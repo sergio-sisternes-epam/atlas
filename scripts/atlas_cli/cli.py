@@ -13,6 +13,7 @@ from .commands import mount as cmd_mount
 from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
 from .commands import schema_cmd as cmd_schema
+from .commands import recall as cmd_recall
 
 
 @click.group(
@@ -105,9 +106,16 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
 @click.option("--force", is_flag=True, help="overwrite existing SCHEMA.json")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
-def init_cmd(root: str | None, force: bool, as_json: bool) -> None:
+@click.option(
+    "--schema-version",
+    "schema_version",
+    default="1.0",
+    show_default=True,
+    help="SCHEMA envelope version (1.0 stays current behaviour; 2.0 adds disabled recall)",
+)
+def init_cmd(root: str | None, force: bool, as_json: bool, schema_version: str) -> None:
     """Write a first SCHEMA.json and default templates."""
-    raise SystemExit(cmd_init.run(root, force, as_json))
+    raise SystemExit(cmd_init.run(root, force, as_json, schema_version))
 
 
 @main.command("search")
@@ -126,6 +134,12 @@ def init_cmd(root: str | None, force: bool, as_json: bool) -> None:
     is_flag=True,
     help="include kva/status terminated|deprecated|superseded (also via kva:terminated)",
 )
+@click.option("--profile", default=None, help="request-scoped SCHEMA 2.0 recall profile")
+@click.option(
+    "--allow-partial",
+    is_flag=True,
+    help="SCHEMA 2.0: return incomplete corpus results (exit 1)",
+)
 def search_cmd(
     query: str,
     root: str | None,
@@ -133,10 +147,14 @@ def search_cmd(
     engine: str | None,
     as_json: bool,
     include_exits: bool,
+    profile: str | None,
+    allow_partial: bool,
 ) -> None:
     """Discover concepts (tool). Agent protocol is path query + B17 card."""
     raise SystemExit(
-        cmd_search.run(root, query, limit, as_json, engine, include_exits)
+        cmd_search.run(
+            root, query, limit, as_json, engine, include_exits, profile, allow_partial
+        )
     )
 
 
@@ -151,6 +169,8 @@ def search_cmd(
 )
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--include-exits", is_flag=True)
+@click.option("--profile", default=None)
+@click.option("--allow-partial", is_flag=True)
 def query_cmd(
     query: str,
     root: str | None,
@@ -158,10 +178,14 @@ def query_cmd(
     engine: str | None,
     as_json: bool,
     include_exits: bool,
+    profile: str | None,
+    allow_partial: bool,
 ) -> None:
     """Alias of search (agent-facing verb from the mesh plan)."""
     raise SystemExit(
-        cmd_search.run(root, query, limit, as_json, engine, include_exits)
+        cmd_search.run(
+            root, query, limit, as_json, engine, include_exits, profile, allow_partial
+        )
     )
 
 
@@ -245,6 +269,84 @@ def schema_install_cmd(source: str, root: str | None, force: bool, as_json: bool
 def schema_uninstall_cmd(cid: str, root: str | None, as_json: bool) -> None:
     """Remove an overlay and receipt-listed CLI writes. Does not delete later pages."""
     raise SystemExit(cmd_schema.run_uninstall(cid, root, as_json))
+
+
+@schema_group.command("upgrade")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--to", "to_version", default="2.0", show_default=True)
+@click.option("--dry-run", "dry_run", is_flag=True, default=True, help="preview (default)")
+@click.option("--apply", "apply_upgrade", is_flag=True, help="write SCHEMA 2.0 and compatibility overlay")
+@click.option("--json", "as_json", is_flag=True)
+def schema_upgrade_cmd(
+    root: str | None,
+    to_version: str,
+    dry_run: bool,
+    apply_upgrade: bool,
+    as_json: bool,
+) -> None:
+    """Upgrade SCHEMA 1.0 to 2.0. Does not enable recall."""
+    raise SystemExit(cmd_schema.run_upgrade(root, apply_upgrade, as_json, to_version))
+
+
+@main.group("recall")
+def recall_group() -> None:
+    """Inspect, validate, activate, or index SCHEMA 2.0 recall."""
+
+
+@recall_group.command("profiles")
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_profiles_cmd(root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_profiles(root, as_json))
+
+
+@recall_group.command("show")
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_show_cmd(root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_show(root, as_json))
+
+
+@recall_group.command("status")
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_status_cmd(root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_status(root, as_json))
+
+
+@recall_group.command("validate")
+@click.option("--root", default=None)
+@click.option("--config", default=None, help="recall JSON file")
+@click.option("--json", "as_json", is_flag=True)
+def recall_validate_cmd(root: str | None, config: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_validate(root, config, as_json))
+
+
+@recall_group.command("activate")
+@click.option("--profile", default="atlas:ranked", show_default=True)
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_activate_cmd(profile: str, root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_activate(root, profile, as_json))
+
+
+@recall_group.command("disable")
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_disable_cmd(root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_disable(root, as_json))
+
+
+@recall_group.group("index")
+def recall_index_group() -> None:
+    """Recall index generations."""
+
+
+@recall_index_group.command("build")
+@click.option("--root", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def recall_index_build_cmd(root: str | None, as_json: bool) -> None:
+    raise SystemExit(cmd_recall.run_index_build(root, as_json))
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Need knowledge from an Atlas (skill process memory or project store).
 | `path: query` | B17 protocol | Card, form the ask, search, rewrite once, select, read, hop, receipt |
 | `atlas search` | CLI tool | Ranked hits + traffic payload |
 
-Card `path` is always `query` for retrieval. The process is always `atlas search`. Do not add a peer path named search. Do not add an `atlas query` verb.
+Card `path` is always `query` for retrieval. The process is always `atlas search`. Do not add a peer path named search. The existing `atlas query` CLI alias remains search; do not invent a separate query engine. SCHEMA 2.0 recall (`--profile`, `--allow-partial`) is configured on path `configure`, not here.
 
 ## Enter (required — Atlas `activation_card: on`)
 
@@ -51,6 +51,8 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas sear
    python3 <atlas-skill>/scripts/atlas.py search "<query>" --root <root> --json
    ```
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
+
+   **Engine choice.** Grep is the basic default (`recall` off). After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
 4. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
 5. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
 6. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.

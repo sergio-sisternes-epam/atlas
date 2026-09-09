@@ -7,7 +7,10 @@ import subprocess
 from pathlib import Path
 
 from ..core.frontmatter import read_page
+from ..core.overlay import merge_overlays
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.recall import run_recall
+from ..core.recall_config import recall_enabled
 from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
@@ -293,9 +296,66 @@ def run(
     as_json: bool = False,
     engine_override: str | None = None,
     include_exits: bool = False,
+    profile: str | None = None,
+    allow_partial: bool = False,
 ) -> int:
     r = store_root(root)
     schema, _ = load_schema(r)
+    effective = schema
+    if schema is not None:
+        merged, crit, _ = merge_overlays(schema, r)
+        if not crit:
+            effective = merged
+    if engine_override and profile:
+        payload = {
+            "ok": False,
+            "error": "conflicting flags: --engine and --profile",
+            "root": str(r),
+            "query": query,
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["error"])
+        return 2
+    use_smr = bool(profile) or recall_enabled(effective)
+    if use_smr:
+        payload, code = run_recall(
+            r,
+            query,
+            profile=profile,
+            allow_partial=allow_partial,
+            include_exits=include_exits,
+            limit=limit,
+        )
+        if not payload.get("legacy"):
+            if as_json:
+                print(json.dumps(payload, indent=2, default=str))
+            else:
+                if not payload.get("ok"):
+                    print(f"atlas search — FAIL: {payload.get('error')}")
+                else:
+                    print(f"atlas search — root={r}")
+                    print(f"query: {query}")
+                    rec = payload.get("recall") or {}
+                    print(
+                        f"engine: configured={payload.get('engine_configured')} used={payload.get('engine_used')} complete={rec.get('complete')}"
+                    )
+                    hits = payload.get("hits") or []
+                    if not hits:
+                        print("no hits")
+                    for i, h in enumerate(hits, 1):
+                        typ = f" [{h['type']}]" if h.get("type") else ""
+                        print(f"{i}. {h['path']}  score={h['score']}{typ}")
+                        if h.get("title"):
+                            print(f"   title: {h['title']}")
+            return code
+    if allow_partial and not use_smr:
+        if as_json:
+            print(json.dumps({"ok": False, "error": "--allow-partial requires SCHEMA 2.0 recall", "root": str(r)}))
+        else:
+            print("--allow-partial requires SCHEMA 2.0 recall")
+        return 2
     staging_name = staging_dir_name(schema)
     engine = (engine_override or _search_engine(schema)).lower()
     if engine not in ("grep", "bm25"):

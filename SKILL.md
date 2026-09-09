@@ -1,7 +1,7 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.9.1
+description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+version: 0.10.0
 activation_card: on
 ---
 
@@ -45,7 +45,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape | schema | ci
+path: query | remember | work | landscape | schema | configure | ci
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -102,6 +102,7 @@ directory. Missing `atlas_id` means Enter is incomplete. One own store per Run.
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
+| **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection | `references/paths/configure.md` |
 | **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount | `references/paths/ci.md` |
 
 Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, ...)
@@ -121,6 +122,7 @@ are tools used inside paths.
 10. **Thoughtful current-theory remember** - writing `lesson`, live `decision`, or `recipe` requires this skill's remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
 11. **Write-home is the active git repo** - load path `mount` first. Mount-if-missing with no `--target`. Query and persist use `--root` on that mount. No git repository: refuse to persist. Never mount or write at `<skill>/references/atlas`.
 12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
+12a. **Recall policy = path `configure` + CLI** - load `references/paths/configure.md`. Installing a contribution is not activation.
 13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
 
 ## CLI surface
@@ -131,8 +133,12 @@ the following commands relative to the consumer project.
 ```text
 python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force]
 python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
-python3 <atlas-skill>/scripts/atlas.py search "..." --root <atlas> [--engine grep|bm25] [--include-exits]
+python3 <atlas-skill>/scripts/atlas.py search "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
                        # query tokens: type: kva: status: work_id: path:
+python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
+python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py recall index build --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]
@@ -144,7 +150,7 @@ python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <atlas> [-
 python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
 ```
 
-Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when index exists).
+Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `query` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
 
 ## Core contract (summary)
 
@@ -177,5 +183,5 @@ Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when i
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, query, remember, work, landscape, schema, ci). SCHEMA
+(mount, init, migrate, query, remember, work, landscape, schema, configure, ci). SCHEMA
 and templates live under `references/`.

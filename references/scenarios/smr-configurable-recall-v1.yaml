@@ -1,0 +1,24 @@
+id: smr-configurable-recall-v1
+work_id: 2026-09-09-atlas-smr-configurable-recall
+adversarial: true
+packages: [atlas]
+expect:
+  legacy_search_until_opt_in: true
+  install_is_not_activation: true
+  tgrep_gated: true
+  partial_requires_flag: true
+smokes:
+  - id: init-default-1.0
+    expect: atlas init writes SCHEMA 1.0 without recall
+  - id: upgrade-does-not-enable
+    expect: schema upgrade --apply writes 2.0 with recall.enabled false
+  - id: engine-profile-conflict
+    expect: --engine and --profile together exit 2
+  - id: tgrep-blocked
+    expect: atlas:tgrep activate fails unsupported_capability
+  - id: install-not-activate
+    expect: overlay presets exist but SCHEMA.recall.preset unchanged
+  - id: uninstall-dangling-preset
+    expect: uninstall of selected namespaced preset exits 2
+  - id: focused-does-not-publish
+    expect: compile --type does not publish a complete generation
