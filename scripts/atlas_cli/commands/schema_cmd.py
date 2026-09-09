@@ -20,7 +20,7 @@ from ..core.overlay import (
     write_receipt,
 )
 from ..core.paths import rel, store_root
-from ..core.recall_config import schema_version, validate_contribution
+from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
 from ..core.schema import load_schema, staging_dir_name
 from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
 
@@ -113,7 +113,11 @@ def run_install(
         return 2
     host, _ = load_schema(r)
     if host is not None and schema_version(host) == "2.0":
-        cerrs = validate_contribution(ov)
+        try:
+            cerrs = validate_contribution(ov)
+        except RecallConfigError as e:
+            _print(as_json, {"ok": False, "error": str(e), "root": str(r), "id": cid})
+            return 2
         if cerrs:
             _print(as_json, {"ok": False, "error": "; ".join(cerrs), "root": str(r), "id": cid})
             return 2

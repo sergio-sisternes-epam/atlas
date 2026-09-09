@@ -84,6 +84,7 @@ def main() -> int:
     check("init-2.0-disabled", r.returncode == 0 and schema.get("recall", {}).get("enabled") is False)
 
     print("Failed:" if failed else "ok", ", ".join(failed))
+    shutil.rmtree(tmp, ignore_errors=True)
     return 1 if failed else 0
 
 

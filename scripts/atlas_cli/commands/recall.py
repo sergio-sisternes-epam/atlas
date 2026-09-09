@@ -171,22 +171,26 @@ def run_status(root: str | None, as_json: bool = False) -> int:
 
 def run_validate(root: str | None, config: str | None, as_json: bool = False) -> int:
     r = store_root(root)
-    if config:
-        path = Path(config)
-        try:
-            data = loads_strict(path.read_text(encoding="utf-8"))
-        except (OSError, StrictJsonError) as e:
-            _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
-            return 2
-        errs = validate_against("recall-v1.schema.json", data)
-    else:
-        schema, err = _effective(r)
-        if schema is None:
-            _print(as_json, {"ok": False, "error": err, "root": str(r)})
-            return 2
-        errs = validate_store_v2(schema) if schema_version(schema) == "2.0" else []
-        if schema_version(schema) != "2.0":
-            errs = ["SCHEMA is not 2.0"]
+    try:
+        if config:
+            path = Path(config)
+            try:
+                data = loads_strict(path.read_text(encoding="utf-8"))
+            except (OSError, StrictJsonError) as e:
+                _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
+                return 2
+            errs = validate_against("recall-v1.schema.json", data)
+        else:
+            schema, err = _effective(r)
+            if schema is None:
+                _print(as_json, {"ok": False, "error": err, "root": str(r)})
+                return 2
+            errs = validate_store_v2(schema) if schema_version(schema) == "2.0" else []
+            if schema_version(schema) != "2.0":
+                errs = ["SCHEMA is not 2.0"]
+    except RecallConfigError as e:
+        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
+        return 2
     payload = {"ok": not errs, "root": str(r), "errors": errs}
     if as_json:
         print(json.dumps(payload, indent=2))
