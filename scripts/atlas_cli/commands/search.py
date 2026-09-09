@@ -217,7 +217,11 @@ def _grep_search(
             continue
         try:
             meta, body = read_page(path, schema_version=page_schema_version)
-        except (OSError, FrontmatterError):
+        except OSError:
+            continue
+        except FrontmatterError as e:
+            if sum(1 for w in warnings if w.startswith("frontmatter:")) < 8:
+                warnings.append(f"frontmatter: {rel(root, path)}: {e}")
             continue
         if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
             continue

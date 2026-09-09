@@ -241,7 +241,7 @@ def pages_from_db(db_path: Path) -> list[ProjectedPage]:
 
 
 def open_db(path: Path) -> sqlite3.Connection:
-    uri = f"file:{path}?mode=ro"
+    uri = f"{path.resolve().as_uri()}?mode=ro"
     return sqlite3.connect(uri, uri=True)
 
 

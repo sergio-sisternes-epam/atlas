@@ -234,10 +234,28 @@ class RecallConfigTests(unittest.TestCase):
             "---\ntype: decision\ntitle: Ranking contract\n---\n\nRanking contract body.\n",
             encoding="utf-8",
         )
-        hits, _ = _grep_search(store, "Ranking", "staging", 10, False, "2.0")
+        hits, warns = _grep_search(store, "Ranking", "staging", 10, False, "2.0")
         paths = [h.get("path") for h in hits]
         self.assertTrue(any("ok.md" in (p or "") for p in paths), paths)
         self.assertFalse(any("bad.md" in (p or "") for p in paths), paths)
+        self.assertTrue(any("frontmatter:" in w and "bad.md" in w for w in warns), warns)
+
+    def test_open_db_uri_encodes_special_chars(self) -> None:
+        import sqlite3
+
+        from atlas_cli.core import recall_index
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas db "))
+        db = tmp / "proj ection.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE t (x INTEGER)")
+        conn.commit()
+        conn.close()
+        opened = recall_index.open_db(db)
+        try:
+            self.assertEqual(opened.execute("SELECT count(*) FROM t").fetchone()[0], 0)
+        finally:
+            opened.close()
 
 
 if __name__ == "__main__":
