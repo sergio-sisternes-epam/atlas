@@ -78,6 +78,11 @@ class RecallConfigTests(unittest.TestCase):
         with self.assertRaises(tgrep_driver.TgrepError) as ctx2:
             tgrep_driver.run_argv(Path("/bin/echo"), ["--no-index", "q"], cwd=Path("."), timeout=1)
         self.assertEqual(str(ctx2.exception), tgrep_driver.NO_INDEX_FORBIDDEN)
+        guarded = tgrep_driver._guard_args(
+            ["search", "-e", "serve", "/tmp/workspace/serve"]
+        )
+        self.assertEqual(guarded[0], "search")
+        self.assertIn("serve", guarded)
 
     def test_tgrep_digest_index_and_filter(self) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))

@@ -24,7 +24,6 @@ INDEX_NAME = "tgrep"
 DIGEST_NAME = "generation.json"
 INDEX_TIMEOUT_SEC = 120
 SEARCH_TIMEOUT_SEC = 30
-FORBIDDEN_TOKENS = frozenset({"serve", "--no-index"})
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -72,11 +71,10 @@ def _rel(store: Path, raw: str) -> str | None:
 
 def _guard_args(args: Iterable[str]) -> list[str]:
     out = [str(a) for a in args]
-    for token in out:
-        if token in FORBIDDEN_TOKENS or Path(token).name == "serve":
-            if token == "--no-index":
-                raise TgrepError(NO_INDEX_FORBIDDEN)
-            raise TgrepError(SERVE_FORBIDDEN)
+    if out and out[0] == "serve":
+        raise TgrepError(SERVE_FORBIDDEN)
+    if "--no-index" in out:
+        raise TgrepError(NO_INDEX_FORBIDDEN)
     return out
 
 

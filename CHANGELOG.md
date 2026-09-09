@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-## 0.10.0 - 2026-09-09
-
 ### Added
 
 - SCHEMA 2.0 opt-in Semantic Memory Recall (scan, SQLite FTS5, bounded graph retrieve).
