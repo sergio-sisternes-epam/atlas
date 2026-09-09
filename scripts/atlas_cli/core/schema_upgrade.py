@@ -121,7 +121,7 @@ def apply(root: Path) -> dict[str, Any]:
             lock.unlink(missing_ok=True)
         else:
             raise UpgradeError("interrupted upgrade lock present; refusing to continue blindly")
-    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         try:
             os.write(fd, b"schema-upgrade-2.0\n")

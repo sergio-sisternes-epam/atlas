@@ -5,7 +5,7 @@ from pathlib import Path
 RESERVED = frozenset({"index.md", "log.md"})
 SCHEMA_NAME = "SCHEMA.json"
 DEFAULT_STAGING = "staging"
-SKIP_DIRS = frozenset({"staging", "templates", ".atlas-index", "mesh", "schema.d"})
+SKIP_DIRS = frozenset({"staging", "templates", ".atlas-index", "mesh", "schema.d", ".git"})
 
 
 def store_root(root: str | None) -> Path:

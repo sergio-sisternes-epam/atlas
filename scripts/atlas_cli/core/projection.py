@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from .paths import rel, store_root
 from .recall_config import schema_version
 from .schema import staging_dir_name
 
-SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d"})
+SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
 
 
 class ProjectionError(ValueError):
@@ -50,17 +51,24 @@ def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
     staging = staging_dir_name(schema)
     skip = set(SKIP_TOP) | {staging}
     out: list[Path] = []
-    for path in sorted(root.rglob("*.md")):
-        if not path.is_file():
-            continue
+    root_r = root.resolve()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         try:
-            parts = path.resolve().relative_to(root.resolve()).parts
+            parts = Path(dirpath).resolve().relative_to(root_r).parts
         except ValueError:
+            dirnames[:] = []
             continue
         if parts and parts[0] in skip:
+            dirnames[:] = []
             continue
-        out.append(path)
-    return out
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        for name in filenames:
+            if not name.endswith(".md"):
+                continue
+            path = Path(dirpath) / name
+            if path.is_file():
+                out.append(path)
+    return sorted(out)
 
 
 def cheap_fingerprint(root: Path, schema: dict[str, Any] | None) -> str:

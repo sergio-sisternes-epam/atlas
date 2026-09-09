@@ -315,6 +315,19 @@ class RecallConfigTests(unittest.TestCase):
         hits, _ = _grep_search(store, "Ranking", "staging", 10, False, "2.0")
         self.assertTrue(any("empty.md" in (h.get("path") or "") for h in hits))
 
+    def test_eligible_paths_skips_git(self) -> None:
+        from atlas_cli.core.projection import eligible_paths
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-proj-"))
+        store = tmp / "store"
+        (store / "decisions").mkdir(parents=True)
+        (store / "decisions" / "a.md").write_text("# a\n", encoding="utf-8")
+        (store / ".git" / "hooks").mkdir(parents=True)
+        (store / ".git" / "hooks" / "x.md").write_text("# no\n", encoding="utf-8")
+        names = [p.name for p in eligible_paths(store, None)]
+        self.assertIn("a.md", names)
+        self.assertNotIn("x.md", names)
+
     def test_open_db_uri_encodes_special_chars(self) -> None:
         import sqlite3
 
