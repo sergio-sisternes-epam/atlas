@@ -144,6 +144,7 @@ class RecallConfigTests(unittest.TestCase):
         self.assertEqual([h["path"] for h in hits2], ["decisions/alpha.md"])
         self.assertFalse(meta2["rebuilt"])
         self.assertFalse(any(c and c[0] == "index" for c in calls))
+        self.assertTrue(any(c and c[0] == "search" for c in calls))
         self.assertTrue(any("-i" in c and "-F" not in c for c in calls))
 
     def test_tgrep_serve_json_detected(self) -> None:
@@ -185,6 +186,16 @@ class RecallConfigTests(unittest.TestCase):
         self.assertIsNone(recall_index.matching_generation(store, "digest-x"))
         pointer["db"] = "../evil.sqlite"
         (store / ".atlas-index" / "recall" / "current.json").write_text(
+            json.dumps(pointer), encoding="utf-8"
+        )
+        self.assertIsNone(recall_index.matching_generation(store, "digest-x"))
+        outside = tmp / "outside-index"
+        (outside / "recall").mkdir(parents=True)
+        (outside / "recall" / "evil.sqlite").write_bytes(b"not-a-db")
+        (store / ".atlas-index").rename(store / ".atlas-index.bak")
+        (store / ".atlas-index").symlink_to(outside)
+        pointer["db"] = ".atlas-index/recall/evil.sqlite"
+        (outside / "recall" / "current.json").write_text(
             json.dumps(pointer), encoding="utf-8"
         )
         self.assertIsNone(recall_index.matching_generation(store, "digest-x"))

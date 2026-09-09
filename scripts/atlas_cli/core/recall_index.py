@@ -147,12 +147,19 @@ def publish_generation(
 
 
 def _pointer_db(store: Path, raw: object) -> Path | None:
-    text = str(raw or "").strip()
+    text = str(raw or "").strip().replace("\\", "/")
     if not text or Path(text).is_absolute() or Path(text).anchor:
         return None
-    candidate = (store / text).resolve()
+    rel = Path(text)
+    if ".." in rel.parts:
+        return None
     try:
-        candidate.relative_to(index_root(store).resolve())
+        rel.relative_to(Path(INDEX_DIR) / "recall")
+    except ValueError:
+        return None
+    candidate = (store / rel).resolve()
+    try:
+        candidate.relative_to(store.resolve())
     except ValueError:
         return None
     return candidate if candidate.is_file() else None

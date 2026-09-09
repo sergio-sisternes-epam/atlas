@@ -226,6 +226,7 @@ def search(
     pattern = "|".join(re.escape(t) for t in tokens)
     admitted = {p.path for p in pages if p.role != "log"}
     args = [
+        "search",
         "--json",
         "-i",
         "--hidden",
