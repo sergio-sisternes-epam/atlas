@@ -200,6 +200,45 @@ class RecallConfigTests(unittest.TestCase):
         )
         self.assertIsNone(recall_index.matching_generation(store, "digest-x"))
 
+    def test_publish_rejects_symlinked_index_root(self) -> None:
+        from atlas_cli.core import recall_index
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-idx-"))
+        store = tmp / "store"
+        store.mkdir()
+        outside = tmp / "outside-index"
+        outside.mkdir()
+        (store / ".atlas-index").symlink_to(outside)
+        schema = {
+            "schema_version": "2.0",
+            "recall": {"version": 1, "enabled": True, "preset": "atlas:scan"},
+        }
+        with self.assertRaises(recall_index.IndexError_):
+            recall_index.publish_generation(
+                store,
+                schema,
+                focused=False,
+                projection={"complete": True, "corpus_digest": "x", "pages": []},
+            )
+
+    def test_grep_search_skips_frontmatter_error(self) -> None:
+        from atlas_cli.commands.search import _grep_search
+
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-grep-"))
+        store = tmp / "store"
+        (store / "decisions").mkdir(parents=True)
+        (store / "decisions" / "bad.md").write_text(
+            "---\ntitle: a\ntitle: b\n---\n\nRanking duplicate\n", encoding="utf-8"
+        )
+        (store / "decisions" / "ok.md").write_text(
+            "---\ntype: decision\ntitle: Ranking contract\n---\n\nRanking contract body.\n",
+            encoding="utf-8",
+        )
+        hits, _ = _grep_search(store, "Ranking", "staging", 10, False, "2.0")
+        paths = [h.get("path") for h in hits]
+        self.assertTrue(any("ok.md" in (p or "") for p in paths), paths)
+        self.assertFalse(any("bad.md" in (p or "") for p in paths), paths)
+
 
 if __name__ == "__main__":
     unittest.main()

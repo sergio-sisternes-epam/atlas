@@ -26,6 +26,24 @@ def index_root(store: Path) -> Path:
     return store / INDEX_DIR / "recall"
 
 
+def _reject_symlink_escape(store: Path, path: Path) -> None:
+    store_r = store.resolve()
+    try:
+        rel = path.relative_to(store)
+    except ValueError as e:
+        raise IndexError_("recall index path escapes the store") from e
+    acc = store
+    for part in rel.parts:
+        acc = acc / part
+        if acc.is_symlink():
+            raise IndexError_("recall index path must not be a symlink")
+        if acc.exists():
+            try:
+                acc.resolve().relative_to(store_r)
+            except ValueError as e:
+                raise IndexError_("recall index path escapes the store") from e
+
+
 def current_pointer(store: Path) -> Path:
     return index_root(store) / CURRENT_NAME
 
@@ -95,6 +113,7 @@ def publish_generation(
         raise IndexError_("focused compile cannot publish a complete generation")
     if not recall_enabled(schema):
         return {"published": False, "reason": "recall_disabled"}
+    _reject_symlink_escape(store, index_root(store))
     if projection is None:
         projection = project_store(store, schema, allow_partial=False)
     if not projection.get("complete"):
@@ -119,7 +138,9 @@ def publish_generation(
             return {"published": True, "reused": True, **pointer}
     gen_id = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     dest_dir = index_root(store) / "generations" / gen_id
+    _reject_symlink_escape(store, dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
+    _reject_symlink_escape(store, dest_dir)
     db_path = dest_dir / "projection.sqlite"
     fd, tmp_name = tempfile.mkstemp(prefix="atlas-recall-", suffix=".sqlite")
     os.close(fd)

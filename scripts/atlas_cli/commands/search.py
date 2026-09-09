@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..core.frontmatter import read_page
+from ..core.frontmatter import FrontmatterError, read_page
 from ..core.overlay import merge_overlays
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
 from ..core.recall import run_recall
@@ -216,10 +216,9 @@ def _grep_search(
         if path.name in RESERVED and path.name == "log.md":
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            meta, body = read_page(path, schema_version=page_schema_version)
+        except (OSError, FrontmatterError):
             continue
-        meta, body = read_page(path, schema_version=page_schema_version)
         if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
             continue
         if filters.get("kva") and str(meta.get("kva") or "").strip() != filters["kva"]:
