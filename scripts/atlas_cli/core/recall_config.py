@@ -230,7 +230,14 @@ def resolve_profile(
         base = _deep_merge(base, overrides)
         provenance.append("request.overrides")
     ceilings = recall.get("ceilings") if isinstance(recall.get("ceilings"), dict) else {}
-    merged_ceil = {**DEFAULT_CEILINGS, **{k: int(v) for k, v in ceilings.items() if k in DEFAULT_CEILINGS}}
+    merged_ceil = dict(DEFAULT_CEILINGS)
+    for k, v in ceilings.items():
+        if k not in DEFAULT_CEILINGS:
+            continue
+        try:
+            merged_ceil[k] = int(v)
+        except (TypeError, ValueError) as e:
+            raise RecallConfigError(f"ceilings.{k} must be an integer") from e
     limits, clamp_notes = _clamp_limits(base.get("limits") or {}, merged_ceil)
     base["limits"] = limits
     for stage in ("coarse", "rank", "retrieve"):

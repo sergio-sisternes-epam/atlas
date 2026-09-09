@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atlas_cli.commands.recall import run_validate
 from atlas_cli.core.jsonutil import StrictJsonError, loads_strict
 from atlas_cli.core.recall_config import (
+    RecallConfigError,
     default_recall_block,
     list_profiles,
     resolve_profile,
@@ -57,6 +58,19 @@ class RecallConfigTests(unittest.TestCase):
         )
         self.assertEqual(resolved["effective"]["limits"]["max_hits"], 100)
         self.assertTrue(resolved["notes"])
+
+    def test_ceilings_non_integer_is_config_error(self) -> None:
+        with self.assertRaises(RecallConfigError):
+            resolve_profile(
+                {
+                    "recall": {
+                        "version": 1,
+                        "enabled": True,
+                        "preset": "atlas:scan",
+                        "ceilings": {"max_hits": None},
+                    }
+                }
+            )
 
     def test_install_is_not_activation(self) -> None:
         profiles = list_profiles({"presets": {"demo:explore": {"coarse": {"driver": "scan"}}}})

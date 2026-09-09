@@ -142,7 +142,9 @@ def publish_generation(
     dest_dir.mkdir(parents=True, exist_ok=True)
     _reject_symlink_escape(store, dest_dir)
     db_path = dest_dir / "projection.sqlite"
-    fd, tmp_name = tempfile.mkstemp(prefix="atlas-recall-", suffix=".sqlite")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix="atlas-recall-", suffix=".sqlite", dir=str(dest_dir)
+    )
     os.close(fd)
     tmp = Path(tmp_name)
     try:
