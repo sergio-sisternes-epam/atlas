@@ -6,8 +6,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..core.frontmatter import read_page
+from ..core.frontmatter import FrontmatterError, read_page
+from ..core.overlay import merge_overlays
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.recall import run_recall
+from ..core.recall_config import recall_enabled, schema_version
 from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
@@ -159,6 +162,7 @@ def _grep_search(
     staging_dir: str,
     limit: int,
     include_exits: bool,
+    page_schema_version: str = "1.0",
 ) -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     filters, rest = _split_filters(query)
@@ -212,10 +216,13 @@ def _grep_search(
         if path.name in RESERVED and path.name == "log.md":
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            meta, body = read_page(path, schema_version=page_schema_version)
         except OSError:
             continue
-        meta, body = read_page(path)
+        except FrontmatterError as e:
+            if sum(1 for w in warnings if w.startswith("frontmatter:")) < 8:
+                warnings.append(f"frontmatter: {rel(root, path)}: {e}")
+            continue
         if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
             continue
         if filters.get("kva") and str(meta.get("kva") or "").strip() != filters["kva"]:
@@ -263,7 +270,7 @@ def _grep_search(
             "title": title or path.stem,
             "type": str(meta.get("type") or ""),
             "terms": hit_terms,
-            "snippet": _snippet(body or text, tokens or [next(iter(filters.values()), "")]),
+            "snippet": _snippet(body, tokens or [next(iter(filters.values()), "")]),
             "relates_to": _relates_preview(meta),
         }
         for key in ("kva", "status", "work_id", "growth"):
@@ -293,9 +300,89 @@ def run(
     as_json: bool = False,
     engine_override: str | None = None,
     include_exits: bool = False,
+    profile: str | None = None,
+    allow_partial: bool = False,
 ) -> int:
     r = store_root(root)
     schema, _ = load_schema(r)
+    effective = schema
+    if schema is not None:
+        merged, crit, _ = merge_overlays(schema, r)
+        if crit:
+            payload = {
+                "ok": False,
+                "error": "; ".join(i["msg"] for i in crit),
+                "root": str(r),
+                "query": query,
+            }
+            if as_json:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"atlas search — FAIL: {payload['error']}")
+            return 2
+        effective = merged
+    if engine_override and profile:
+        payload = {
+            "ok": False,
+            "error": "conflicting flags: --engine and --profile",
+            "root": str(r),
+            "query": query,
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["error"])
+        return 2
+    if engine_override and recall_enabled(effective):
+        payload = {
+            "ok": False,
+            "error": "--engine cannot be used while recall is enabled; disable recall or pass --profile",
+            "root": str(r),
+            "query": query,
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["error"])
+        return 2
+    use_smr = bool(profile) or recall_enabled(effective)
+    if use_smr:
+        payload, code = run_recall(
+            r,
+            query,
+            profile=profile,
+            allow_partial=allow_partial,
+            include_exits=include_exits,
+            limit=limit,
+        )
+        if not payload.get("legacy"):
+            if as_json:
+                print(json.dumps(payload, indent=2, default=str))
+            else:
+                if not payload.get("ok"):
+                    print(f"atlas search — FAIL: {payload.get('error')}")
+                else:
+                    print(f"atlas search — root={r}")
+                    print(f"query: {query}")
+                    rec = payload.get("recall") or {}
+                    print(
+                        f"engine: configured={payload.get('engine_configured')} used={payload.get('engine_used')} complete={rec.get('complete')}"
+                    )
+                    hits = payload.get("hits") or []
+                    if not hits:
+                        print("no hits")
+                    for i, h in enumerate(hits, 1):
+                        typ = f" [{h['type']}]" if h.get("type") else ""
+                        print(f"{i}. {h['path']}  score={h['score']}{typ}")
+                        if h.get("title"):
+                            print(f"   title: {h['title']}")
+            return code
+    if allow_partial and not use_smr:
+        if as_json:
+            print(json.dumps({"ok": False, "error": "--allow-partial requires SCHEMA 2.0 recall", "root": str(r)}))
+        else:
+            print("--allow-partial requires SCHEMA 2.0 recall")
+        return 2
     staging_name = staging_dir_name(schema)
     engine = (engine_override or _search_engine(schema)).lower()
     if engine not in ("grep", "bm25"):
@@ -304,17 +391,18 @@ def run(
     warning: str | None = None
     extra_warnings: list[str] = []
     mode_used = engine
+    page_ver = schema_version(effective) if effective else "1.0"
 
     if engine == "bm25":
         hits, warning = _bm25_search(r, query, staging_name, limit)
         if warning:
             mode_used = "grep"
             hits, extra_warnings = _grep_search(
-                r, query, staging_name, limit, include_exits
+                r, query, staging_name, limit, include_exits, page_ver
             )
     else:
         hits, extra_warnings = _grep_search(
-            r, query, staging_name, limit, include_exits
+            r, query, staging_name, limit, include_exits, page_ver
         )
 
     all_warnings = [w for w in [warning, *extra_warnings] if w]

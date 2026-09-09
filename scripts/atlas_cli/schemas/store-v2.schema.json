@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/store-v2",
+  "title": "Atlas SCHEMA.json 2.0",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["schema_version", "atlas_id", "structure", "compile"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "atlas_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "structure": { "type": "object" },
+    "compile": { "type": "object" },
+    "templates": { "type": "object" },
+    "types": { "type": "object" },
+    "query": { "type": "object" },
+    "relations": { "type": "object" },
+    "mesh": { "type": "object" },
+    "sources_profile": { "type": "object" },
+    "required_root_fields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "bindings": { "type": "object" },
+    "presets": { "type": "object" },
+    "recall": { "$ref": "https://atlas.local/schemas/recall-v1" }
+  }
+}

@@ -20,7 +20,9 @@ from ..core.overlay import (
     write_receipt,
 )
 from ..core.paths import rel, store_root
+from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
 from ..core.schema import load_schema, staging_dir_name
+from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -109,6 +111,16 @@ def run_install(
     if id_err:
         _print(as_json, {"ok": False, "error": id_err, "root": str(r)})
         return 2
+    host, _ = load_schema(r)
+    if host is not None and schema_version(host) == "2.0":
+        try:
+            cerrs = validate_contribution(ov)
+        except RecallConfigError as e:
+            _print(as_json, {"ok": False, "error": str(e), "root": str(r), "id": cid})
+            return 2
+        if cerrs:
+            _print(as_json, {"ok": False, "error": "; ".join(cerrs), "root": str(r), "id": cid})
+            return 2
     dest = overlay_path(r, cid)
     _, by_err = overlay_by_type(ov)
     if by_err:
@@ -187,6 +199,28 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
     if not dest.is_file():
         _print(as_json, {"ok": False, "error": f"no overlay {cid}", "root": str(r)})
         return 2
+    host, _ = load_schema(r)
+    ov_live, _ = load_overlay(r, cid)
+    preset = None
+    if isinstance(host, dict):
+        recall = host.get("recall") if isinstance(host.get("recall"), dict) else {}
+        preset = recall.get("preset") if isinstance(recall, dict) else None
+    if preset:
+        names = set()
+        if isinstance(ov_live, dict) and isinstance(ov_live.get("presets"), dict):
+            names.update(str(k) for k in ov_live["presets"])
+            names.update(f"{cid}:{k}" for k in ov_live["presets"])
+        if str(preset) == cid or str(preset).startswith(cid + ":") or str(preset) in names:
+            _print(
+                as_json,
+                {
+                    "ok": False,
+                    "error": f"recall preset {preset!r} still selected; disable or change it before uninstall",
+                    "root": str(r),
+                    "id": cid,
+                },
+            )
+            return 2
     rec, rec_err = load_receipt(r, cid)
     notes: list[str] = []
     if rec_err and receipt_path(r, cid).is_file():
@@ -267,3 +301,31 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
         payload["warning"] = "orphan overlay types remain on pages"
     _print(as_json, payload)
     return 0
+
+
+def run_upgrade(
+    root: str | None,
+    apply: bool = False,
+    as_json: bool = False,
+    to: str = "2.0",
+) -> int:
+    r = store_root(root)
+    if to != "2.0":
+        _print(as_json, {"ok": False, "error": f"unsupported target {to}", "root": str(r)})
+        return 2
+    try:
+        payload = upgrade_apply(r) if apply else upgrade_preview(r)
+    except UpgradeError as e:
+        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
+        return 2
+    payload = {"root": str(r), **payload}
+    if as_json:
+        print(json.dumps(payload, indent=2, default=str))
+    else:
+        print(f"atlas schema upgrade — {'apply' if apply else 'dry-run'}")
+        print(f"from={payload.get('from')} to={payload.get('to')} ok={payload.get('ok')}")
+        for note in payload.get("notes") or []:
+            print(note)
+        if payload.get("unknown_keys"):
+            print("unknown keys: " + ", ".join(payload["unknown_keys"]))
+    return 0 if payload.get("ok") else 2

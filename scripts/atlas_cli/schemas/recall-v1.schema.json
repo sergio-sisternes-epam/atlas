@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/recall-v1",
+  "title": "Atlas recall policy v1",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "enabled": { "type": "boolean", "default": false },
+    "preset": { "type": ["string", "null"] },
+    "overrides": { "$ref": "#/$defs/overrides" },
+    "ceilings": { "$ref": "#/$defs/ceilings" }
+  },
+  "$defs": {
+    "driver": {
+      "type": "string",
+      "enum": ["scan", "sqlite-fts5", "pages-graph", "tgrep"]
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": { "$ref": "#/$defs/driver" },
+        "max_hops": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "primary": { "type": "number", "minimum": 0 },
+            "secondary": { "type": "number", "minimum": 0 },
+            "body": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_hits": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "max_hops": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "max_nodes": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "max_edges": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "max_evidence_bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 }
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coarse": { "$ref": "#/$defs/stage" },
+        "rank": { "$ref": "#/$defs/stage" },
+        "retrieve": { "$ref": "#/$defs/stage" },
+        "limits": { "$ref": "#/$defs/limits" }
+      }
+    },
+    "ceilings": { "$ref": "#/$defs/limits" }
+  }
+}

@@ -45,6 +45,7 @@ Other paths may call `atlas compile` as a tool. They must not hand-edit `SCHEMA.
 | Overlay required-keys changed | `schema install … --force` |
 | Remove a contribution | `schema uninstall <id>` |
 | Check merge / clashes only | `compile` |
+| SCHEMA 1.0 → 2.0 envelope (does not enable recall) | `schema upgrade` then path `configure` |
 
 Never skip compile after a write.
 

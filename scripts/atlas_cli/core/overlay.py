@@ -21,8 +21,10 @@ FORBIDDEN_CORE = frozenset(
         "query",
         "mesh",
         "sources_profile",
+        "recall",
     }
 )
+CONTRIB_MERGE = frozenset({"bindings", "presets"})
 ALLOW_UNION = frozenset({"types"})
 RESERVED_CORE_TYPES = frozenset(
     {"experience", "decision", "work", "document", "protostar", "lesson", "recipe"}
@@ -290,6 +292,44 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                         )
                         continue
                     dest_by[tname] = deepcopy(block)
+                continue
+            if key in CONTRIB_MERGE:
+                if not isinstance(val, dict):
+                    critical.append(_issue("overlay_bindings", relp, f"{key} must be an object"))
+                    continue
+                dest = merged.setdefault(key, {})
+                if not isinstance(dest, dict):
+                    critical.append(
+                        _issue(
+                            "overlay_bindings",
+                            relp,
+                            f"host {key} must be an object",
+                        )
+                    )
+                    continue
+                for raw_name, body in val.items():
+                    qn = str(raw_name)
+                    if ":" not in qn:
+                        qn = f"{cid}:{qn}"
+                    elif not qn.startswith(f"{cid}:"):
+                        critical.append(
+                            _issue(
+                                "overlay_namespace",
+                                relp,
+                                f"{key} '{qn}' must be in contribution namespace '{cid}:'",
+                            )
+                        )
+                        continue
+                    if qn in dest and dest[qn] != body:
+                        critical.append(
+                            _issue(
+                                "overlay_key_clash",
+                                relp,
+                                f"two overlays both define {key} '{qn}'",
+                            )
+                        )
+                        continue
+                    dest[qn] = deepcopy(body)
                 continue
             if key in ALLOW_UNION and isinstance(val, dict) and isinstance(merged.get(key), dict):
                 dest = merged[key]
