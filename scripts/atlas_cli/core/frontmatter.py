@@ -172,17 +172,18 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
     )
     try:
-        events = list(yaml.parse(block, Loader=yaml.SafeLoader))
+        count = 0
+        for event in yaml.parse(block, Loader=yaml.SafeLoader):
+            count += 1
+            if count > MAX_YAML_EVENTS:
+                raise FrontmatterError("frontmatter exceeds event limit")
+            if event.__class__.__name__ == "AliasEvent":
+                raise FrontmatterError("YAML aliases are not supported")
+            tag = getattr(event, "tag", None) or ""
+            if tag in ("tag:yaml.org,2002:merge",) or tag.startswith("!"):
+                raise FrontmatterError(f"unsupported YAML tag {tag}")
     except yaml.YAMLError as e:
         raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
-    if len(events) > MAX_YAML_EVENTS:
-        raise FrontmatterError("frontmatter exceeds event limit")
-    for event in events:
-        if event.__class__.__name__ == "AliasEvent":
-            raise FrontmatterError("YAML aliases are not supported")
-        tag = getattr(event, "tag", None) or ""
-        if tag in ("tag:yaml.org,2002:merge",) or tag.startswith("!"):
-            raise FrontmatterError(f"unsupported YAML tag {tag}")
     try:
         data = yaml.load(block, Loader=UniqueSafeLoader)
     except yaml.YAMLError as e:

@@ -54,7 +54,10 @@ def _effective(root: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 def _write_recall(root: Path, recall: dict[str, Any]) -> None:
     path = root / SCHEMA_NAME
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = loads_strict(path.read_text(encoding="utf-8"))
+    except (OSError, StrictJsonError) as e:
+        raise RecallConfigError(str(e)) from e
     if not isinstance(data, dict):
         raise RecallConfigError("SCHEMA.json must be an object")
     if schema_version(data) != "2.0":
