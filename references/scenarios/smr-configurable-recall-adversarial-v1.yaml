@@ -1,4 +1,4 @@
-id: smr-configurable-recall-v1
+id: smr-configurable-recall-adversarial-v1
 work_id: 2026-09-09-atlas-smr-configurable-recall
 adversarial: true
 packages: [atlas]

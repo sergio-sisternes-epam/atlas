@@ -74,7 +74,7 @@ def neighbourhood(
         outgoing = [(e.get("target") or "", e.get("kind") or "related", "outgoing") for e in page.edges]
         inbound = [(src, kind, "incoming") for src, kind in incoming.get(current, [])]
         for target, kind, direction in [*outgoing, *inbound]:
-            if not target:
+            if not target or target not in by_id:
                 continue
             if max_edges and len(edges) >= max_edges:
                 truncated = True
