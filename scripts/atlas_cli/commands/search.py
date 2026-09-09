@@ -10,7 +10,7 @@ from ..core.frontmatter import read_page
 from ..core.overlay import merge_overlays
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
 from ..core.recall import run_recall
-from ..core.recall_config import recall_enabled
+from ..core.recall_config import recall_enabled, schema_version
 from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
@@ -162,6 +162,7 @@ def _grep_search(
     staging_dir: str,
     limit: int,
     include_exits: bool,
+    page_schema_version: str = "1.0",
 ) -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     filters, rest = _split_filters(query)
@@ -218,7 +219,7 @@ def _grep_search(
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        meta, body = read_page(path)
+        meta, body = read_page(path, schema_version=page_schema_version)
         if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
             continue
         if filters.get("kva") and str(meta.get("kva") or "").strip() != filters["kva"]:
@@ -304,8 +305,19 @@ def run(
     effective = schema
     if schema is not None:
         merged, crit, _ = merge_overlays(schema, r)
-        if not crit:
-            effective = merged
+        if crit:
+            payload = {
+                "ok": False,
+                "error": "; ".join(i["msg"] for i in crit),
+                "root": str(r),
+                "query": query,
+            }
+            if as_json:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"atlas search — FAIL: {payload['error']}")
+            return 2
+        effective = merged
     if engine_override and profile:
         payload = {
             "ok": False,
@@ -376,17 +388,18 @@ def run(
     warning: str | None = None
     extra_warnings: list[str] = []
     mode_used = engine
+    page_ver = schema_version(effective) if effective else "1.0"
 
     if engine == "bm25":
         hits, warning = _bm25_search(r, query, staging_name, limit)
         if warning:
             mode_used = "grep"
             hits, extra_warnings = _grep_search(
-                r, query, staging_name, limit, include_exits
+                r, query, staging_name, limit, include_exits, page_ver
             )
     else:
         hits, extra_warnings = _grep_search(
-            r, query, staging_name, limit, include_exits
+            r, query, staging_name, limit, include_exits, page_ver
         )
 
     all_warnings = [w for w in [warning, *extra_warnings] if w]

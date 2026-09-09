@@ -227,7 +227,8 @@ def run_recall(
         conn = recall_index.open_db(db_path)
         try:
             weights = ((policy.get("rank") or {}).get("weights")) or None
-            hits = fts5_driver.search(conn, rest or query, 0, weights)
+            fetch_limit = max_hits * 4 if max_hits else 0
+            hits = fts5_driver.search(conn, rest or query, fetch_limit, weights)
         finally:
             conn.close()
             if ephemeral and db_path is not None:

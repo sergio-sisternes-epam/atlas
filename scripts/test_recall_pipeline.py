@@ -159,6 +159,16 @@ def main() -> int:
             str(tp.get("error") or tgrep_probe.stderr[:200]),
         )
 
+    write(store / "schema.d" / "broken.json", "{not json")
+    overlay_fail = run(["search", "ranking", "--root", str(store), "--json"])
+    ofp = json.loads(overlay_fail.stdout) if overlay_fail.stdout.strip().startswith("{") else {}
+    check(
+        "search-overlay-fail-closed",
+        overlay_fail.returncode == 2 and ofp.get("ok") is False,
+        overlay_fail.stdout[:300] or overlay_fail.stderr[:200],
+    )
+    (store / "schema.d" / "broken.json").unlink(missing_ok=True)
+
     contrib = tmp / "contrib" / "SCHEMA.overlay.json"
     write(
         contrib,
