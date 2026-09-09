@@ -59,8 +59,6 @@ def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
             continue
         if parts and parts[0] in skip:
             continue
-        if path.name == "SCHEMA.json":
-            continue
         out.append(path)
     return out
 

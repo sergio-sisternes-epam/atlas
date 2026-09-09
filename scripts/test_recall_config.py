@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from atlas_cli.commands.recall import run_validate
 from atlas_cli.core.jsonutil import StrictJsonError, loads_strict
 from atlas_cli.core.recall_config import (
     default_recall_block,
@@ -28,6 +29,12 @@ class RecallConfigTests(unittest.TestCase):
     def test_duplicate_json_keys(self) -> None:
         with self.assertRaises(StrictJsonError):
             loads_strict('{"a": 1, "a": 2}')
+
+    def test_validate_config_rejects_duplicate_keys(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-val-"))
+        cfg = tmp / "recall.json"
+        cfg.write_text('{"version": 1, "version": 1, "enabled": false}', encoding="utf-8")
+        self.assertEqual(run_validate(str(tmp), str(cfg), as_json=True), 2)
 
     def test_unknown_recall_key(self) -> None:
         errs = validate_against(

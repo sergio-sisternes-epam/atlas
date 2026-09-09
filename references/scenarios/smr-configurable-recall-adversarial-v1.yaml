@@ -5,7 +5,7 @@ packages: [atlas]
 expect:
   legacy_search_until_opt_in: true
   install_is_not_activation: true
-  tgrep_gated: true
+  tgrep_search_fail_closed: true
   partial_requires_flag: true
 smokes:
   - id: init-default-1.0
@@ -15,7 +15,7 @@ smokes:
   - id: engine-profile-conflict
     expect: --engine and --profile together exit 2
   - id: tgrep-blocked
-    expect: atlas:tgrep activate fails unsupported_capability
+    expect: atlas:tgrep search fails tgrep_binary_missing when the binary is absent; activate may persist the preset
   - id: install-not-activate
     expect: overlay presets exist but SCHEMA.recall.preset unchanged
   - id: uninstall-dangling-preset

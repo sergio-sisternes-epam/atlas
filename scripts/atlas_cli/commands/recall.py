@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..core.jsonutil import StrictJsonError, loads_strict
 from ..core.overlay import merge_overlays
 from ..core.paths import SCHEMA_NAME, store_root
 from ..core.recall import run_recall
@@ -170,8 +171,8 @@ def run_validate(root: str | None, config: str | None, as_json: bool = False) ->
     if config:
         path = Path(config)
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
+            data = loads_strict(path.read_text(encoding="utf-8"))
+        except (OSError, StrictJsonError) as e:
             _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
             return 2
         errs = validate_against("recall-v1.schema.json", data)
