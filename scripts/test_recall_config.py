@@ -147,6 +147,17 @@ class RecallConfigTests(unittest.TestCase):
         self.assertTrue(any(c and c[0] == "search" for c in calls))
         self.assertTrue(any("-i" in c and "-F" not in c for c in calls))
 
+    def test_tgrep_index_rejects_symlink_root(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))
+        store = tmp / "store"
+        store.mkdir()
+        outside = tmp / "outside-index"
+        outside.mkdir()
+        (store / ".atlas-index").symlink_to(outside)
+        with self.assertRaises(tgrep_driver.TgrepError) as ctx:
+            tgrep_driver.ensure_index(store, "digest", binary=Path("/bin/echo"))
+        self.assertIn("tgrep_index_escape", str(ctx.exception))
+
     def test_tgrep_serve_json_detected(self) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))
         store = tmp / "store"

@@ -123,8 +123,10 @@ def apply(root: Path) -> dict[str, Any]:
             raise UpgradeError("interrupted upgrade lock present; refusing to continue blindly")
     fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
-        os.write(fd, b"schema-upgrade-2.0\n")
-        os.close(fd)
+        try:
+            os.write(fd, b"schema-upgrade-2.0\n")
+        finally:
+            os.close(fd)
         schema, err = load_schema(root)
         if schema is None:
             raise UpgradeError(err or "missing SCHEMA.json")

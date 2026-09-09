@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable
 
 from .scan import tokenise
 from ..projection import ProjectedPage, SKIP_TOP
+from ..recall_index import IndexError_, _reject_symlink_escape
 from ..schema import staging_dir_name
 
 PIN = "d55b022023518646c90742f4761488dc95633b73"
@@ -134,6 +135,10 @@ def ensure_index(
     runner: Runner | None = None,
 ) -> tuple[Path, bool]:
     dest = index_dir(store)
+    try:
+        _reject_symlink_escape(store, dest)
+    except IndexError_ as e:
+        raise TgrepError(f"tgrep_index_escape: {e}") from e
     _detect_serve(store, dest)
     if _load_digest(dest) == digest:
         return dest, False
@@ -143,6 +148,10 @@ def ensure_index(
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
+    try:
+        _reject_symlink_escape(store, dest)
+    except IndexError_ as e:
+        raise TgrepError(f"tgrep_index_escape: {e}") from e
     args = ["index", str(store), "--index-path", str(dest), "--hidden", "--no-ignore", *_excludes(schema)]
     try:
         proc = (runner or run_argv)(resolved, args, cwd=store, timeout=INDEX_TIMEOUT_SEC)
