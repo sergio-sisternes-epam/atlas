@@ -58,7 +58,7 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return None, f"missing {path.name}"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+    except (OSError, UnicodeError, json.JSONDecodeError) as e:
         return None, f"invalid JSON in {path.name}: {e}"
     if not isinstance(data, dict):
         return None, f"{path.name} must be a JSON object"
@@ -193,7 +193,12 @@ def claimed_allows(claimed: list[str], wp: str) -> bool:
     return False
 
 
-def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], list[dict], list[dict]]:
+def merge_overlays(
+    core: dict[str, Any],
+    root: Path,
+    *,
+    candidate_overlays: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], list[dict], list[dict]]:
     """Return (effective_schema, critical, warnings). Core is not mutated."""
     merged = deepcopy(core) if isinstance(core, dict) else {}
     critical: list[dict] = []
@@ -209,8 +214,9 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
     live = frozenset(src_by.keys()) if isinstance(src_by, dict) else frozenset()
     core_type_names = RESERVED_CORE_TYPES | live
 
-    for cid in list_overlays(root):
-        ov, err = load_overlay(root, cid)
+    candidates = candidate_overlays or {}
+    for cid in sorted(set(list_overlays(root)) | candidates.keys()):
+        ov, err = (candidates[cid], None) if cid in candidates else load_overlay(root, cid)
         relp = f"{SCHEMA_D}/{cid}.json"
         if err or ov is None:
             critical.append(_issue("overlay_json", relp, err or "unreadable overlay"))
@@ -225,9 +231,11 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                 _issue("overlay_id", relp, f"contribution_id {oid!r} does not match filename {cid}")
             )
             continue
-        claimed = ov.get("claimed_folders") or []
-        if claimed and not isinstance(claimed, list):
-            critical.append(_issue("overlay_claimed", relp, "claimed_folders must be a list"))
+        claimed = ov.get("claimed_folders", [])
+        if not isinstance(claimed, list) or any(
+            not isinstance(c, str) or normalize_rel_path(c) is None for c in claimed
+        ):
+            critical.append(_issue("overlay_claimed", relp, "claimed_folders must be a list of safe relative paths"))
 
         for key, val in ov.items():
             if key in META_KEYS:
@@ -246,6 +254,10 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                         _issue("overlay_templates", relp, "templates.by_type must be an object")
                     )
                     continue
+                for sub in val.keys() - {"by_type"}:
+                    critical.append(
+                        _issue("overlay_core_clash", relp, f"overlay must not set templates.{sub}")
+                    )
                 add_by = val.get("by_type") or {}
                 if not isinstance(add_by, dict):
                     add_by = {}
@@ -280,7 +292,7 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                             )
                         )
                         continue
-                    if tname in dest_by and dest_by[tname] != block:
+                    if tname in dest_by:
                         critical.append(
                             _issue(
                                 "overlay_key_clash",
@@ -291,10 +303,21 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
                         continue
                     dest_by[tname] = deepcopy(block)
                 continue
-            if key in ALLOW_UNION and isinstance(val, dict) and isinstance(merged.get(key), dict):
-                dest = merged[key]
+            if key in ALLOW_UNION:
+                if not isinstance(val, dict):
+                    critical.append(_issue("overlay_types", relp, "types must be an object"))
+                    continue
+                dest = merged.setdefault(key, {})
+                if not isinstance(dest, dict):
+                    critical.append(_issue("overlay_types", relp, "core types must be an object"))
+                    continue
                 for sub, sval in val.items():
-                    if sub in ("recommended", "unconstrained") and isinstance(sval, list):
+                    if sub in ("recommended", "unconstrained"):
+                        if not isinstance(sval, list) or any(
+                            not isinstance(x, str) or not x.strip() for x in sval
+                        ):
+                            critical.append(_issue("overlay_types", relp, f"types.{sub} must be a list of names"))
+                            continue
                         existing = dest.get(sub) or []
                         if not isinstance(existing, list):
                             existing = []
@@ -336,11 +359,18 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
     return merged, critical, warnings
 
 
-def receipt_issues(root: Path) -> list[dict]:
+def receipt_issues(
+    root: Path,
+    *,
+    candidate_overlays: dict[str, dict[str, Any]] | None = None,
+    candidate_receipts: dict[str, dict[str, Any]] | None = None,
+) -> list[dict]:
     """Critical if a receipt lists a write outside schema.d and claimed prefixes."""
     issues: list[dict] = []
-    for cid in list_overlays(root):
-        rec, rec_err = load_receipt(root, cid)
+    overlays = candidate_overlays or {}
+    receipts = candidate_receipts or {}
+    for cid in sorted(set(list_overlays(root)) | overlays.keys() | receipts.keys()):
+        rec, rec_err = (receipts[cid], None) if cid in receipts else load_receipt(root, cid)
         relp = f"{SCHEMA_D}/{cid}.receipt.json"
         if rec is None:
             issues.append(
@@ -351,11 +381,40 @@ def receipt_issues(root: Path) -> list[dict]:
                 )
             )
             continue
-        written = rec.get("written") or []
-        if not isinstance(written, list):
-            issues.append(_issue("overlay_receipt", relp, "written must be a list"))
+        if rec.get("id", cid) != cid:
+            issues.append(_issue("overlay_receipt", relp, "receipt id must match its contribution"))
+        written = rec.get("written", [])
+        if not isinstance(written, list) or any(not isinstance(x, str) for x in written):
+            issues.append(_issue("overlay_receipt", relp, "written must be a list of paths"))
             continue
-        ov, _ = load_overlay(root, cid)
+        types = rec.get("added_types", [])
+        if not isinstance(types, list) or any(
+            not isinstance(t, str) or validate_type_name(t) for t in types
+        ):
+            issues.append(_issue("overlay_receipt", relp, "added_types must be a list of type names"))
+        hashes = rec.get("template_hashes", {})
+        if not isinstance(hashes, dict):
+            issues.append(_issue("overlay_receipt", relp, "template_hashes must be an object"))
+        else:
+            hash_paths: set[str] = set()
+            for path, digest in hashes.items():
+                if (
+                    normalize_rel_path(path) != path
+                    or not path.startswith("templates/")
+                    or not path.endswith(".md")
+                    or path not in written
+                    or not isinstance(digest, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                ):
+                    issues.append(_issue("overlay_receipt", relp, f"invalid template_hashes entry: {path}"))
+                folded = path.casefold()
+                if any(
+                    folded == other or folded.startswith(other + "/") or other.startswith(folded + "/")
+                    for other in hash_paths
+                ):
+                    issues.append(_issue("overlay_receipt", relp, f"template_hashes path collision: {path}"))
+                hash_paths.add(folded)
+        ov, _ = (overlays[cid], None) if cid in overlays else load_overlay(root, cid)
         claimed = []
         if ov and isinstance(ov.get("claimed_folders"), list):
             claimed = [str(x).strip().strip("/") for x in ov["claimed_folders"] if str(x).strip()]

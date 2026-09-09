@@ -111,7 +111,7 @@ are tools used inside paths.
 
 1. **Formal lookup = path `query` + `atlas search`** - B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored.
+3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links. Per-type opt-ins also enforce required H2 headings/content, scalar/date/order rules, and typed local relations (critical `exit 2`, not inline-ignorable). Unopted-in headings remain advisory. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and legacy page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile proves current snapshot conformance, not historical immutability or source truth.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
 5. **Work cluster** - pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** - append only for structural store changes (not every experience).
@@ -142,6 +142,8 @@ python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--typ
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]
 python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <atlas> [--force]
 python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py schema configure --max-required-sections-per-type 7 --root <atlas> [--json]
+python3 <atlas-skill>/scripts/atlas.py schema capabilities --json
 ```
 
 Search engine: SCHEMA `query.search_engine` (`grep` pilot default; `bm25` when index exists).

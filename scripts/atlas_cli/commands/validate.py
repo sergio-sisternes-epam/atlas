@@ -10,6 +10,7 @@ from ..core.mesh import consolidate as mesh_consolidate
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
+from ..core.type_rules import page_rule_errors
 from ..core.schema import (
     by_type_map,
     load_contract,
@@ -417,6 +418,10 @@ def run(
                 critical.append(issue)
 
         if schema:
+            block = by_type_map(schema).get(str(meta.get("type") or "").strip())
+            if isinstance(block, dict):
+                for iid, message in page_rule_errors(r, meta, body, block, staging_name):
+                    critical.append({"id": iid, "path": rel(r, path), "msg": message})
             for issue in _page_contract_issues(r, path, meta, schema):
                 rid = issue.get("id") or ""
                 if rid not in ignores:

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- Opt-in per-type required H2 sections and nonempty content checks, scalar and
+  calendar-date rules, date ordering, and typed local `relates_to` constraints.
+- `atlas schema configure --max-required-sections-per-type` for validated,
+  atomic core budget changes without permitting overlay overrides.
+- `atlas schema capabilities --json` for executable feature/version preflight.
+
+### Fixed
+
+- Preflight overlay installations before writes; upgrade only unchanged,
+  receipt-hash-owned templates. User edits and unowned conflicting templates
+  remain protected even with `--force`.
+- Preserve template ownership across repeated installs and preserve edited or
+  legacy unhashed templates on uninstall.
+
 ## 0.9.1 - 2026-09-08
 
 ### Changed

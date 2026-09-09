@@ -45,7 +45,7 @@
   "templates": {
     "directory": "templates/",
     "by_type": {
-      "$comment": "Each type may declare file + frontmatter required/recommended + sections; MD template carries a copy of rules",
+      "$comment": "Each type may declare file + frontmatter required/recommended + sections. Opt-in native rules: sections.enforce/require_content; frontmatter.fields/date_order; per-type relates_to. See paths/schema.md. Examples do not close the type vocabulary.",
       "work": {
         "file": "templates/work.md",
         "frontmatter": {
@@ -70,6 +70,23 @@
             "Related"
           ]
         }
+      },
+      "sample-record": {
+        "frontmatter": {
+          "required": ["type", "title", "started", "ended"],
+          "fields": {
+            "started": {"type": "date", "unknown": ["Unknown."]},
+            "ended": {"type": "date", "unknown": ["Unknown."]},
+            "status": {"type": "string", "enum": ["open", "closed", "Unknown."]}
+          },
+          "date_order": [{"before": "started", "after": "ended", "allow_equal": true}]
+        },
+        "sections": {
+          "enforce": true,
+          "required": ["Overview", "Evidence"],
+          "require_content": true
+        },
+        "relates_to": [{"kind": "records", "target_types": ["sample-source"], "min": 1, "max": 1}]
       },
       "document": {
         "file": "templates/document.md",

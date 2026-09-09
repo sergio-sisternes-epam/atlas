@@ -1,0 +1,26 @@
+{
+  "contribution_id": "sample-contract",
+  "templates": {
+    "by_type": {
+      "sample-record": {
+        "frontmatter": {
+          "required": ["type", "title", "started", "ended"],
+          "fields": {
+            "started": {"type": "date", "unknown": ["Unknown."]},
+            "ended": {"type": "date", "unknown": ["Unknown."]},
+            "status": {"type": "string", "enum": ["open", "closed", "Unknown."]},
+            "score": {"type": "integer", "minimum": 0, "maximum": 10}
+          },
+          "date_order": [{"before": "started", "after": "ended", "allow_equal": true}]
+        },
+        "sections": {
+          "enforce": true,
+          "required": ["Overview", "Evidence", "Outcomes", "Constraints", "Alternatives", "Links", "Notes"],
+          "require_content": true
+        },
+        "relates_to": [{"kind": "records", "target_types": ["sample-source"], "min": 1, "max": 1}]
+      },
+      "sample-source": {"frontmatter": {"required": ["type", "title"]}}
+    }
+  }
+}

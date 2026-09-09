@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .paths import SCHEMA_NAME
+from .type_rules import declaration_errors
 
 # Re-export for commands that import SCHEMA_NAME from schema.
 
@@ -24,7 +25,10 @@ def load_schema(root: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def required_root_fields(schema: dict) -> list[str]:
-    return list(schema.get("required_root_fields") or ["schema_version", "atlas_id", "structure", "compile"])
+    declared = schema.get("required_root_fields")
+    if isinstance(declared, list) and all(isinstance(key, str) for key in declared):
+        return declared or ["schema_version", "atlas_id", "structure", "compile"]
+    return ["schema_version", "atlas_id", "structure", "compile"]
 
 
 def skill_root() -> Path:
@@ -95,6 +99,11 @@ def recommended_without_contract(schema: dict) -> list[str]:
 def validate_schema_shape(schema: dict) -> list[str]:
     """Structural checks on SCHEMA.json itself."""
     errs: list[str] = []
+    declared = schema.get("required_root_fields")
+    if declared is not None and (
+        not isinstance(declared, list) or not all(isinstance(key, str) for key in declared)
+    ):
+        errs.append("SCHEMA.required_root_fields must be a list of field names")
     for key in required_root_fields(schema):
         # required_root_fields may be listed inside the contract file; for a live
         # Atlas SCHEMA the keys must exist on the object itself.
@@ -111,34 +120,37 @@ def validate_schema_shape(schema: dict) -> list[str]:
         by = tmpl.get("by_type")
         if by is not None and not isinstance(by, dict):
             errs.append("SCHEMA.templates.by_type must be an object")
-    structure = schema.get("structure") or {}
+    structure = schema.get("structure", {})
     if not isinstance(structure, dict):
         errs.append("SCHEMA.structure must be an object")
-    compile_cfg = schema.get("compile") or {}
+    compile_cfg = schema.get("compile", {})
     if not isinstance(compile_cfg, dict):
         errs.append("SCHEMA.compile must be an object")
-    budget = (compile_cfg.get("simplicity_budget") or {}) if isinstance(compile_cfg, dict) else {}
-    if budget:
-        max_keys = budget.get("max_required_frontmatter_keys_per_type")
-        max_secs = budget.get("max_required_sections_per_type")
-        tmpl_obj = schema.get("templates") if isinstance(schema.get("templates"), dict) else {}
-        templates = tmpl_obj.get("by_type") if isinstance(tmpl_obj.get("by_type"), dict) else {}
-        if isinstance(templates, dict):
-            for tname, tdef in templates.items():
-                if not isinstance(tdef, dict):
-                    continue
-                fm = tdef.get("frontmatter") or {}
-                req = fm.get("required") or []
-                if max_keys is not None and len(req) > int(max_keys):
+    budget = compile_cfg.get("simplicity_budget", {}) if isinstance(compile_cfg, dict) else {}
+    if not isinstance(budget, dict):
+        errs.append("SCHEMA.compile.simplicity_budget must be an object")
+        budget = {}
+    for key in ("max_required_frontmatter_keys_per_type", "max_required_sections_per_type"):
+        if key in budget and (type(budget[key]) is not int or budget[key] < 0):
+            errs.append(f"SCHEMA.compile.simplicity_budget.{key} must be a nonnegative integer")
+    tmpl_obj = tmpl if isinstance(tmpl, dict) else {}
+    templates = tmpl_obj.get("by_type", {})
+    if isinstance(templates, dict):
+        for tname, tdef in templates.items():
+            rule_errors = declaration_errors(tname, tdef)
+            errs.extend(rule_errors)
+            if rule_errors:
+                continue
+            for group, key in (
+                ("frontmatter", "max_required_frontmatter_keys_per_type"),
+                ("sections", "max_required_sections_per_type"),
+            ):
+                required = tdef.get(group, {}).get("required", [])
+                limit = budget.get(key)
+                if type(limit) is int and len(required) > limit:
                     errs.append(
                         f"simplicity_budget exceeded for type {tname}: "
-                        f"{len(req)} required frontmatter keys > {max_keys}"
-                    )
-                secs = (tdef.get("sections") or {}).get("required") or []
-                if max_secs is not None and len(secs) > int(max_secs):
-                    errs.append(
-                        f"simplicity_budget exceeded for type {tname}: "
-                        f"{len(secs)} required sections > {max_secs}"
+                        f"{len(required)} required {group} > {limit}"
                     )
     return errs
 

@@ -63,6 +63,27 @@ python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
 The skill emits an activation card and loads exactly one procedure from
 `references/paths/` before acting.
 
+### Native schema contracts
+
+Custom types can opt into exact required H2 headings, nonempty section bodies,
+scalar/date validation, date ordering, and typed local relations. Existing
+schemas do not acquire heading enforcement implicitly; custom types stay open.
+See [the schema procedure](references/paths/schema.md) for the concrete JSON
+contract and synthetic examples.
+
+```text
+python3 <atlas-skill>/scripts/atlas.py schema capabilities --json
+python3 <atlas-skill>/scripts/atlas.py schema configure \
+  --max-required-sections-per-type 7 --root <atlas-root> --json
+```
+
+The section budget defaults to six. Only the allowlisted CLI configuration
+changes core settings; overlays cannot override `compile`. Install preflights
+the effective schema and protects modified templates, even with `--force`.
+Capability receipts identify executable features separately from the package
+release version. Compile validates the current snapshot, not historical
+immutability or the truth of source claims.
+
 ### Mount credentials
 
 Atlas applies `ATLAS_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_APM_PAT`

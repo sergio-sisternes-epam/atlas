@@ -114,3 +114,28 @@ notes remain generated from merged pull requests. Signed tags and provenance
 attestations are optional hardening unless repository or organisational policy
 makes them mandatory. Archive checksums and marketplace artifacts are not
 applicable while Atlas publishes no release assets.
+
+## Native schema changes
+
+The executable implementation lives in `scripts/atlas_cli/core/type_rules.py`,
+`core/schema.py`, and the schema/validate commands. Keep
+`references/SCHEMA.contract.json`, `references/paths/schema.md`, CLI help, and
+capability feature versions aligned. Do not widen the minimal frontmatter
+parser or add a closed global type enum to implement a custom contract.
+
+`scripts/test_native_schema.py` exercises synthetic passing/missing-category
+fixtures under `fixtures/native-schema/`, declaration failures, headings,
+dates, typed links, budgets, and configuration atomicity.
+`scripts/test_template_upgrades.py` covers ownership, conflicts, and preflight
+failures. Both are discovered by the existing `scripts/run_tests.py` runner.
+Use disposable stores for tests; never mutate installed packages or consumer
+stores during source development.
+An additional prose/YAML adversarial scenario is explicitly deferred for this
+contract: the native runner executes the synthetic fixtures and adversarial
+cases directly, avoiding a second, non-executable copy of the same assertions.
+
+New capabilities may appear under `Unreleased` while the package version
+still matches the last release. Consumer preflight must inspect
+`schema capabilities --json` feature versions rather than infer behavior from
+the package version alone. Version increments, upstream pushes, and releases
+remain separate owner-approved operations.

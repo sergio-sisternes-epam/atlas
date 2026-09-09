@@ -13,6 +13,7 @@ from .commands import mount as cmd_mount
 from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
 from .commands import schema_cmd as cmd_schema
+from .commands import schema_config as cmd_schema_config
 
 
 @click.group(
@@ -215,7 +216,23 @@ def promote_cmd(
 
 @main.group("schema")
 def schema_group() -> None:
-    """Create, install, or uninstall SCHEMA overlays (CLI is the only writer)."""
+    """Manage overlays, allowlisted core settings, and capability receipts."""
+
+
+@schema_group.command("capabilities")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable capability/version receipt")
+def schema_capabilities_cmd(as_json: bool) -> None:
+    """Report executable schema features independently of package release version."""
+    raise SystemExit(cmd_schema_config.capabilities(as_json))
+
+
+@schema_group.command("configure")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--max-required-sections-per-type", "max_sections", required=True, type=click.IntRange(min=0))
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def schema_configure_cmd(root: str | None, max_sections: int, as_json: bool) -> None:
+    """Validate and atomically set only the core required-section budget."""
+    raise SystemExit(cmd_schema_config.configure(root, max_sections, as_json))
 
 
 @schema_group.command("new")
@@ -231,7 +248,7 @@ def schema_new_cmd(cid: str, root: str | None, claims: tuple[str, ...], as_json:
 @schema_group.command("install")
 @click.argument("source")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--force", is_flag=True, help="overwrite existing overlay (required if required-keys changed)")
+@click.option("--force", is_flag=True, help="allow required-key changes; never overwrite edited/unowned templates")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def schema_install_cmd(source: str, root: str | None, force: bool, as_json: bool) -> None:
     """Copy a skill or file overlay into schema.d/."""
