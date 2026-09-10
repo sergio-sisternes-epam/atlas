@@ -105,7 +105,9 @@ def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
     if raw not in STRATEGIES:
         return [f"{prefix}strategy must be shared or dedicated"]
     ref = str(row.get("ref") or "").strip()
-    if raw == "shared" and ref and ref != SHARED_REF:
+    if raw == "shared" and ref != SHARED_REF:
+        if not ref:
+            return [f"{prefix}strategy shared requires ref {SHARED_REF}"]
         return [f"{prefix}strategy shared requires ref {SHARED_REF}, have {ref}"]
     return []
 

@@ -179,9 +179,9 @@ def _init_shared(
                 f"branch {SHARED_BRANCH} exists but is not an Atlas root (missing {SCHEMA_NAME})",
                 as_json,
             )
-        rc = _silent_init(dest, schema_version)
+        rc, err = _silent_init(dest, schema_version)
         if rc != 0:
-            return rc
+            return _fail(err or "atlas init failed", as_json)
         _stamp_atlas_id(dest, atlas_id)
         code, err = commit_all(dest, "Initialize Atlas SCHEMA")
         if code != 0:
@@ -253,9 +253,9 @@ def _init_dedicated(
     dest = cmd_mount.default_mount(parent, parsed.atlas_id)
     created_schema = False
     if not (dest / SCHEMA_NAME).is_file():
-        rc = _silent_init(dest, schema_version)
+        rc, err = _silent_init(dest, schema_version)
         if rc != 0:
-            return rc
+            return _fail(err or "atlas init failed", as_json)
         _stamp_atlas_id(dest, parsed.atlas_id)
         code, err = commit_all(dest, "Initialize Atlas SCHEMA")
         if code != 0:
@@ -480,10 +480,11 @@ def _store_path(parent: Path, source: dict) -> Path:
     return dest
 
 
-def _silent_init(dest: Path, schema_version: str) -> int:
+def _silent_init(dest: Path, schema_version: str) -> tuple[int, str]:
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-        return cmd_init.run(str(dest), False, False, schema_version)
+        rc = cmd_init.run(str(dest), False, False, schema_version)
+    return rc, buf.getvalue().strip()
 
 
 def _stamp_atlas_id(root: Path, atlas_id: str) -> None:

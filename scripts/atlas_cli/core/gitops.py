@@ -286,7 +286,7 @@ def push_history(
             cwd=source,
         )
         if anc_code == 1:
-            return 2, "destination history is unrelated; refuse to rewrite"
+            return 2, "destination is not a fast-forward of this history; refuse to rewrite"
         if anc_code != 0:
             return anc_code, anc_err or "merge-base failed"
     code, _, err = run_git(

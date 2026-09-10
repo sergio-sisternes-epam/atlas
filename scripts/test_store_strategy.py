@@ -22,7 +22,11 @@ from atlas_cli.core.gitops import (
     run_git,
     tree_has_schema,
 )
-from atlas_cli.core.github_driver import protect_atlas_branch, ruleset_payload
+from atlas_cli.core.github_driver import (
+    protect_atlas_branch,
+    ruleset_payload,
+    ruleset_targets_branch,
+)
 from atlas_cli.core.meshfile import (
     MeshFileError,
     effective_strategy,
@@ -148,6 +152,21 @@ def main() -> int:
             any("strategy shared requires ref atlas" in e for e in errs),
             f"errs={errs}",
         )
+        missing_ref = {
+            "version": 1,
+            "stores": [
+                {
+                    "id": "github.com/example/store",
+                    "strategy": "shared",
+                }
+            ],
+        }
+        missing_ref_errs = validate_doc(missing_ref)
+        check(
+            "shared-requires-ref-atlas",
+            any("strategy shared requires ref atlas" in e for e in missing_ref_errs),
+            f"errs={missing_ref_errs}",
+        )
 
         mesh_parent = tmp / "mesh-parent"
         init_parent(mesh_parent)
@@ -200,6 +219,12 @@ def main() -> int:
         check(
             "bootstrap-before-ruleset-payload-targets-atlas",
             payload["conditions"]["ref_name"]["include"] == ["refs/heads/atlas"],
+            f"payload={payload}",
+        )
+        check(
+            "ruleset-targets-requested-branch-only",
+            ruleset_targets_branch(payload, "atlas")
+            and not ruleset_targets_branch(payload, "knowledge"),
             f"payload={payload}",
         )
         code, warn = protect_atlas_branch("git.example.com/org/repo")
@@ -530,6 +555,35 @@ def main() -> int:
             and "escapes" in payload.get("error", "")
             and outside.is_dir(),
             parse_error or f"exit={result.returncode} payload={payload}",
+        )
+
+        bad_ver = tmp / "bad-schema-version"
+        bad_url = "https://github.com/example/bad-schema.git"
+        bad_bare = tmp / "bad-schema.git"
+        git(["init", "-q", "--bare", "--initial-branch=main", str(bad_bare)], tmp)
+        init_parent(bad_ver, bad_url)
+        bad_env = local_remote_env(bad_bare, bad_url)
+        git(["push", "-q", "origin", "main"], bad_ver, bad_env)
+        result = run(
+            [
+                "store",
+                "init",
+                "--schema-version",
+                "9.9",
+                "--json",
+                "--cwd",
+                str(bad_ver),
+            ],
+            bad_ver,
+            bad_env,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "store-init-json-on-silent-init-fail",
+            result.returncode != 0
+            and not parse_error
+            and "unsupported" in payload.get("error", "").lower(),
+            parse_error or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
         )
 
         help_out = run(["migrate", "--help"], ROOT)

@@ -18,6 +18,14 @@ def host_is_github(host: str) -> bool:
     return h == "github.com" or h.endswith(".ghe.com")
 
 
+def ruleset_targets_branch(ruleset: dict[str, Any], branch: str) -> bool:
+    include = ((ruleset.get("conditions") or {}).get("ref_name") or {}).get(
+        "include"
+    ) or []
+    wanted = f"refs/heads/{branch}"
+    return wanted in include or "~ALL" in include
+
+
 def ruleset_payload(branch: str = SHARED_BRANCH) -> dict[str, Any]:
     return {
         "name": RULESET_NAME,
@@ -80,10 +88,38 @@ def protect_atlas_branch(atlas_id: str, branch: str = SHARED_BRANCH) -> tuple[in
             rows = json.loads(listed.stdout or "[]")
         except json.JSONDecodeError:
             rows = []
-        if isinstance(rows, list) and any(
-            isinstance(r, dict) and r.get("name") == RULESET_NAME for r in rows
-        ):
-            return 0, ""
+        match = next(
+            (
+                r
+                for r in rows
+                if isinstance(r, dict) and r.get("name") == RULESET_NAME
+            ),
+            None,
+        ) if isinstance(rows, list) else None
+        if match:
+            detail = match
+            rid = match.get("id")
+            if rid is not None:
+                got = subprocess.run(
+                    ["gh", "api", *env_host, f"repos/{owner_repo}/rulesets/{rid}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if got.returncode == 0:
+                    try:
+                        loaded = json.loads(got.stdout or "{}")
+                    except json.JSONDecodeError:
+                        loaded = None
+                    if isinstance(loaded, dict):
+                        detail = loaded
+            if ruleset_targets_branch(detail, branch):
+                return 0, ""
+            return (
+                0,
+                f"github driver skipped: ruleset {RULESET_NAME} "
+                f"does not target branch {branch}",
+            )
     created = subprocess.run(
         [
             "gh",
