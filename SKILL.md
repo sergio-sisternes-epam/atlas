@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.11.1
+version: 0.11.2
 activation_card: on
 ---
 

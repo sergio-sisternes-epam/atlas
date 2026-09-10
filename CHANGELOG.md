@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-09-10
+
+### Changed
+
+- Resolve the `okf` format-authority dependency through marketplace `atlas`
+  (`okf@atlas`) instead of `sergio-sisternes-epam`.
+- Consumer registration uses
+  `apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas`.
+
 ## 0.11.1 - 2026-09-10
 
 ### Changed

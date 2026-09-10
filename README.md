@@ -16,10 +16,10 @@ root APM skill bundle; the `okf` package remains the format authority.
 
 - APM CLI 0.30.0 or newer.
 - Python 3.10 or newer.
-- The `sergio-sisternes-epam` APM marketplace, registered as:
+- The `atlas` APM marketplace, registered as:
 
   ```text
-  apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+  apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
   ```
 
 - Access to the private `sergio-sisternes-epam/atlas` and

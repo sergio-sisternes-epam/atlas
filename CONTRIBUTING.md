@@ -11,11 +11,11 @@ python3 -m pip install -r scripts/requirements.txt
 Register the catalog before installing dependencies:
 
 ```bash
-apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 ```
 
 The `--name` flag is required. Do not use alias `me` or the default
-`apm-marketplace` name. OKF remains private; configure an APM GitHub credential
+`atlas-marketplace` name. OKF remains private; configure an APM GitHub credential
 with read-only access to `sergio-sisternes-epam/okf` and do not store tokens in
 this repository.
 
@@ -44,7 +44,7 @@ checkout and runs full lockfile plus install-replay drift audits after
 installing Atlas into each disposable consumer:
 
 ```bash
-apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 apm audit --no-policy --no-drift
 ```
 

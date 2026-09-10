@@ -178,13 +178,13 @@ class CiActivationContractTests(unittest.TestCase):
             self.ci_workflow.count('apm-version: "0.30.0"'),
         )
         self.assertIn(
-            "apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam",
+            "apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas",
             self.ci_workflow,
         )
         self.assertEqual(
             2,
             self.ci_workflow.count(
-                "apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam"
+                "apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas"
             ),
         )
         self.assertEqual(
