@@ -241,6 +241,30 @@ def main() -> int:
             or f"exit={result.returncode} payload={payload} stderr={result.stderr!r} mesh={mesh}",
         )
 
+        origin_first = tmp / "origin-first"
+        init_parent(origin_first, consumer_url)
+        result = run(
+            [
+                "store",
+                "init",
+                "--remote",
+                "https://github.com/example/wrong.git",
+                "--json",
+                "--cwd",
+                str(origin_first),
+            ],
+            origin_first,
+            env,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "shared-init-origin-before-remote",
+            result.returncode == 0
+            and payload.get("id") == "github.com/example/consumer"
+            and payload.get("id") != "github.com/example/wrong",
+            parse_error or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
+        )
+
         result = run(
             ["store", "init", "--strategy", "dedicated", "--json", "--cwd", str(shared_parent)],
             shared_parent,

@@ -238,9 +238,9 @@ def commit_all(repo: Path, message: str) -> tuple[int, str]:
     code, _, err = run_git(["add", "-A"], cwd=repo)
     if code != 0:
         return code, err
-    code, out, _ = run_git(["status", "--porcelain"], cwd=repo)
+    code, out, err = run_git(["status", "--porcelain"], cwd=repo)
     if code != 0:
-        return code, out
+        return code, err or out or "git status failed"
     if not out:
         return 0, ""
     identity = {

@@ -150,6 +150,8 @@ python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py resolve <pointer>
+python3 <atlas-skill>/scripts/atlas.py store init [--strategy shared|dedicated] [--remote <url>]
+python3 <atlas-skill>/scripts/atlas.py store rehost --destination-strategy shared|dedicated [--remote <url>] [--id <atlas_id>]
 python3 <atlas-skill>/scripts/atlas.py migrate <source> --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--type ...] --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]

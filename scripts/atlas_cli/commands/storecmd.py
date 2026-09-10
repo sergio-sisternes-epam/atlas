@@ -105,7 +105,8 @@ def _init_shared(
     as_json: bool,
     schema_version: str,
 ) -> int:
-    pointer = remote or origin_url(parent)
+    origin = origin_url(parent)
+    pointer = origin or remote
     if not pointer:
         return _fail("shared init needs --remote or origin on the consumer repository", as_json)
     try:
@@ -235,7 +236,9 @@ def _init_dedicated(
         if rc != 0:
             return rc
         _stamp_atlas_id(dest, parsed.atlas_id)
-        commit_all(dest, "Initialize Atlas SCHEMA")
+        code, err = commit_all(dest, "Initialize Atlas SCHEMA")
+        if code != 0:
+            return _fail(err or "SCHEMA commit failed", as_json)
         created_schema = True
     landed = current_branch(dest) or ""
     try:
