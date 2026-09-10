@@ -13,8 +13,20 @@ from .gitops import SHARED_BRANCH
 RULESET_NAME = "atlas-no-direct-push"
 
 
+def github_hostname(host: str) -> str:
+    """Host without a trailing :port so GHE atlas_ids still match."""
+    h = (host or "").strip().lower()
+    if h.startswith("[") and "]" in h:
+        return h[1 : h.find("]")]
+    if ":" in h:
+        name, port = h.rsplit(":", 1)
+        if port.isdigit():
+            return name
+    return h
+
+
 def host_is_github(host: str) -> bool:
-    h = (host or "").lower()
+    h = github_hostname(host)
     return h == "github.com" or h.endswith(".ghe.com")
 
 
@@ -64,6 +76,7 @@ def protect_atlas_branch(atlas_id: str, branch: str = SHARED_BRANCH) -> tuple[in
     if len(parts) != 3:
         return 0, f"github driver skipped: unparseable id {atlas_id}"
     host, org, repo = parts
+    hostname = github_hostname(host)
     if not host_is_github(host):
         return (
             0,
@@ -76,7 +89,7 @@ def protect_atlas_branch(atlas_id: str, branch: str = SHARED_BRANCH) -> tuple[in
             f"protect branch {branch} manually"
         )
     owner_repo = f"{org}/{repo}"
-    env_host = [] if host == "github.com" else ["--hostname", host]
+    env_host = [] if hostname == "github.com" else ["--hostname", hostname]
     listed = subprocess.run(
         ["gh", "api", *env_host, f"repos/{owner_repo}/rulesets"],
         capture_output=True,

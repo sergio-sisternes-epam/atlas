@@ -25,6 +25,7 @@ from atlas_cli.core.gitops import (
     tree_has_schema,
 )
 from atlas_cli.core.github_driver import (
+    host_is_github,
     protect_atlas_branch,
     ruleset_payload,
     ruleset_targets_branch,
@@ -234,6 +235,13 @@ def main() -> int:
             "self-hosted-warn-and-continue",
             code == 0 and "self-hosted" in warn,
             f"code={code} warn={warn!r}",
+        )
+        check(
+            "github-host-strips-port",
+            host_is_github("ghe.example.ghe.com:8443")
+            and host_is_github("github.com:443")
+            and not host_is_github("git.example.com:8443"),
+            "expected GHE hosts with ports to count as GitHub",
         )
         code, warn = protect_atlas_branch("git.example.com/org/repo", branch="knowledge")
         check(
