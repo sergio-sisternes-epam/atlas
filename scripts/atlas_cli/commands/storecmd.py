@@ -27,7 +27,7 @@ from ..core.gitops import (
     run_git,
     tree_has_schema,
 )
-from ..core.github_driver import protect_atlas_branch
+from ..core.github_driver import github_hostname, protect_atlas_branch
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import (
     MeshFileError,
@@ -510,6 +510,7 @@ def _stamp_atlas_id(root: Path, atlas_id: str) -> None:
 
 def _auth_for(atlas_id: str, ssh: bool) -> AuthResult:
     host, org, _repo = atlas_id.split("/", 2)
+    host = github_hostname(host)
     recorded = lookup(host, org)
     if recorded and not ssh:
         ssh = bool(recorded.get("ssh") or recorded.get("backend") == "ssh")

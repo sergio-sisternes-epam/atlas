@@ -24,6 +24,7 @@ from ..core.gitops import (
     submodule_init,
     submodule_register,
 )
+from ..core.github_driver import github_hostname
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_store, upsert
 from ..core.translate import remote_url
@@ -65,6 +66,7 @@ def run(
         )
 
     host, org, _repo = parsed.atlas_id.split("/", 2)
+    host = github_hostname(host)
     recorded = lookup(host, org)
     if recorded and not ssh:
         ssh = bool(recorded.get("ssh") or recorded.get("backend") == "ssh")

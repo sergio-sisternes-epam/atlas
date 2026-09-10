@@ -674,7 +674,11 @@ def _https_host(url: str | None) -> str:
     if url.startswith("git@"):
         rest = url[4:]
         return rest.split(":", 1)[0] or "github.com"
-    return urlsplit(url).hostname or "github.com"
+    parts = urlsplit(url)
+    host = parts.hostname or "github.com"
+    if parts.port:
+        return f"{host}:{parts.port}"
+    return host
 
 
 def _redact(err: str, token: str | None = None) -> str:

@@ -10,11 +10,16 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas_cli.commands.mount import _persistable_ref, _relative_origin
+from atlas_cli.commands.storecmd import _auth_for
+from atlas_cli.core.auth import AuthResult
 from atlas_cli.core.gitops import (
+    _auth_args,
+    _https_host,
     create_orphan_empty_branch,
     ensure_shared_branch,
     origin_url,
@@ -243,6 +248,42 @@ def main() -> int:
             and host_is_github("github.com:443")
             and not host_is_github("git.example.com:8443"),
             "expected GHE hosts with ports to count as GitHub",
+        )
+        check(
+            "https-host-keeps-nondefault-port",
+            _https_host("https://ghe.example.ghe.com:8443/org/repo.git")
+            == "ghe.example.ghe.com:8443"
+            and _https_host("https://github.com/org/repo.git") == "github.com",
+            _https_host("https://ghe.example.ghe.com:8443/org/repo.git"),
+        )
+        ported_host = _https_host("https://ghe.example.ghe.com:8443/org/repo.git")
+        rewrite = " ".join(_auth_args("tok", host=ported_host, backend="token")[0])
+        check(
+            "auth-args-insteadOf-keeps-port",
+            "https://ghe.example.ghe.com:8443/" in rewrite
+            and "x-access-token:tok@ghe.example.ghe.com:8443/" in rewrite,
+            rewrite,
+        )
+        seen: dict[str, object] = {}
+
+        def fake_lookup(host: str, org: str):
+            seen["lookup"] = (host, org)
+            return None
+
+        def fake_resolve(host: str, want_ssh: bool = False):
+            seen["resolve"] = host
+            return AuthResult(backend="none", host=host, token=None, ssh=want_ssh)
+
+        with (
+            patch("atlas_cli.commands.storecmd.lookup", fake_lookup),
+            patch("atlas_cli.commands.storecmd.resolve_auth", fake_resolve),
+        ):
+            _auth_for("ghe.example.ghe.com:8443/org/repo", False)
+        check(
+            "auth-for-strips-port",
+            seen.get("lookup") == ("ghe.example.ghe.com", "org")
+            and seen.get("resolve") == "ghe.example.ghe.com",
+            f"seen={seen}",
         )
         code, warn = protect_atlas_branch("git.example.com/org/repo", branch="knowledge")
         check(
