@@ -263,7 +263,7 @@ def _init_dedicated(
         if code != 0:
             return _fail(err or "SCHEMA commit failed", as_json)
         created_schema = True
-    landed = current_branch(dest) or ""
+    landed = cmd_mount._persistable_ref(current_branch(dest))
     try:
         upsert(
             parent,
@@ -431,7 +431,7 @@ def _rehost_to_dedicated(
             remove_store(parent, src_id)
         except MeshFileError as e:
             return _fail(str(e), as_json)
-    landed = current_branch(dest) or dest_branch
+    landed = cmd_mount._persistable_ref(current_branch(dest), dest_branch)
     try:
         upsert(
             parent,

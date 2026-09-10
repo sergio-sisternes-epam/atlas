@@ -413,7 +413,9 @@ def main() -> int:
         payload, parse_error = json_payload(result)
         check(
             "dedicated-init-mounts-existing",
-            result.returncode == 0 and payload.get("strategy") == "dedicated",
+            result.returncode == 0
+            and payload.get("strategy") == "dedicated"
+            and payload.get("ref") != "HEAD",
             parse_error or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
         )
 
