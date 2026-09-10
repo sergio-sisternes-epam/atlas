@@ -156,6 +156,11 @@ def _init_shared(
             backend=auth.backend,
             source_ref=SHARED_BRANCH,
         )
+        if code == 2:
+            return _fail(
+                err or "shared atlas push refused; destination is not a fast-forward",
+                as_json,
+            )
         if code != 0:
             warnings.append(err or "push of empty atlas branch failed")
     if not (dest / ".git").exists():
@@ -197,6 +202,11 @@ def _init_shared(
             backend=auth.backend,
             source_ref="HEAD",
         )
+        if code == 2:
+            return _fail(
+                err or "shared atlas SCHEMA push refused; destination is not a fast-forward",
+                as_json,
+            )
         if code != 0:
             warnings.append(err or "push of atlas SCHEMA failed; publish it before the GitHub ruleset")
         else:

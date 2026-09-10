@@ -23,7 +23,6 @@ intent: <one line>
 strategy: shared | dedicated
 remote: <consumer origin, or existing dedicated store URL>
 atlas_id: <host/org/repo, or set after id>
-ref: atlas | <dedicated branch>
 root: <set after resolve>
 ```
 

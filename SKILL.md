@@ -68,7 +68,6 @@ path_module: references/paths/init.md
 intent: <one line>
 strategy: shared
 remote: <consumer origin or existing dedicated store URL>
-ref: atlas
 root: <set after resolve>
 ```
 
