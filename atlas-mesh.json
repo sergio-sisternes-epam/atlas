@@ -3,8 +3,13 @@
   "stores": [
     {
       "id": "github.com/sergio-sisternes-epam/atlas-atlas",
-      "ref": "main",
+      "ref": "docs/skill-help-pilot",
       "path": ".atlas/github.com/sergio-sisternes-epam/atlas-atlas"
+    },
+    {
+      "id": "github.com/sergio-sisternes-epam/atlas-cartograph-atlas",
+      "ref": "docs/atlas-help-connection",
+      "path": ".atlas/github.com/sergio-sisternes-epam/atlas-cartograph-atlas"
     }
   ]
 }
