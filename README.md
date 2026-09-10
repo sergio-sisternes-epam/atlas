@@ -66,7 +66,7 @@ New stores default to **shared** strategy: knowledge lives on isolated branch
 `.atlas/<id>/`. Recursive clone therefore fetches the git object store twice;
 that is accepted. **Dedicated** strategy still uses a separate existing
 repository (`--strategy dedicated --remote <url>`). Never `gh repo create`.
-Move history with `atlas store rehost` (path migrate `mode: strategy`). CLI
+Move history with `atlas store rehost` (path migrate `migrate_mode: strategy`). CLI
 `atlas migrate` still copies into `staging/` only.
 
 The skill emits an activation card and loads exactly one procedure from

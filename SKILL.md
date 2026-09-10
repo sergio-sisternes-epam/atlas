@@ -91,6 +91,7 @@ migrate_mode: relocate | strategy
 atlas_id: <host/org/repo>
 ref: main
 destination_strategy: shared | dedicated
+remote: <existing dedicated URL when destination is dedicated>
 ```
 
 Then load `references/paths/migrate.md`. Missing `migrate_mode` (or `atlas_id` on
