@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ATLAS_ROOT: .
-      ATLAS_REF: v0.11.0
+      ATLAS_REF: v0.11.1
       ATLAS_REPO: sergio-sisternes-epam/atlas
     steps:
       - name: Checkout mount

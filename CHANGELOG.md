@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.11.1 - 2026-09-10
+
+### Changed
+
+- Pin the Atlas help pilot design, activation-card and retrieval-fallback
+  decisions, and curated Cartograph onboarding articles in the knowledge store.
+- Connect Atlas and Cartograph knowledge stores with reciprocal help links;
+  align mesh refs and submodule tracking with the published knowledge branches.
+- Preserve the pilot as knowledge and design only: runtime `help`,
+  `getting-started`, and `visualise` activation paths remain unimplemented.
+
 ## 0.11.0 - 2026-09-10
 
 ### Added
