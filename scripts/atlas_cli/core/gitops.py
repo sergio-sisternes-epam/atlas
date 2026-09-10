@@ -134,6 +134,183 @@ def bootstrap_empty_repository(repo: Path, branch: str) -> tuple[int, str]:
     return code, err
 
 
+SHARED_BRANCH = "atlas"
+SCHEMA_BLOB = "SCHEMA.json"
+
+
+def origin_url(repo: Path) -> str:
+    """Configured origin URL, not the insteadOf-rewritten fetch URL."""
+    code, out, _ = run_git(["config", "--get", "remote.origin.url"], cwd=repo)
+    return out if code == 0 else ""
+
+
+def ref_exists(repo: Path, branch: str) -> bool:
+    code, _, _ = run_git(
+        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repo,
+    )
+    return code == 0
+
+
+def tree_has_schema(repo: Path, treeish: str) -> bool:
+    code, _, _ = run_git(["cat-file", "-e", f"{treeish}:{SCHEMA_BLOB}"], cwd=repo)
+    return code == 0
+
+
+def create_orphan_empty_branch(repo: Path, branch: str) -> tuple[int, str]:
+    """Empty-tree orphan ref. Does not checkout; does not copy the working tree."""
+    if ref_exists(repo, branch):
+        return 2, f"branch already exists: {branch}"
+    code, _, err = run_git(["check-ref-format", "--branch", branch], cwd=repo)
+    if code != 0:
+        return code, err or f"invalid branch: {branch}"
+    code, tree, err = run_git(["mktree"], cwd=repo, input_text="")
+    if code != 0:
+        return code, err
+    identity = {
+        "GIT_AUTHOR_NAME": EMPTY_MOUNT_AUTHOR,
+        "GIT_AUTHOR_EMAIL": EMPTY_MOUNT_EMAIL,
+        "GIT_AUTHOR_DATE": EMPTY_MOUNT_DATE,
+        "GIT_COMMITTER_NAME": EMPTY_MOUNT_AUTHOR,
+        "GIT_COMMITTER_EMAIL": EMPTY_MOUNT_EMAIL,
+        "GIT_COMMITTER_DATE": EMPTY_MOUNT_DATE,
+    }
+    code, commit, err = run_git(
+        ["commit-tree", tree, "-m", EMPTY_MOUNT_MESSAGE],
+        cwd=repo,
+        env=identity,
+    )
+    if code != 0:
+        return code, err
+    code, _, err = run_git(
+        ["update-ref", f"refs/heads/{branch}", commit],
+        cwd=repo,
+    )
+    return code, err
+
+
+def ensure_shared_branch(
+    repo: Path,
+    branch: str = SHARED_BRANCH,
+    remote: str = "origin",
+) -> tuple[int, str, str]:
+    """Reuse atlas if SCHEMA.json is at the store root; else create empty orphan.
+
+    Returns (code, status, error) where status is created|reused|"".
+    """
+    if not ref_exists(repo, branch):
+        code, out, _ = run_git(
+            ["ls-remote", "--heads", remote, branch],
+            cwd=repo,
+        )
+        if code == 0 and out:
+            fetch_code, _, fetch_err = run_git(
+                ["fetch", remote, f"{branch}:{branch}"],
+                cwd=repo,
+            )
+            if fetch_code != 0:
+                return fetch_code, "", fetch_err or "failed to fetch shared branch"
+    if ref_exists(repo, branch):
+        if tree_has_schema(repo, branch):
+            return 0, "reused", ""
+        return (
+            2,
+            "",
+            f"branch {branch} exists but is not an Atlas root (missing {SCHEMA_BLOB})",
+        )
+    code, err = create_orphan_empty_branch(repo, branch)
+    if code != 0:
+        return code, "", err or "orphan branch create failed"
+    return 0, "created", ""
+
+
+def ensure_attached_branch(repo: Path, branch: str) -> tuple[int, str]:
+    have = current_branch(repo)
+    if have == branch:
+        return 0, ""
+    code, _, err = run_git(["checkout", "-B", branch, f"refs/heads/{branch}"], cwd=repo)
+    if code != 0:
+        code, _, err = run_git(["checkout", "-B", branch], cwd=repo)
+    return code, err
+
+
+def commit_all(repo: Path, message: str) -> tuple[int, str]:
+    code, _, err = run_git(["add", "-A"], cwd=repo)
+    if code != 0:
+        return code, err
+    code, out, _ = run_git(["status", "--porcelain"], cwd=repo)
+    if code != 0:
+        return code, out
+    if not out:
+        return 0, ""
+    identity = {
+        "GIT_AUTHOR_NAME": EMPTY_MOUNT_AUTHOR,
+        "GIT_AUTHOR_EMAIL": EMPTY_MOUNT_EMAIL,
+        "GIT_COMMITTER_NAME": EMPTY_MOUNT_AUTHOR,
+        "GIT_COMMITTER_EMAIL": EMPTY_MOUNT_EMAIL,
+    }
+    code, _, err = run_git(["commit", "-m", message], cwd=repo, env=identity)
+    return code, err
+
+
+def push_history(
+    source: Path,
+    dest_url: str,
+    dest_branch: str,
+    token: str | None = None,
+    backend: str = "none",
+    source_ref: str = "HEAD",
+) -> tuple[int, str]:
+    """Push source_ref to dest_url dest_branch. Fail closed if not fast-forward."""
+    auth, drop = _auth_args(token, host=_https_host(dest_url), backend=backend)
+    code, out, err = run_git(
+        [*auth, "ls-remote", "--heads", dest_url, dest_branch],
+        cwd=source,
+        drop_keys=drop,
+    )
+    if code != 0:
+        return code, _redact(err, token) or "unable to list destination heads"
+    dest_tip = ""
+    if out:
+        dest_tip = out.split()[0]
+    if dest_tip:
+        fetch_code, _, fetch_err = run_git(
+            [*auth, "fetch", dest_url, dest_branch],
+            cwd=source,
+            drop_keys=drop,
+        )
+        if fetch_code != 0:
+            return fetch_code, _redact(fetch_err, token)
+        anc_code, _, _ = run_git(
+            ["merge-base", "--is-ancestor", dest_tip, source_ref],
+            cwd=source,
+        )
+        if anc_code != 0:
+            return 2, "destination history is unrelated; refuse to rewrite"
+    code, _, err = run_git(
+        [*auth, "push", dest_url, f"{source_ref}:refs/heads/{dest_branch}"],
+        cwd=source,
+        drop_keys=drop,
+    )
+    return code, _redact(err, token)
+
+
+def remove_submodule(parent: Path, dest: Path) -> tuple[int, str]:
+    rel = os.path.relpath(dest, parent).replace("\\", "/")
+    run_git(["submodule", "deinit", "-f", "--", rel], cwd=parent)
+    code, _, err = run_git(["rm", "-f", "--", rel], cwd=parent)
+    if code != 0:
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        return 0, ""
+    modules = _git_path(parent, "modules")
+    if modules:
+        nested = modules / Path(*rel.split("/"))
+        if nested.exists():
+            shutil.rmtree(nested, ignore_errors=True)
+    return 0, err
+
+
 @dataclass(frozen=True)
 class _FileSnapshot:
     path: Path

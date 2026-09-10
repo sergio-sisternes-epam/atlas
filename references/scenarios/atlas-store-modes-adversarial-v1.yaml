@@ -1,0 +1,24 @@
+id: atlas-store-modes-adversarial-v1
+adversarial: true
+work_id: 2026-09-10-atlas-store-modes
+packages: [atlas]
+smokes:
+  - id: no-dual-write
+    source: pin-11
+    expect: fail if two writable store roots after strategy migrate
+  - id: no-overlay-product-branch
+    source: pin-7
+    expect: fail if init writes SCHEMA onto existing non-Atlas atlas branch
+  - id: no-infer-when-field-contradicts
+    source: pin-4
+    expect: fail closed when strategy contradicts id/ref
+  - id: no-create-host-repo
+    source: pin-5
+    expect: fail if dedicated init creates a repository
+  - id: bootstrap-before-ruleset
+    source: pin-14
+    expect: GitHub ruleset applied only after atlas branch exists on the remote
+  - id: orphan-not-default-tree
+    source: pin-6
+    expect: shared atlas branch is an empty tree, not a copy of the default branch
+---

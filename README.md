@@ -58,7 +58,16 @@ deterministic CLI from the resolved skill directory:
 python3 <atlas-skill>/scripts/atlas.py --help
 python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
   --root <atlas-root> --json
+python3 <atlas-skill>/scripts/atlas.py store init --strategy shared
 ```
+
+New stores default to **shared** strategy: knowledge lives on isolated branch
+`atlas` of the consumer repository and mounts as a same-repo submodule at
+`.atlas/<id>/`. Recursive clone therefore fetches the git object store twice;
+that is accepted. **Dedicated** strategy still uses a separate existing
+repository (`--strategy dedicated --remote <url>`). Never `gh repo create`.
+Move history with `atlas store rehost` (path migrate `mode: strategy`). CLI
+`atlas migrate` still copies into `staging/` only.
 
 The skill emits an activation card and loads exactly one procedure from
 `references/paths/` before acting.

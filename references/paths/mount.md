@@ -46,6 +46,11 @@ root: <set after resolve>
    does not create a divergent branch. Failed mounts roll back the target,
    submodule metadata, index, and local Git configuration.
 
+   Mesh `strategy` is preserved on remount. Missing `strategy` means **dedicated**.
+   Shared mounts track `.gitmodules` `branch = atlas` (do not leave the nested
+   checkout detached). Same-repo shared submodules duplicate the git object
+   store on recursive clone; that is accepted.
+
 3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (query, remember, work, landscape).
 
 Do not write into the calling skill package. This file is not a store.

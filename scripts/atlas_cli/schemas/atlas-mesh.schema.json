@@ -21,7 +21,8 @@
         "id": { "type": "string", "minLength": 3 },
         "subpath": { "type": "string" },
         "ref": { "type": "string" },
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "strategy": { "type": "string", "enum": ["shared", "dedicated"] }
       }
     }
   }
