@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -138,6 +139,9 @@ SHARED_BRANCH = "atlas"
 SCHEMA_BLOB = "SCHEMA.json"
 
 
+_HTTP_URL = re.compile(r"https?://[^\s'\"<>]+")
+
+
 def redact_remote_userinfo(url: str) -> str:
     """Drop userinfo from http(s) remotes so tokens never reach logs."""
     if "://" not in url:
@@ -149,6 +153,13 @@ def redact_remote_userinfo(url: str) -> str:
     if "@" in netloc:
         netloc = netloc.rsplit("@", 1)[-1]
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def redact_git_output(text: str) -> str:
+    """Drop http(s) userinfo from git stdout/stderr."""
+    if not text:
+        return text
+    return _HTTP_URL.sub(lambda m: redact_remote_userinfo(m.group(0)), text)
 
 
 def origin_url(repo: Path) -> str:
@@ -222,7 +233,11 @@ def ensure_shared_branch(
                 cwd=repo,
             )
             if fetch_code != 0:
-                return fetch_code, "", fetch_err or "failed to fetch shared branch"
+                return (
+                    fetch_code,
+                    "",
+                    redact_git_output(fetch_err) or "failed to fetch shared branch",
+                )
     if ref_exists(repo, branch):
         if tree_has_schema(repo, branch):
             return 0, "reused", ""
@@ -662,10 +677,10 @@ def _https_host(url: str | None) -> str:
     return urlsplit(url).hostname or "github.com"
 
 
-def _redact(err: str, token: str | None) -> str:
+def _redact(err: str, token: str | None = None) -> str:
     if err and token:
-        return err.replace(token, "***")
-    return err
+        err = err.replace(token, "***")
+    return redact_git_output(err)
 
 
 def _auth_args(

@@ -19,6 +19,7 @@ from atlas_cli.core.gitops import (
     ensure_shared_branch,
     origin_url,
     push_history,
+    redact_git_output,
     redact_remote_userinfo,
     remove_submodule,
     run_git,
@@ -266,6 +267,17 @@ def main() -> int:
             "origin-url-strips-userinfo",
             redact_remote_userinfo(leaked) == "https://github.com/example/consumer.git",
             redact_remote_userinfo(leaked),
+        )
+        leaked_err = (
+            "fatal: unable to access 'https://secret-token@github.com/example/consumer.git/': "
+            "The requested URL returned error: 403"
+        )
+        redacted_err = redact_git_output(leaked_err)
+        check(
+            "git-output-strips-userinfo",
+            "secret-token" not in redacted_err
+            and "https://github.com/example/consumer.git/" in redacted_err,
+            redacted_err,
         )
         cred_parent = tmp / "cred-parent"
         init_parent(cred_parent, leaked)

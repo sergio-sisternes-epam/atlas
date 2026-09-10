@@ -6,7 +6,7 @@ path_id: migrate
 
 # Path: migrate
 
-Generic. Card **mode is required**. Missing `mode` ⇒ incomplete Enter.
+Generic. Card **migrate_mode is required**. Missing `migrate_mode` ⇒ incomplete Enter.
 
 - `relocate` — move a skill off vendor store at `references/atlas` onto `.atlas/<id>/` via path mount.
 - `strategy` — push store git history to the other storage strategy (shared ↔ dedicated). Do **not** use CLI `atlas migrate` (that copies into `staging/`).
@@ -25,18 +25,18 @@ subject: <skill>
 path: migrate
 path_module: references/paths/migrate.md
 intent: <one line>
-mode: relocate | strategy
+migrate_mode: relocate | strategy
 atlas_id: <host/org/repo>
 ref: main
 destination_strategy: shared | dedicated
 remote: <existing dedicated URL when destination is dedicated>
 ```
 
-`destination_strategy` is required when `mode` is `strategy`. Same source and destination strategy ⇒ fail closed.
+`destination_strategy` is required when `migrate_mode` is `strategy`. Same source and destination strategy ⇒ fail closed.
 
 ## Procedure
 
-### mode: relocate
+### migrate_mode: relocate
 
 1. Load path **mount** with the same `atlas_id` and `ref`. Query/remember use `--root` from `atlas resolve <atlas_id>`. No git repo: refuse persist.
 2. Move the gitlink from `references/atlas` to `.atlas/<atlas_id>/`. Same path in `atlas-mesh.json`. Delete `.gitignore` `.atlas/` if present.
@@ -47,7 +47,7 @@ remote: <existing dedicated URL when destination is dedicated>
 
 Do not add a skill-side `references/atlas.md` pointer.
 
-### mode: strategy
+### migrate_mode: strategy
 
 1. Read mesh `strategy` (missing = dedicated). Do not infer from id+ref when the field is present.
 2. Destination needs an **existing** git remote when `destination_strategy` is dedicated. Never create a host repository.

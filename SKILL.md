@@ -74,7 +74,7 @@ root: <set after resolve>
 If strategy is dedicated and `remote` is missing, ask and stop. Then load
 `references/paths/init.md` from the resolved Atlas skill directory.
 
-To **migrate**, emit path **migrate** with required `mode`:
+To **migrate**, emit path **migrate** with required `migrate_mode`:
 
 - `relocate` — skill off `<skill>/references/atlas` onto `.atlas/<id>/`
 - `strategy` — move history between shared and dedicated (`atlas store rehost`)
@@ -87,13 +87,13 @@ subject: <skill>
 path: migrate
 path_module: references/paths/migrate.md
 intent: <one line>
-mode: relocate | strategy
+migrate_mode: relocate | strategy
 atlas_id: <host/org/repo>
 ref: main
 destination_strategy: shared | dedicated
 ```
 
-Then load `references/paths/migrate.md`. Missing `mode` (or `atlas_id` on
+Then load `references/paths/migrate.md`. Missing `migrate_mode` (or `atlas_id` on
 relocate) means Enter is incomplete. One own store per Run. CLI `atlas migrate`
 still copies into staging; do not use it for strategy moves.
 
