@@ -41,6 +41,27 @@ from . import init as cmd_init
 from . import mount as cmd_mount
 
 
+def _mount(
+    pointer: str,
+    ref: str | None,
+    target: str | None,
+    ssh: bool,
+    parent: Path,
+    as_json: bool,
+    strategy: str,
+) -> int:
+    return cmd_mount.run(
+        pointer,
+        ref,
+        target,
+        ssh,
+        str(parent),
+        as_json,
+        True,
+        strategy,
+    )
+
+
 def run_init(
     strategy: str,
     remote: str | None,
@@ -135,14 +156,13 @@ def _init_shared(
         if code != 0:
             warnings.append(err or "push of empty atlas branch failed")
     if not (dest / ".git").exists():
-        rc = cmd_mount.run(
+        rc = _mount(
             atlas_id,
             SHARED_BRANCH,
             str(dest.relative_to(parent)),
             ssh,
-            str(parent),
-            False,
-            True,
+            parent,
+            as_json,
             "shared",
         )
         if rc != 0:
@@ -226,7 +246,7 @@ def _init_dedicated(
         parsed = parse_pointer(remote)
     except IdentityError as e:
         return _fail(str(e), as_json)
-    rc = cmd_mount.run(remote, None, None, ssh, str(parent), False, True, "dedicated")
+    rc = _mount(remote, None, None, ssh, parent, as_json, "dedicated")
     if rc != 0:
         return rc
     dest = cmd_mount.default_mount(parent, parsed.atlas_id)
@@ -301,19 +321,20 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
 
     dest = cmd_mount.default_mount(parent, dest_id)
     if dest.resolve() != src_path.resolve():
-        rc = cmd_mount.run(
+        rc = _mount(
             dest_id,
             SHARED_BRANCH,
             str(dest.relative_to(parent)),
             ssh,
-            str(parent),
-            False,
-            True,
+            parent,
+            as_json,
             "shared",
         )
         if rc != 0:
             return rc
-        remove_submodule(parent, src_path)
+        code, err = remove_submodule(parent, src_path)
+        if code != 0:
+            return _fail(err or "could not remove previous submodule", as_json)
         try:
             remove_store(parent, src_id)
         except MeshFileError as e:
@@ -390,11 +411,13 @@ def _rehost_to_dedicated(
     if code != 0:
         return _fail(err or "history push to dedicated remote failed", as_json)
     dest = cmd_mount.default_mount(parent, dest_id)
-    rc = cmd_mount.run(remote, dest_branch, None, ssh, str(parent), False, True, "dedicated")
+    rc = _mount(remote, dest_branch, None, ssh, parent, as_json, "dedicated")
     if rc != 0:
         return rc
     if dest.resolve() != src_path.resolve():
-        remove_submodule(parent, src_path)
+        code, err = remove_submodule(parent, src_path)
+        if code != 0:
+            return _fail(err or "could not remove previous submodule", as_json)
         try:
             remove_store(parent, src_id)
         except MeshFileError as e:

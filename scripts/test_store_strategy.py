@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atlas_cli.core.gitops import (
     create_orphan_empty_branch,
     ensure_shared_branch,
+    push_history,
+    remove_submodule,
     run_git,
     tree_has_schema,
 )
@@ -418,6 +420,61 @@ def main() -> int:
             "rehost-dedicated-requires-existing-remote",
             result.returncode == 0 and payload.get("strategy") == "dedicated",
             parse_error or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
+        )
+
+        json_parent = tmp / "json-parent"
+        init_parent(json_parent)
+        missing_url = "https://github.com/example/does-not-exist.git"
+        result = run(
+            [
+                "store",
+                "init",
+                "--strategy",
+                "dedicated",
+                "--remote",
+                missing_url,
+                "--json",
+                "--cwd",
+                str(json_parent),
+            ],
+            json_parent,
+            local_remote_env(tmp / "missing.git", missing_url),
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "store-json-keeps-json-on-mount-fail",
+            result.returncode != 0
+            and not parse_error
+            and payload.get("ok") is False
+            and "atlas mount:" not in (result.stdout or ""),
+            parse_error or f"exit={result.returncode} payload={payload} stdout={result.stdout!r}",
+        )
+
+        code, err = remove_submodule(json_parent, json_parent / "no-such-submodule")
+        check(
+            "remove-missing-submodule-is-ok",
+            code == 0,
+            f"code={code} err={err!r}",
+        )
+
+        previous_allow = os.environ.get("GIT_ALLOW_PROTOCOL")
+        os.environ["GIT_ALLOW_PROTOCOL"] = "file"
+        try:
+            code, err = push_history(
+                shared_parent,
+                f"file://{consumer_bare}",
+                "atlas",
+                source_ref="refs/heads/does-not-exist",
+            )
+        finally:
+            if previous_allow is None:
+                os.environ.pop("GIT_ALLOW_PROTOCOL", None)
+            else:
+                os.environ["GIT_ALLOW_PROTOCOL"] = previous_allow
+        check(
+            "push-history-bad-rev-is-not-unrelated",
+            code != 0 and "unrelated" not in (err or "").lower(),
+            f"code={code} err={err!r}",
         )
 
         help_out = run(["migrate", "--help"], ROOT)

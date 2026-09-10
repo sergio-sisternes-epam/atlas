@@ -281,12 +281,14 @@ def push_history(
         )
         if fetch_code != 0:
             return fetch_code, _redact(fetch_err, token)
-        anc_code, _, _ = run_git(
+        anc_code, _, anc_err = run_git(
             ["merge-base", "--is-ancestor", dest_tip, source_ref],
             cwd=source,
         )
-        if anc_code != 0:
+        if anc_code == 1:
             return 2, "destination history is unrelated; refuse to rewrite"
+        if anc_code != 0:
+            return anc_code, anc_err or "merge-base failed"
     code, _, err = run_git(
         [*auth, "push", dest_url, f"{source_ref}:refs/heads/{dest_branch}"],
         cwd=source,
@@ -300,6 +302,9 @@ def remove_submodule(parent: Path, dest: Path) -> tuple[int, str]:
     run_git(["submodule", "deinit", "-f", "--", rel], cwd=parent)
     code, _, err = run_git(["rm", "-f", "--", rel], cwd=parent)
     if code != 0:
+        missing = "did not match" in (err or "").lower()
+        if not missing:
+            return code, err or "git rm failed"
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
         return 0, ""
