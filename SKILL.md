@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
-version: 0.10.0
+version: 0.11.0
 activation_card: on
 ---
 
@@ -54,7 +54,9 @@ root: <atlas store root>
 Then read `path_module` from the resolved Atlas skill directory and follow it.
 Do not run from this router alone.
 
-To **create** a new Atlas, emit path **init** instead of mount. `remote` is required (existing git remote). Never create the host repository:
+To **create** a new Atlas, emit path **init** instead of mount. Default
+**strategy is shared** (knowledge on consumer branch `atlas`). Dedicated
+needs an existing store `remote`. Never create the host repository:
 
 ```text
 skill: atlas
@@ -64,16 +66,18 @@ subject: atlas | <project>
 path: init
 path_module: references/paths/init.md
 intent: <one line>
-remote: <existing git remote URL>
-ref: main
+strategy: shared
+remote: <consumer origin or existing dedicated store URL>
 root: <set after resolve>
 ```
 
-If `remote` is missing, ask and stop. Then load `references/paths/init.md`
-from the resolved Atlas skill directory.
+If strategy is dedicated and `remote` is missing, ask and stop. Then load
+`references/paths/init.md` from the resolved Atlas skill directory.
 
-To **migrate** a skill off `<skill>/references/atlas`, emit path **migrate**.
-`atlas_id` is that skill's store (`host/org/repo`):
+To **migrate**, emit path **migrate** with required `migrate_mode`:
+
+- `relocate` — skill off `<skill>/references/atlas` onto `.atlas/<id>/`
+- `strategy` — move history between shared and dedicated (`atlas store rehost`)
 
 ```text
 skill: atlas
@@ -83,20 +87,24 @@ subject: <skill>
 path: migrate
 path_module: references/paths/migrate.md
 intent: <one line>
+migrate_mode: relocate | strategy
 atlas_id: <host/org/repo>
 ref: main
+destination_strategy: shared | dedicated
+remote: <existing dedicated URL when destination is dedicated>
 ```
 
-Then load `references/paths/migrate.md` from the resolved Atlas skill
-directory. Missing `atlas_id` means Enter is incomplete. One own store per Run.
+Then load `references/paths/migrate.md`. Missing `migrate_mode` (or `atlas_id` on
+relocate) means Enter is incomplete. One own store per Run. CLI `atlas migrate`
+still copies into staging; do not use it for strategy moves.
 
 ## Path registry (load before execute)
 
 | path_id | When | Module |
 |---------|------|--------|
 | **mount** | Mount-if-missing and resolve `--root` | `references/paths/mount.md` |
-| **init** | New Atlas from an existing git remote; never creates the repo | `references/paths/init.md` |
-| **migrate** | Move a skill off `references/atlas` onto `.atlas/<id>/` | `references/paths/migrate.md` |
+| **init** | New Atlas; default shared (`atlas` branch) or dedicated existing remote; never creates the repo | `references/paths/init.md` |
+| **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated | `references/paths/migrate.md` |
 | **query** | Find / answer from an Atlas | `references/paths/query.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
@@ -142,6 +150,8 @@ python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py resolve <pointer>
+python3 <atlas-skill>/scripts/atlas.py store init [--strategy shared|dedicated] [--remote <url>]
+python3 <atlas-skill>/scripts/atlas.py store rehost --destination-strategy shared|dedicated [--remote <url>] [--id <atlas_id>]
 python3 <atlas-skill>/scripts/atlas.py migrate <source> --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--type ...] --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]

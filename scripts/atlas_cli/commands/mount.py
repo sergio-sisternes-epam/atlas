@@ -24,6 +24,7 @@ from ..core.gitops import (
     submodule_init,
     submodule_register,
 )
+from ..core.github_driver import github_hostname
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_store, upsert
 from ..core.translate import remote_url
@@ -40,6 +41,8 @@ def run(
     ssh: bool,
     start: str | None,
     as_json: bool,
+    quiet: bool = False,
+    strategy: str | None = None,
 ) -> int:
     base = Path(start).resolve() if start else Path.cwd()
     try:
@@ -63,6 +66,7 @@ def run(
         )
 
     host, org, _repo = parsed.atlas_id.split("/", 2)
+    host = github_hostname(host)
     recorded = lookup(host, org)
     if recorded and not ssh:
         ssh = bool(recorded.get("ssh") or recorded.get("backend") == "ssh")
@@ -82,7 +86,7 @@ def run(
     if dest.exists() and existing.exists():
         if is_dirty(dest):
             return _fail(f"dirty worktree: {dest}", as_json)
-        actual_id, identity_error = _checkout_atlas_id(dest)
+        actual_id, identity_error = _checkout_atlas_id(dest, parent_git)
         if actual_id != parsed.atlas_id:
             detail = actual_id or identity_error or "unknown origin"
             return _fail(
@@ -128,7 +132,7 @@ def run(
                     cleanup,
                     as_json,
                 )
-            landed = current_branch(dest) or ref or ""
+            landed = _persistable_ref(current_branch(dest), ref)
             result = _finish(
                 project,
                 dest,
@@ -137,6 +141,8 @@ def run(
                 as_json,
                 "mounted",
                 snapshot,
+                quiet=quiet,
+                strategy=strategy,
             )
             return result
         stored = None
@@ -153,9 +159,11 @@ def run(
             project,
             dest,
             parsed.atlas_id,
-            have or want or "",
+            _persistable_ref(have, want),
             as_json,
             "noop",
+            quiet=quiet,
+            strategy=strategy,
         )
 
     dest_empty = dest.is_dir() and not any(dest.iterdir())
@@ -191,7 +199,7 @@ def run(
         if code != 0:
             actual_id = None
             if (dest / ".git").exists():
-                actual_id, _ = _checkout_atlas_id(dest)
+                actual_id, _ = _checkout_atlas_id(dest, parent_git)
             if actual_id == parsed.atlas_id and is_empty_repository(dest):
                 verify_code, remote_empty, verify_error = remote_is_empty(
                     url,
@@ -230,7 +238,7 @@ def run(
                     cleanup,
                     as_json,
                 )
-    landed = current_branch(dest) or ref or ""
+    landed = _persistable_ref(current_branch(dest), ref)
     return _finish(
         project,
         dest,
@@ -239,7 +247,16 @@ def run(
         as_json,
         "mounted",
         snapshot,
+        quiet=quiet,
+        strategy=strategy,
     )
+
+
+def _persistable_ref(*candidates: str | None) -> str:
+    for candidate in candidates:
+        if candidate and candidate != "HEAD":
+            return candidate
+    return ""
 
 
 def _infer_subpath(dest: Path) -> str:
@@ -277,7 +294,10 @@ def _in_gitmodules(parent: Path, dest: Path) -> bool:
     return False
 
 
-def _checkout_atlas_id(dest: Path) -> tuple[str | None, str | None]:
+def _checkout_atlas_id(
+    dest: Path,
+    parent: Path | None = None,
+) -> tuple[str | None, str | None]:
     code, raw_origin, raw_error = run_git(
         ["config", "--get", "remote.origin.url"],
         cwd=dest,
@@ -297,8 +317,21 @@ def _checkout_atlas_id(dest: Path) -> tuple[str | None, str | None]:
             return parse_pointer(origin).atlas_id, None
         except IdentityError as exc:
             errors.append(str(exc))
+    if parent is not None and _relative_origin(raw_origin or expanded_origin):
+        p_code, parent_origin, _ = run_git(["remote", "get-url", "origin"], cwd=parent)
+        if p_code == 0 and parent_origin:
+            try:
+                return parse_pointer(parent_origin).atlas_id, None
+            except IdentityError as exc:
+                errors.append(str(exc))
     detail = "; ".join(errors) or expanded_error or "unparseable origin"
     return None, f"origin remote is invalid ({detail})"
+
+
+def _relative_origin(url: str | None) -> bool:
+    if not url:
+        return False
+    return url in (".", "..", "./") or url.startswith("./") or url.startswith("../")
 
 
 def _finish(
@@ -309,25 +342,34 @@ def _finish(
     as_json: bool,
     status: str,
     snapshot: SubmoduleSnapshot | None = None,
+    quiet: bool = False,
+    strategy: str | None = None,
 ) -> int:
     try:
         rel = dest.relative_to(project)
     except ValueError:
         return _fail("mounted Atlas is outside the active git repository", as_json)
+    row = {
+        "id": atlas_id,
+        "ref": landed,
+        "path": str(rel).replace("\\", "/"),
+        "subpath": _infer_subpath(dest),
+    }
+    chosen = strategy
+    if not chosen:
+        try:
+            existing = find_store(project, atlas_id)
+        except MeshFileError:
+            existing = None
+        chosen = (existing or {}).get("strategy")
+    if chosen:
+        row["strategy"] = chosen
     try:
-        upsert(
-            project,
-            {
-                "id": atlas_id,
-                "ref": landed,
-                "path": str(rel).replace("\\", "/"),
-                "subpath": _infer_subpath(dest),
-            },
-        )
+        upsert(project, row)
     except MeshFileError as e:
         cleanup = rollback_submodule_state(snapshot) if snapshot else []
         return _fail_with_cleanup(str(e), cleanup, as_json)
-    return _ok(str(dest), atlas_id, landed, as_json, status)
+    return _ok(str(dest), atlas_id, landed, as_json, status, quiet)
 
 
 def _fail(msg: str, as_json: bool) -> int:
@@ -344,7 +386,16 @@ def _fail_with_cleanup(msg: str, cleanup: list[str], as_json: bool) -> int:
     return _fail(msg, as_json)
 
 
-def _ok(path: str, atlas_id: str, ref: str, as_json: bool, status: str) -> int:
+def _ok(
+    path: str,
+    atlas_id: str,
+    ref: str,
+    as_json: bool,
+    status: str,
+    quiet: bool = False,
+) -> int:
+    if quiet:
+        return 0
     if as_json:
         print(json.dumps({"ok": True, "path": path, "id": atlas_id, "ref": ref, "status": status}))
     else:

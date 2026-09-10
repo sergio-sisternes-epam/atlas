@@ -14,6 +14,7 @@ from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
 from .commands import schema_cmd as cmd_schema
 from .commands import recall as cmd_recall
+from .commands import storecmd as cmd_store
 
 
 @click.group(
@@ -116,6 +117,66 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
 def init_cmd(root: str | None, force: bool, as_json: bool, schema_version: str) -> None:
     """Write a first SCHEMA.json and default templates."""
     raise SystemExit(cmd_init.run(root, force, as_json, schema_version))
+
+
+@main.group("store")
+def store_group() -> None:
+    """Shared (consumer atlas branch) or dedicated (separate repo) storage."""
+
+
+@store_group.command("init")
+@click.option(
+    "--strategy",
+    type=click.Choice(["shared", "dedicated"], case_sensitive=False),
+    default="shared",
+    show_default=True,
+)
+@click.option("--remote", default=None, help="git URL; shared defaults to consumer origin")
+@click.option("--ssh", is_flag=True)
+@click.option("--cwd", "start", default=None, help="project directory")
+@click.option("--json", "as_json", is_flag=True)
+@click.option(
+    "--schema-version",
+    "schema_version",
+    default="1.0",
+    show_default=True,
+)
+def store_init_cmd(
+    strategy: str,
+    remote: str | None,
+    ssh: bool,
+    start: str | None,
+    as_json: bool,
+    schema_version: str,
+) -> None:
+    """Bootstrap a store. Default strategy is shared. Never creates a host repo."""
+    raise SystemExit(cmd_store.run_init(strategy.lower(), remote, start, ssh, as_json, schema_version))
+
+
+@store_group.command("rehost")
+@click.option(
+    "--destination-strategy",
+    "destination_strategy",
+    type=click.Choice(["shared", "dedicated"], case_sensitive=False),
+    required=True,
+)
+@click.option("--remote", default=None, help="existing dedicated remote (required when destination is dedicated)")
+@click.option("--id", "atlas_id", default=None, help="source store id (default: sole mesh row)")
+@click.option("--ssh", is_flag=True)
+@click.option("--cwd", "start", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def store_rehost_cmd(
+    destination_strategy: str,
+    remote: str | None,
+    atlas_id: str | None,
+    ssh: bool,
+    start: str | None,
+    as_json: bool,
+) -> None:
+    """Move store history between shared and dedicated. Does not import pages."""
+    raise SystemExit(
+        cmd_store.run_rehost(destination_strategy.lower(), remote, atlas_id, start, ssh, as_json)
+    )
 
 
 @main.command("search")

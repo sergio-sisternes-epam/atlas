@@ -11,6 +11,9 @@ from .identity import IdentityError, normalise
 MESH_NAME = "atlas-mesh.json"
 FORBIDDEN = frozenset({"token", "pat", "password", "secret", "credential"})
 SCHEMA_FILE = Path(__file__).resolve().parents[1] / "schemas" / "atlas-mesh.schema.json"
+STRATEGIES = frozenset({"shared", "dedicated"})
+DEFAULT_STRATEGY = "dedicated"
+SHARED_REF = "atlas"
 
 
 class MeshFileError(ValueError):
@@ -82,7 +85,31 @@ def validate_doc(data: Any) -> list[str]:
                 errs.append(f"stores[{i}] id is not canonical: {sid}")
         except IdentityError:
             errs.append(f"stores[{i}] id is not host/org/repo: {sid}")
+        errs.extend(strategy_errors(row, i))
     return errs
+
+
+def effective_strategy(row: dict[str, Any] | None) -> str:
+    """Missing strategy is dedicated. Do not infer from id+ref."""
+    raw = (row or {}).get("strategy")
+    if raw in (None, ""):
+        return DEFAULT_STRATEGY
+    return str(raw)
+
+
+def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
+    prefix = f"stores[{index}] " if index != "" else ""
+    raw = row.get("strategy")
+    if raw in (None, ""):
+        return []
+    if raw not in STRATEGIES:
+        return [f"{prefix}strategy must be shared or dedicated"]
+    ref = str(row.get("ref") or "").strip()
+    if raw == "shared" and ref != SHARED_REF:
+        if not ref:
+            return [f"{prefix}strategy shared requires ref {SHARED_REF}"]
+        return [f"{prefix}strategy shared requires ref {SHARED_REF}, have {ref}"]
+    return []
 
 
 def upsert(project: Path, row: dict[str, str]) -> Path:
@@ -111,3 +138,14 @@ def find_store(project: Path, atlas_id: str) -> dict | None:
 def known_ids(project: Path) -> set[str]:
     doc = load(project)
     return {str(s.get("id")) for s in doc.get("stores") or [] if s.get("id")}
+
+
+def remove_store(project: Path, atlas_id: str) -> Path:
+    doc = load(project)
+    doc["stores"] = [s for s in doc.get("stores") or [] if s.get("id") != atlas_id]
+    errs = validate_doc(doc)
+    if errs:
+        raise MeshFileError("; ".join(errs))
+    fp = mesh_path(project)
+    fp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return fp
