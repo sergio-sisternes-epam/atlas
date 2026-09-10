@@ -57,7 +57,7 @@ jobs:
       - name: Register APM marketplace
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+        run: apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
       - name: Scan committed APM primitives
         run: apm audit --no-policy --no-drift
 
@@ -89,7 +89,7 @@ jobs:
       - name: Register APM marketplace
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
-        run: apm marketplace add sergio-sisternes-epam/apm-marketplace --name sergio-sisternes-epam
+        run: apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
       - name: Install checked-out package into a disposable consumer
         env:
           GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
