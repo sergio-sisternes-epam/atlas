@@ -322,7 +322,7 @@ def _checkout_atlas_id(
 def _relative_origin(url: str | None) -> bool:
     if not url:
         return False
-    return url in (".", "./") or url.startswith("./") or url.startswith("../")
+    return url in (".", "..", "./") or url.startswith("./") or url.startswith("../")
 
 
 def _finish(

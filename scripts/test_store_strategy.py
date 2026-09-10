@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from atlas_cli.commands.mount import _relative_origin
 from atlas_cli.core.gitops import (
     create_orphan_empty_branch,
     ensure_shared_branch,
@@ -206,6 +207,17 @@ def main() -> int:
             "self-hosted-warn-and-continue",
             code == 0 and "self-hosted" in warn,
             f"code={code} warn={warn!r}",
+        )
+        code, warn = protect_atlas_branch("git.example.com/org/repo", branch="knowledge")
+        check(
+            "protect-warning-uses-branch-arg",
+            code == 0 and "knowledge" in warn,
+            f"code={code} warn={warn!r}",
+        )
+        check(
+            "relative-origin-bare-dotdot",
+            _relative_origin("..") and _relative_origin("../") and not _relative_origin("atlas"),
+            "expected '..' to count as a relative origin",
         )
 
         consumer_url = "https://github.com/example/consumer.git"
@@ -475,6 +487,49 @@ def main() -> int:
             "push-history-bad-rev-is-not-unrelated",
             code != 0 and "unrelated" not in (err or "").lower(),
             f"code={code} err={err!r}",
+        )
+
+        escape_parent = tmp / "escape-parent"
+        init_parent(escape_parent, consumer_url)
+        outside = tmp / "outside-store"
+        outside.mkdir()
+        (outside / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
+        (escape_parent / "atlas-mesh.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "stores": [
+                        {
+                            "id": "github.com/example/store",
+                            "path": "../outside-store",
+                            "ref": "main",
+                            "strategy": "dedicated",
+                        }
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = run(
+            [
+                "store",
+                "rehost",
+                "--destination-strategy",
+                "shared",
+                "--json",
+                "--cwd",
+                str(escape_parent),
+            ],
+            escape_parent,
+        )
+        payload, parse_error = json_payload(result)
+        check(
+            "rehost-rejects-escaped-mesh-path",
+            result.returncode != 0
+            and "escapes" in payload.get("error", "")
+            and outside.is_dir(),
+            parse_error or f"exit={result.returncode} payload={payload}",
         )
 
         help_out = run(["migrate", "--help"], ROOT)

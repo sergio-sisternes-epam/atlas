@@ -60,10 +60,13 @@ def protect_atlas_branch(atlas_id: str, branch: str = SHARED_BRANCH) -> tuple[in
         return (
             0,
             "github driver skipped: self-hosted git has no Atlas ruleset; "
-            "protect branch 'atlas' on the server if you can",
+            f"protect branch '{branch}' on the server if you can",
         )
     if shutil.which("gh") is None:
-        return 0, "github driver skipped: gh not on PATH; protect branch atlas manually"
+        return 0, (
+            "github driver skipped: gh not on PATH; "
+            f"protect branch {branch} manually"
+        )
     owner_repo = f"{org}/{repo}"
     env_host = [] if host == "github.com" else ["--hostname", host]
     listed = subprocess.run(

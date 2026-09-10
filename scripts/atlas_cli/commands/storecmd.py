@@ -18,6 +18,7 @@ from ..core.gitops import (
     ensure_shared_branch,
     git_root,
     has_git,
+    inside_git,
     origin_url,
     push_history,
     ref_exists,
@@ -296,7 +297,10 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
     except IdentityError as e:
         return _fail(str(e), as_json)
     src_id = str(source["id"])
-    src_path = _store_path(parent, source)
+    try:
+        src_path = _store_path(parent, source)
+    except MeshFileError as e:
+        return _fail(str(e), as_json)
     if not (src_path / ".git").exists() and not (src_path / SCHEMA_NAME).is_file():
         return _fail(f"source mount missing: {src_path}", as_json)
 
@@ -390,7 +394,10 @@ def _rehost_to_dedicated(
         return _fail(str(e), as_json)
     dest_id = dest_parsed.atlas_id
     src_id = str(source["id"])
-    src_path = _store_path(parent, source)
+    try:
+        src_path = _store_path(parent, source)
+    except MeshFileError as e:
+        return _fail(str(e), as_json)
     if not (src_path / ".git").exists() and not (src_path / SCHEMA_NAME).is_file():
         return _fail(f"source mount missing: {src_path}", as_json)
     auth = _auth_for(dest_id, ssh)
@@ -463,8 +470,14 @@ def _source_row(parent: Path, atlas_id: str | None) -> dict:
 def _store_path(parent: Path, source: dict) -> Path:
     raw = str(source.get("path") or "").strip()
     if raw:
-        return (parent / raw).resolve()
-    return cmd_mount.default_mount(parent, str(source["id"]))
+        dest = (parent / raw).resolve()
+    else:
+        dest = cmd_mount.default_mount(parent, str(source["id"]))
+    if not inside_git(parent, dest):
+        raise MeshFileError(
+            f"mesh path escapes the consumer repository: {raw or dest}"
+        )
+    return dest
 
 
 def _silent_init(dest: Path, schema_version: str) -> int:
