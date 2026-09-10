@@ -17,7 +17,9 @@ from atlas_cli.commands.mount import _relative_origin
 from atlas_cli.core.gitops import (
     create_orphan_empty_branch,
     ensure_shared_branch,
+    origin_url,
     push_history,
+    redact_remote_userinfo,
     remove_submodule,
     run_git,
     tree_has_schema,
@@ -243,6 +245,47 @@ def main() -> int:
             "relative-origin-bare-dotdot",
             _relative_origin("..") and _relative_origin("../") and not _relative_origin("atlas"),
             "expected '..' to count as a relative origin",
+        )
+        leaked = "https://secret-token@github.com/example/consumer.git"
+        check(
+            "origin-url-strips-userinfo",
+            redact_remote_userinfo(leaked) == "https://github.com/example/consumer.git",
+            redact_remote_userinfo(leaked),
+        )
+        cred_parent = tmp / "cred-parent"
+        init_parent(cred_parent, leaked)
+        got_origin = origin_url(cred_parent)
+        check(
+            "origin-url-hides-embedded-token",
+            "secret-token" not in got_origin and "github.com/example/consumer.git" in got_origin,
+            got_origin,
+        )
+        fetch_src = tmp / "atlas-src"
+        init_store_repo(fetch_src, "atlas-on-remote")
+        git(["branch", "atlas"], fetch_src)
+        fetch_bare = tmp / "atlas-src.git"
+        git(["init", "-q", "--bare", "--initial-branch=main", str(fetch_bare)], tmp)
+        git(["remote", "add", "origin", f"file://{fetch_bare}"], fetch_src)
+        previous_allow = os.environ.get("GIT_ALLOW_PROTOCOL")
+        os.environ["GIT_ALLOW_PROTOCOL"] = "file"
+        try:
+            git(["push", "-q", "origin", "main", "atlas"], fetch_src)
+            no_origin = tmp / "no-origin-parent"
+            init_parent(no_origin)
+            code, status, err = ensure_shared_branch(
+                no_origin,
+                "atlas",
+                f"file://{fetch_bare}",
+            )
+        finally:
+            if previous_allow is None:
+                os.environ.pop("GIT_ALLOW_PROTOCOL", None)
+            else:
+                os.environ["GIT_ALLOW_PROTOCOL"] = previous_allow
+        check(
+            "ensure-shared-branch-fetches-remote-url",
+            code == 0 and status == "reused",
+            f"code={code} status={status} err={err!r}",
         )
 
         consumer_url = "https://github.com/example/consumer.git"

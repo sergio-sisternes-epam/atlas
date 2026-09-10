@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from .auth import TOKEN_ENV_KEYS
 
@@ -138,10 +138,23 @@ SHARED_BRANCH = "atlas"
 SCHEMA_BLOB = "SCHEMA.json"
 
 
+def redact_remote_userinfo(url: str) -> str:
+    """Drop userinfo from http(s) remotes so tokens never reach logs."""
+    if "://" not in url:
+        return url
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return url
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def origin_url(repo: Path) -> str:
     """Configured origin URL, not the insteadOf-rewritten fetch URL."""
     code, out, _ = run_git(["config", "--get", "remote.origin.url"], cwd=repo)
-    return out if code == 0 else ""
+    return redact_remote_userinfo(out) if code == 0 and out else ""
 
 
 def ref_exists(repo: Path, branch: str) -> bool:

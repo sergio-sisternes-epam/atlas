@@ -21,6 +21,7 @@ from ..core.gitops import (
     inside_git,
     origin_url,
     push_history,
+    redact_remote_userinfo,
     ref_exists,
     remove_submodule,
     run_git,
@@ -128,7 +129,7 @@ def _init_shared(
     schema_version: str,
 ) -> int:
     origin = origin_url(parent)
-    pointer = origin or remote
+    pointer = redact_remote_userinfo(origin or remote or "")
     if not pointer:
         return _fail("shared init needs --remote or origin on the consumer repository", as_json)
     try:
@@ -136,7 +137,9 @@ def _init_shared(
     except IdentityError as e:
         return _fail(str(e), as_json)
     atlas_id = parsed.atlas_id
-    code, status, err = ensure_shared_branch(parent, SHARED_BRANCH)
+    dest_url = pointer
+    fetch_from = "origin" if origin else dest_url
+    code, status, err = ensure_shared_branch(parent, SHARED_BRANCH, fetch_from)
     if code != 0:
         return _fail(err or "shared branch setup failed", as_json)
 
@@ -144,7 +147,6 @@ def _init_shared(
     warnings: list[str] = []
     auth = _auth_for(atlas_id, ssh)
     token = cmd_mount._explicit_git_token(auth)
-    dest_url = origin_url(parent) or pointer
     if status == "created":
         code, err = push_history(
             parent,
