@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from atlas_cli.commands.mount import _relative_origin
+from atlas_cli.commands.mount import _persistable_ref, _relative_origin
 from atlas_cli.core.gitops import (
     create_orphan_empty_branch,
     ensure_shared_branch,
@@ -245,6 +245,13 @@ def main() -> int:
             "relative-origin-bare-dotdot",
             _relative_origin("..") and _relative_origin("../") and not _relative_origin("atlas"),
             "expected '..' to count as a relative origin",
+        )
+        check(
+            "mesh-ref-does-not-persist-head",
+            _persistable_ref("HEAD", "atlas") == "atlas"
+            and _persistable_ref("HEAD", "HEAD") == ""
+            and _persistable_ref("main") == "main",
+            "detached HEAD must not be written as a mesh ref",
         )
         leaked = "https://secret-token@github.com/example/consumer.git"
         check(

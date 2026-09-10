@@ -130,7 +130,7 @@ def run(
                     cleanup,
                     as_json,
                 )
-            landed = current_branch(dest) or ref or ""
+            landed = _persistable_ref(current_branch(dest), ref)
             result = _finish(
                 project,
                 dest,
@@ -157,7 +157,7 @@ def run(
             project,
             dest,
             parsed.atlas_id,
-            have or want or "",
+            _persistable_ref(have, want),
             as_json,
             "noop",
             quiet=quiet,
@@ -236,7 +236,7 @@ def run(
                     cleanup,
                     as_json,
                 )
-    landed = current_branch(dest) or ref or ""
+    landed = _persistable_ref(current_branch(dest), ref)
     return _finish(
         project,
         dest,
@@ -248,6 +248,13 @@ def run(
         quiet=quiet,
         strategy=strategy,
     )
+
+
+def _persistable_ref(*candidates: str | None) -> str:
+    for candidate in candidates:
+        if candidate and candidate != "HEAD":
+            return candidate
+    return ""
 
 
 def _infer_subpath(dest: Path) -> str:
