@@ -543,6 +543,16 @@ def main() -> int:
             code == 0,
             f"code={code} err={err!r}",
         )
+        outside_rm = tmp / "outside-rm"
+        outside_rm.mkdir()
+        keep = outside_rm / "keep.txt"
+        keep.write_text("keep\n", encoding="utf-8")
+        code, err = remove_submodule(json_parent, outside_rm)
+        check(
+            "remove-submodule-rejects-escaped-path",
+            code != 0 and keep.is_file() and "escapes" in (err or ""),
+            f"code={code} err={err!r} exists={keep.is_file()}",
+        )
 
         previous_allow = os.environ.get("GIT_ALLOW_PROTOCOL")
         os.environ["GIT_ALLOW_PROTOCOL"] = "file"

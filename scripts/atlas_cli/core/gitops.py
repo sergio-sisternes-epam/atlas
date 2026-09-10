@@ -311,6 +311,8 @@ def push_history(
 
 
 def remove_submodule(parent: Path, dest: Path) -> tuple[int, str]:
+    if not inside_git(parent, dest):
+        return 2, "submodule path escapes the consumer repository"
     rel = os.path.relpath(dest, parent).replace("\\", "/")
     run_git(["submodule", "deinit", "-f", "--", rel], cwd=parent)
     code, _, err = run_git(["rm", "-f", "--", rel], cwd=parent)
