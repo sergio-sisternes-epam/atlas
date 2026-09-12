@@ -65,32 +65,12 @@ the use case requires it.
 
 ## Install
 
-Requires APM CLI 0.30.0 or newer and Python 3.10 or newer.
-
 ```bash
 apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 apm install atlas@atlas
 ```
 
-Pass `--target` when you want a specific harness (for example `copilot` or
-`claude`).
-
-After the source owner publishes an immutable tag matching the `version` in
-`apm.yml`, you may also install that tag:
-
-```bash
-apm install sergio-sisternes-epam/atlas#vX.Y.Z
-```
-
-Then install CLI dependencies in the environment that runs Atlas:
-
-```bash
-python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
-```
-
-> IMPORTANT: Package dependencies are linked to `@atlas`. If you do not
-> register the marketplace with this exact name, transient dependency
-> installation will fail.
+`--name atlas` is required so the package resolves as `atlas@atlas`.
 
 ## Use
 
