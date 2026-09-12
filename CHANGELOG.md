@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Document Atlas's Apache-2.0 license and the separate licensing boundary for
+  the `okf` dependency.
+
 ## 0.11.2 - 2026-09-10
 
 ### Changed

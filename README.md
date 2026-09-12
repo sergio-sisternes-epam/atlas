@@ -114,6 +114,12 @@ Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-
 | `scripts/atlas_cli/` | CLI implementation |
 | `fixtures/` | Validation fixtures used by the package test suite |
 
+## License
+
+Atlas is licensed under the [Apache License 2.0](LICENSE), Copyright 2026
+Sergio Sisternes. The separately distributed `okf` dependency remains under
+its own Apache-2.0 license and notice.
+
 ## Support and maintenance
 
 Source, issues, and release history:
