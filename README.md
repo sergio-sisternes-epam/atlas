@@ -1,14 +1,16 @@
-# atlas
+# Atlas
 
 Atlas is a knowledge graph in technologies LLMs already know: git and
 markdown, with a SCHEMA and a CLI that compile the store.
 
 ## Why / what this is not
 
-Atlas follows [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format)
-and the compile-once idea in [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
-Knowledge is written once, linked, and reused — not rediscovered from raw files
-on every question.
+Atlas defines the storage protocol, following
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format).
+Like [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
+it turns working notes into durable linked pages instead of re-deriving
+answers from raw files on every question. Atlas `compile` is a later gate:
+it checks SCHEMA, frontmatter, and links — it does not ingest sources.
 
 Source code, tickets, and designs are systems of record. RAG is good at the
 *what*. A central ontology is bad at branch, conflict, and merge. Atlas treats
