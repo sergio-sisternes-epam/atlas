@@ -31,7 +31,7 @@ detail lives in `SKILL.md`. For Semantic Knowledge Recall (SMR), It ships with a
 
 Atlas is not enforcing a *Semantic Knowledge Organisation (SMO)*. It ships with a simple base SCHEMA that an LLM can customise with the help of `dicuss@atlas` and `atlas@atlas`. But how you organise it is entirely up to you.
 
-Atlas is not a closed Semantic Knowledge Organisation (SMO), an Enterprise distributed Semantic Knowledge Recall (SMR)  or an Ontology solution.
+Atlas is not an optimised or closed Semantic Knowledge Organisation (SMO), an Enterprise distributed Semantic Knowledge Recall (SMR)  or an Ontology solution. These capabilities can, and should, be built on top of Atlas if the use case requires it.
 
 ## Install
 
@@ -62,19 +62,25 @@ After install, invoke Atlas in an agent session with `/atlas`. It ships
 
 ```text
 /atlas getting-started
+/atlas How can I get started?
+/atlas I need help on how to use it
 ```
 
-Starting is asking Atlas how to do it.
+Starting is asking Atlas how to do it. It comes with its own Atlas and skill modules to help you through the process.
 
 ## Modules
 
-- **Query** — Find and answer from an Atlas store.
-- **Remember** — Persist experiences, decisions, lessons, and recipes.
-- **Work** — Open, update, or close work hubs.
-- **Landscape** — Research competitors and symbionts into comparison memory.
-- **Schema** — Create, install, or uninstall SCHEMA overlays.
-- **Configure** — Inspect and select Semantic Memory Recall.
-- **Init** — Scaffold a new Atlas in the active git repository.
+| Module | What it does |
+| --- | --- |
+| Getting started | First-run onboarding: how to mount, init, and ask Atlas. |
+| Help | How to use Atlas; ask Atlas how to do the next step. |
+| Query | Find and answer from an Atlas store. |
+| Remember | Persist experiences, decisions, lessons, and recipes. |
+| Work | Open, update, or close work hubs. |
+| Landscape | Research competitors and symbionts into comparison memory. |
+| Schema | Create, install, or uninstall SCHEMA overlays. |
+| Configure | Inspect and select Semantic Memory Recall. |
+| Init | Scaffold a new Atlas in the active git repository. |
 
 ## Related
 
