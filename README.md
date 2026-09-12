@@ -1,7 +1,7 @@
 # atlas
 
-Atlas keeps agent process memory in git: markdown pages, a SCHEMA, and a CLI
-that compiles the graph.
+Atlas is a knowledge graph in technologies LLMs already know: git and
+markdown, with a SCHEMA and a CLI that compile the store.
 
 ## Why / what this is not
 
@@ -19,7 +19,7 @@ keep agents from breaking the contract.
 
 > The value is not only in connecting the dots at the surface (the *what*),
 > but the trail of memories, decisions, and experiences LLMs create as they
-> work.
+> work (the *why*).
 
 Tried so far on GitHub Copilot and Grok: travel planning; cooking (recipes,
 shopping, purchases, prices); sky/gear trips; work and personal second-brain
