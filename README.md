@@ -1,17 +1,28 @@
 # atlas
 
-Atlas is a durable OKF v0.2 knowledge substrate for agent process memory,
-decisions, work hubs, and project knowledge graphs.
+Atlas keeps agent process memory in git: markdown pages, a SCHEMA, and a CLI
+that compiles the graph.
 
 ## Why / what this is not
 
-Atlas is a root APM skill bundle with a deterministic Python CLI. Use it to
-query stores, remember knowledge, track work, refresh landscape, and govern
-schema on durable OKF graphs.
+Atlas follows [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format)
+and the compile-once idea in [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+Knowledge is written once, linked, and reused — not rediscovered from raw files
+on every question.
 
-The `okf` package remains the format authority and a separate dependency.
-Atlas does not replace `okf`, phone home, or auto-author claims without an
-agent. Runtime detail lives in `SKILL.md`.
+Source code and tickets are systems of record. RAG is good at the *what*. A
+central ontology is bad at branch, conflict, and merge. Atlas treats each
+session’s decisions as git history so agents can share a graph without
+pretending only one story is true.
+
+> The value is not only in connecting the dots at the surface (the *what*),
+> but the trail of memories, decisions, and experiences LLMs create as they
+> work.
+
+Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
+package remains the format authority and a separate dependency. Atlas does not
+replace `okf`, phone home, or auto-author claims without an agent. Runtime
+detail lives in `SKILL.md`.
 
 ## Install
 
