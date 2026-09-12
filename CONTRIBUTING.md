@@ -34,6 +34,13 @@ The `--name` flag is required. Do not use alias `me` or the default
 GitHub consumers do not need a personal access token to install Atlas or the
 separate `okf` dependency.
 
+After a matching immutable tag exists, contributors may install that tag for
+release checks:
+
+```bash
+apm install sergio-sisternes-epam/atlas#vX.Y.Z
+```
+
 Atlas mount credentials are host-scoped. Generic public GitHub tokens apply
 only to `github.com` and `*.ghe.com`. For GHES automation, set `GH_HOST` to the
 exact server hostname and use `GH_ENTERPRISE_TOKEN` or

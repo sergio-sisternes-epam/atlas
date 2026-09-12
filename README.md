@@ -1,151 +1,112 @@
-# atlas
+# Atlas
 
-Atlas is a durable OKF v0.2 knowledge substrate for agent process memory,
-decisions, work hubs, and project knowledge graphs. It is distributed as a
-root APM skill bundle; the `okf` package remains the format authority.
+![Atlas](docs/atlas-banner.jpg)
 
-## What it provides
+Looking to build a second brain for your agent or skill (yes, agents can
+have skills) that follows specific structures and can be connected with
+other brains?
 
-- Query, remember, work, landscape, schema, and configure workflows selected by intent.
-- A deterministic Python CLI for Atlas creation, validation, search, mounting,
-  migration, promotion, and schema governance.
-- Templates and reference procedures for durable OKF stores.
-- Broad skill-runtime compatibility without harness-specific instructions.
+Look no more. Atlas is a distributed Semantic Knowledge Network built with
+technologies LLMs already know: git and markdown, with a SCHEMA and a CLI
+that keep agents inside pre-defined, extensible domains.
 
-## Prerequisites
+Compatible with GitHub Copilot, Claude Code, Cursor, Grok, Hermes and any
+other git-capable LLM harness that APM can target.
 
-- APM CLI 0.30.0 or newer.
-- Python 3.10 or newer.
-- Python dependencies from `scripts/requirements.txt`.
+| Property | What it is |
+| --- | --- |
+| Git-based | Stores mount as git submodules in the project. |
+| Guardrailed | SCHEMA plus CLI `compile` checks shape, frontmatter, and links. |
+| Distributed | Pages link across stores with `atlas://`. |
+| Clustered | Knowledge groups into logical clusters (work hubs, second-brain slices). |
+| Shared or dedicated | Knowledge on consumer branch `atlas`, or a separate store repo. |
+| Recall | Default `grep` search; opt-in `atlas:ranked` (FTS5); `atlas:tgrep` is advanced. |
 
-Public GitHub consumers do not need a personal access token to install Atlas
-or its separate `okf` dependency.
+## Why / what this is not
 
-The optional `discuss` companion skill owns wrong-frame termination workflows.
-Atlas probes for it only when that path is requested; it is not a manifest
-dependency because `discuss` already depends on Atlas.
+Atlas operates mainly at storage level, following
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format).
+Like [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
+it turns working notes into durable linked pages instead of re-deriving
+answers from raw files on every question. Atlas `compile` is a later gate:
+it checks SCHEMA, frontmatter, and links — it ensures agents adhere to the
+expected structure. Unlike Karpathy, it does not separate raw and wiki.
+Building the leaves ("wiki") is part of what you do, when you want and
+where you need.
+
+Source code, tickets, and designs are systems of record. RAG is good at
+surfacing information from pre-defined data sources. A central ontology is
+bad at branch, conflict, and merge. Atlas lets you analyse those systems of
+record and give them meaning. It treats each session’s decisions as git
+history so agents can share a graph without pretending only one story is
+true, and it can connect that graph to your systems of record. The graph
+can span repositories: stores mount as git submodules, pages link with
+`atlas://`, and SCHEMA plus the CLI keep agents from breaking the contract.
+
+> The value is not only in connecting the dots at the surface (the *what*),
+> but the trail of memories, decisions, and experiences LLMs create as they
+> produce (the *why*).
+
+Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
+package remains the format authority and a separate dependency. Atlas does
+not replace `okf`. It does not phone home. It does not auto-author claims
+without an agent. Runtime detail lives in `SKILL.md`. For Semantic Knowledge
+Recall (SMR), search stays `grep` until recall is enabled; the opt-in
+profile is `atlas:ranked` (FTS5). `atlas:tgrep` is advanced and limited.
+
+Atlas does not enforce a *Semantic Knowledge Organisation (SMO)*. It ships
+with a simple base SCHEMA that an LLM can customise with the help of
+`discuss` and Atlas. How you organise it is entirely up to you.
+
+Atlas is not an optimised or closed Semantic Knowledge Organisation (SMO),
+an enterprise distributed Semantic Knowledge Recall (SMR), or an ontology
+solution. Those capabilities can, and should, be built on top of Atlas if
+the use case requires it.
 
 ## Install
-
-Register the public Atlas catalog, then install the package:
 
 ```bash
 apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 apm install atlas@atlas
 ```
 
-After the source owner publishes an immutable tag matching the `version` in
-`apm.yml`, you may also install that tag directly:
-
-```bash
-apm install sergio-sisternes-epam/atlas#vX.Y.Z
-```
-
-APM deploys the skill to the consumer's selected target. The package does not
-pin one harness; it is validated against the shared Agent Skills target and
-APM's stable multi-runtime target set.
-
-Install the CLI's Python dependencies in the environment that runs Atlas:
-
-```text
-python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
-```
+`--name atlas` is required so the package resolves as `atlas@atlas`.
 
 ## Use
 
-Invoke Atlas through the agent runtime for knowledge-store requests, or run the
-deterministic CLI from the resolved skill directory:
+After install, invoke Atlas in an agent session with `/atlas` and ask it
+how to get started. Starting is asking Atlas how to do it.
 
 ```text
-python3 <atlas-skill>/scripts/atlas.py --help
-python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
-  --root <atlas-root> --json
-python3 <atlas-skill>/scripts/atlas.py store init --strategy shared
+/atlas How can I get started?
 ```
 
-New stores default to **shared** strategy: knowledge lives on isolated branch
-`atlas` of the consumer repository and mounts as a same-repo submodule at
-`.atlas/<id>/`. Recursive clone therefore fetches the git object store twice;
-that is accepted. **Dedicated** strategy still uses a separate existing
-repository (`--strategy dedicated --remote <url>`). Never `gh repo create`.
-Move history with `atlas store rehost` (path migrate `migrate_mode: strategy`). CLI
-`atlas migrate` still copies into `staging/` only.
+## Modules
 
-The skill emits an activation card and loads exactly one procedure from
-`references/paths/` before acting.
-
-### Mount credentials
-
-Atlas applies `ATLAS_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_APM_PAT`
-only to `github.com` and GitHub Enterprise Cloud (`*.ghe.com`). For GitHub
-Enterprise Server automation, set `GH_HOST` to the exact server hostname and
-use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; `ATLAS_PAT` and
-`GITHUB_APM_PAT` are also accepted when paired with that exact `GH_HOST`.
-Credentials stored by `gh auth login --hostname <host>` remain supported.
-
-For any unmatched host, Atlas attempts anonymous HTTPS with credential helpers
-disabled. It never forwards generic GitHub environment tokens to that host.
-Use `--ssh` or authenticate the exact host with `gh` when anonymous access is
-not sufficient.
-
-## Process-memory store
-
-Process memory is **not** authored in this package. The canonical store is:
-
-https://github.com/sergio-sisternes-epam/atlas-atlas
-
-Git root **is** the OKF root (`SCHEMA.json`). Load path `mount` (`references/paths/mount.md`), then:
-
-```text
-python3 <atlas-skill>/scripts/atlas.py mount \
-  github.com/sergio-sisternes-epam/atlas-atlas \
-  --ref main
-```
-
-Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-atlas` (compile/query root)
-
-## Contents
-
-| Resource | Purpose |
+| Module | What it does |
 | --- | --- |
-| `CHANGELOG.md` | Unreleased user-visible changes |
-| `SKILL.md` | Runtime router, invariants, and CLI surface |
-| `references/paths/` | Query, remember, work, landscape, and schema procedures |
-| `references/templates/` | OKF content templates |
-| `scripts/atlas.py` | Atlas CLI entry point |
-| `scripts/atlas_cli/` | CLI implementation |
-| `fixtures/` | Validation fixtures used by the package test suite |
+| Init | Scaffold a new Atlas in the active git repository. |
+| Query | Find and answer from an Atlas store. |
+| Remember | Persist experiences, decisions, lessons, and recipes. A basic Semantic Knowledge Organisation (SMO). |
+| Work | Open, update, or close work hubs. |
+| Landscape | Research competitors and symbionts into comparison memory. |
+| Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss` skill for best results. |
+| Configure | Inspect and select Semantic Memory Recall. |
+
+## Related
+
+- [`okf`](https://github.com/sergio-sisternes-epam/okf) — format authority
+- [`atlas-atlas`](https://github.com/sergio-sisternes-epam/atlas-atlas) — companion process-memory store
+- [`discuss`](https://github.com/sergio-sisternes-epam/discuss) — optional companion for wrong-frame termination
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, validation, and release
+handoff. Report vulnerabilities through a
+[private security advisory](https://github.com/sergio-sisternes-epam/atlas/security/advisories/new).
 
 ## License
 
 Atlas is licensed under the [Apache License 2.0](LICENSE), Copyright 2026
 Sergio Sisternes. The separately distributed `okf` dependency remains under
 its own Apache-2.0 license and notice.
-
-## Support and maintenance
-
-Source, issues, and release history:
-https://github.com/sergio-sisternes-epam/atlas
-
-See `CONTRIBUTING.md` for validation, CI credentials, and the release handoff.
-
-## Code review panel
-
-The project-level `code-review` skill is the broad pull-request review
-entrypoint. It requires the sibling `panel-review` skill to run the cost-aware
-multi-lens review and publish its findings. Both are authored under
-`.apm/skills/`. Generate the Copilot deployment with:
-
-```text
-apm install --target copilot --frozen
-```
-
-APM deploys both skills under `.agents/skills/`. Edit the `.apm/` sources, not
-the generated copies.
-
-GitHub documents `code-review` as the review-focused directory name that makes
-Copilot code review load a skill. GitHub does not document skill-to-skill
-execution as guaranteed, so this adapter fails closed if it cannot load or
-execute `panel-review`.
-
-See `references/paths/mount.md` for the mount protocol.

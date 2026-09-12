@@ -4,6 +4,7 @@
 
 ### Added
 
+- Root README header banner at `docs/atlas-banner.jpg`.
 - GitHub issue and pull request templates for bugs, features, and contribution
   checks.
 - Document Atlas's Apache-2.0 license and the separate licensing boundary for
@@ -11,10 +12,14 @@
 
 ### Changed
 
-- Consumer install docs treat Atlas as public on GitHub: register
+- Root `README.md` follows the family outline: Why / what this is not,
+  Install, Use, Modules, Related, Contributing, License. Use is a session
+  `/atlas` ask. Extra depth stays in `SKILL.md` and `CONTRIBUTING.md`.
+- Consumer README install is marketplace-only: register
   `sergio-sisternes-epam/atlas-marketplace` as `atlas` and install
-  `atlas@atlas`. Direct `sergio-sisternes-epam/atlas#vX.Y.Z` remains valid.
-  github.com consumers do not need a PAT. OKF stays a separate dependency.
+  `atlas@atlas`. `--name atlas` is required. Contributor pip setup and
+  optional git-tag install stay in `CONTRIBUTING.md`. OKF stays a
+  separate dependency.
 - Atlas CI **Release readiness decision** now runs on pull requests. Same-repo
   PRs record `release_readiness_decision=pr-validated` when Python tests, APM
   package integrity, and consumer installs succeed. Exact-main / ready-to-tag
