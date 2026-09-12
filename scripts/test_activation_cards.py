@@ -20,6 +20,8 @@ PATHS = (
     "schema",
     "configure",
     "ci",
+    "help",
+    "getting-started",
 )
 
 
