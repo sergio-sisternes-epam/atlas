@@ -4,6 +4,8 @@
 
 ### Added
 
+- GitHub issue and pull request templates for bugs, features, and contribution
+  checks.
 - Document Atlas's Apache-2.0 license and the separate licensing boundary for
   the `okf` dependency.
 

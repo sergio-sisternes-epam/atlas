@@ -1,5 +1,20 @@
 # Contributing to Atlas
 
+## Issues and pull requests
+
+Use the GitHub issue templates in `.github/ISSUE_TEMPLATE/` for bugs and
+feature requests. Report vulnerabilities through a
+[private security advisory](https://github.com/sergio-sisternes-epam/atlas/security/advisories/new);
+do not file public issues for them.
+
+External substantive work needs a linked issue first. Maintainer-authored
+small docs or maintenance may skip that wait.
+
+A human must approve the scope before an agent implements the change, except
+for maintainer-authored small docs or maintenance. The pull request author
+owns any agent-generated diffs and must not open the pull request as an
+unattended GitHub author.
+
 ## Local setup
 
 Use Python 3.10 or newer and APM CLI 0.30.0 or newer.
