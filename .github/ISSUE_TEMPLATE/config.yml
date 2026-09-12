@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/sergio-sisternes-epam/atlas/security/advisories/new
+    about: Do not file public issues for vulnerabilities. Use a private advisory.
