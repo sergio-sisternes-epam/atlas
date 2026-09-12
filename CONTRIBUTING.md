@@ -83,9 +83,11 @@ target set.
 
 ## CI credential
 
-Repository Actions use an `APM_READ_TOKEN` secret as a workflow implementation
-detail. The workflow exposes it only through APM's
-`GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM` environment variable.
+Repository Actions still use an `APM_READ_TOKEN` secret as a workflow
+implementation detail. The existing workflow exposes it only through APM's
+`GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM` environment variable. That secret is
+not a public consumer install requirement; github.com consumers do not need
+a PAT. This documentation change does not rewrite the workflow.
 
 ## Release handoff
 
