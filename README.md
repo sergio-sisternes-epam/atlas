@@ -1,8 +1,11 @@
 # Atlas
 
-![Atlas](docs/atlas-banner.jpg)
-Atlas is a distruted Semantic Knowledge Network build with technologies LLMs already know: git and
+![Atlas](docs/atlas-banner.jpg)Looking to build a second brain for your agent or skill (yes, agents can have skills) that follows specific structures and can be connected with other brains? 
+
+Look no more. Atlas is a distruted Semantic Knowledge Network build with technologies LLMs already know: git and
 markdown, with a SCHEMA and a CLI that ensures adherence and compliance with pre-defined, extensible domains.
+
+Compatible with GitHub Copilot, Claude Code, Cursor, Grok, Hermes and any other git-capable LLM harness that APM can target.
 
 ## Why / what this is not
 
@@ -23,6 +26,14 @@ keep agents from breaking the contract.
 > but the trail of memories, decisions, and experiences LLMs create as they
 > produce (the *why*).
 
+| Property | What it is |
+| --- | --- |
+| Git-based | Stores mount as git submodules in the project. |
+| Guardrailed | SCHEMA plus CLI `compile` check shape, frontmatter, and links. |
+| Distributed | Pages link across stores with `atlas://`. |
+| Clustered | Knowledge groups into logical clusters (work hubs, second-brain slices). |
+| Shared or dedicated | Knowledge on consumer branch `atlas`, or a separate store repo. |
+| Recall | Default grep search; BM25 + tgrep as an early preview. |
 
 Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
 package remains the format authority and a separate dependency. Atlas does not
@@ -35,11 +46,12 @@ Atlas is not an optimised or closed Semantic Knowledge Organisation (SMO), an En
 
 ## Install
 
-Requires APM CLI 0.30.0 or newer and Python 3.10 or newer.
+Requires APM CLI 0.30.0 or newer and Python 3.10 or newer. Don't forget to set your target harness.
 
 ```bash
 apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
-apm install atlas@atlas
+apm install atlas@atlas --target copilot
+apm install atlas@atlas --target claude
 ```
 
 > IMPORTANT: Package dependencies are linked to @atlas. If you do not register the marketplace with this exact name, transient dependency installation will fail.
