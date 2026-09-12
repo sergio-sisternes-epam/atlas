@@ -66,9 +66,16 @@ apm audit --no-policy --no-drift
 Pull requests from branches in this repository run the Python tests, the source
 primitive scan, and full install-replay drift audits in disposable consumers.
 The source scan receives `APM_READ_TOKEN` but does not run `apm install`, so the
-checked-out deployment remains unchanged. Pull requests from forks cannot
-receive repository secrets and therefore skip the APM and consumer gates; they
-still run the Python tests.
+checked-out deployment remains unchanged. The **Release readiness decision** job
+always runs on pull requests: when those upstream jobs succeed it records
+`release_readiness_decision=pr-validated` and does not require exact-main.
+Exact-main / ready-to-tag stays for `main` and tags.
+
+Pull requests from forks cannot receive repository secrets and therefore skip
+the APM and consumer gates; they still run the Python tests. The readiness job
+then records `blocked` because package integrity and consumer installs did not
+succeed. That is intended. Same-repo pull requests go green when tests, package
+integrity, and consumers pass.
 
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime

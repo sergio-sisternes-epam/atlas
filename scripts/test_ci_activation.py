@@ -207,6 +207,28 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertIn("name: Release readiness decision", self.ci_workflow)
         self.assertIn('if [ "$REF_NAME" != main ]', self.ci_workflow)
 
+    def test_ci_readiness_records_pr_validated_or_blocked(self) -> None:
+        self.assertRegex(
+            self.ci_workflow,
+            r"name: Release readiness decision\n(?:.*\n){1,12}\s+if: always\(\)\n",
+        )
+        self.assertNotIn(
+            "if: always() && github.event_name != 'pull_request'",
+            self.ci_workflow,
+        )
+        self.assertIn('if [ "$EVENT_NAME" = pull_request ]; then', self.ci_workflow)
+        self.assertIn(
+            'echo "release_readiness_decision=pr-validated"',
+            self.ci_workflow,
+        )
+        self.assertIn('if [ "$TEST_RESULT" != success ] ||', self.ci_workflow)
+        self.assertIn('[ "$PACKAGE_RESULT" != success ] ||', self.ci_workflow)
+        self.assertIn('[ "$CONSUMER_RESULT" != success ]; then', self.ci_workflow)
+        self.assertIn(
+            'echo "release_readiness_decision=blocked"',
+            self.ci_workflow,
+        )
+
     def test_release_verifies_metadata_before_publishing(self) -> None:
         self.assertIn("python3 scripts/release_readiness.py", self.release_workflow)
         self.assertIn('--tag "$GITHUB_REF_NAME"', self.release_workflow)

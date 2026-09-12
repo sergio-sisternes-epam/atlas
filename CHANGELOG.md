@@ -9,6 +9,14 @@
 - Document Atlas's Apache-2.0 license and the separate licensing boundary for
   the `okf` dependency.
 
+### Changed
+
+- Atlas CI **Release readiness decision** now runs on pull requests. Same-repo
+  PRs record `release_readiness_decision=pr-validated` when Python tests, APM
+  package integrity, and consumer installs succeed. Exact-main / ready-to-tag
+  remains for `main` and tags. Fork PRs still skip APM and consumer jobs
+  (no `APM_READ_TOKEN`) and the readiness job records `blocked`.
+
 ## 0.11.2 - 2026-09-10
 
 ### Changed
