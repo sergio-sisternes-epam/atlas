@@ -1,33 +1,21 @@
 # atlas
 
 Atlas is a durable OKF v0.2 knowledge substrate for agent process memory,
-decisions, work hubs, and project knowledge graphs. It is distributed as a
-root APM skill bundle; the `okf` package remains the format authority.
+decisions, work hubs, and project knowledge graphs.
 
-## What it provides
+## Why / what this is not
 
-- Query, remember, work, landscape, schema, and configure workflows selected by intent.
-- A deterministic Python CLI for Atlas creation, validation, search, mounting,
-  migration, promotion, and schema governance.
-- Templates and reference procedures for durable OKF stores.
-- Broad skill-runtime compatibility without harness-specific instructions.
+Atlas is a root APM skill bundle with a deterministic Python CLI. Use it to
+query stores, remember knowledge, track work, refresh landscape, and govern
+schema on durable OKF graphs.
 
-## Prerequisites
-
-- APM CLI 0.30.0 or newer.
-- Python 3.10 or newer.
-- Python dependencies from `scripts/requirements.txt`.
-
-Public GitHub consumers do not need a personal access token to install Atlas
-or its separate `okf` dependency.
-
-The optional `discuss` companion skill owns wrong-frame termination workflows.
-Atlas probes for it only when that path is requested; it is not a manifest
-dependency because `discuss` already depends on Atlas.
+The `okf` package remains the format authority and a separate dependency.
+Atlas does not replace `okf`, phone home, or auto-author claims without an
+agent. Runtime detail lives in `SKILL.md`.
 
 ## Install
 
-Register the public Atlas catalog, then install the package:
+Requires APM CLI 0.30.0 or newer and Python 3.10 or newer.
 
 ```bash
 apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
@@ -35,117 +23,49 @@ apm install atlas@atlas
 ```
 
 After the source owner publishes an immutable tag matching the `version` in
-`apm.yml`, you may also install that tag directly:
+`apm.yml`, you may also install that tag:
 
 ```bash
 apm install sergio-sisternes-epam/atlas#vX.Y.Z
 ```
 
-APM deploys the skill to the consumer's selected target. The package does not
-pin one harness; it is validated against the shared Agent Skills target and
-APM's stable multi-runtime target set.
+Then install CLI dependencies in the environment that runs Atlas:
 
-Install the CLI's Python dependencies in the environment that runs Atlas:
-
-```text
+```bash
 python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 ```
 
 ## Use
 
-Invoke Atlas through the agent runtime for knowledge-store requests, or run the
-deterministic CLI from the resolved skill directory:
-
-```text
-python3 <atlas-skill>/scripts/atlas.py --help
+```bash
 python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
   --root <atlas-root> --json
-python3 <atlas-skill>/scripts/atlas.py store init --strategy shared
 ```
 
-New stores default to **shared** strategy: knowledge lives on isolated branch
-`atlas` of the consumer repository and mounts as a same-repo submodule at
-`.atlas/<id>/`. Recursive clone therefore fetches the git object store twice;
-that is accepted. **Dedicated** strategy still uses a separate existing
-repository (`--strategy dedicated --remote <url>`). Never `gh repo create`.
-Move history with `atlas store rehost` (path migrate `migrate_mode: strategy`). CLI
-`atlas migrate` still copies into `staging/` only.
+## Modules
 
-The skill emits an activation card and loads exactly one procedure from
-`references/paths/` before acting.
+- **Query** — Find and answer from an Atlas store.
+- **Remember** — Persist experiences, decisions, lessons, and recipes.
+- **Work** — Open, update, or close work hubs.
+- **Landscape** — Research competitors and symbionts into comparison memory.
+- **Schema** — Create, install, or uninstall SCHEMA overlays.
+- **Configure** — Inspect and select Semantic Memory Recall.
+- **Init** — Scaffold a new Atlas in the active git repository.
 
-### Mount credentials
+## Related
 
-Atlas applies `ATLAS_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_APM_PAT`
-only to `github.com` and GitHub Enterprise Cloud (`*.ghe.com`). For GitHub
-Enterprise Server automation, set `GH_HOST` to the exact server hostname and
-use `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN`; `ATLAS_PAT` and
-`GITHUB_APM_PAT` are also accepted when paired with that exact `GH_HOST`.
-Credentials stored by `gh auth login --hostname <host>` remain supported.
+- [`okf`](https://github.com/sergio-sisternes-epam/okf) — format authority
+- [`atlas-atlas`](https://github.com/sergio-sisternes-epam/atlas-atlas) — companion process-memory store
+- [`discuss`](https://github.com/sergio-sisternes-epam/discuss) — optional companion for wrong-frame termination
 
-For any unmatched host, Atlas attempts anonymous HTTPS with credential helpers
-disabled. It never forwards generic GitHub environment tokens to that host.
-Use `--ssh` or authenticate the exact host with `gh` when anonymous access is
-not sufficient.
+## Contributing
 
-## Process-memory store
-
-Process memory is **not** authored in this package. The canonical store is:
-
-https://github.com/sergio-sisternes-epam/atlas-atlas
-
-Git root **is** the OKF root (`SCHEMA.json`). Load path `mount` (`references/paths/mount.md`), then:
-
-```text
-python3 <atlas-skill>/scripts/atlas.py mount \
-  github.com/sergio-sisternes-epam/atlas-atlas \
-  --ref main
-```
-
-Default mount = git submodule at `.atlas/github.com/sergio-sisternes-epam/atlas-atlas` (compile/query root)
-
-## Contents
-
-| Resource | Purpose |
-| --- | --- |
-| `CHANGELOG.md` | Unreleased user-visible changes |
-| `SKILL.md` | Runtime router, invariants, and CLI surface |
-| `references/paths/` | Query, remember, work, landscape, and schema procedures |
-| `references/templates/` | OKF content templates |
-| `scripts/atlas.py` | Atlas CLI entry point |
-| `scripts/atlas_cli/` | CLI implementation |
-| `fixtures/` | Validation fixtures used by the package test suite |
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, validation, and release
+handoff. Report vulnerabilities through a
+[private security advisory](https://github.com/sergio-sisternes-epam/atlas/security/advisories/new).
 
 ## License
 
 Atlas is licensed under the [Apache License 2.0](LICENSE), Copyright 2026
 Sergio Sisternes. The separately distributed `okf` dependency remains under
 its own Apache-2.0 license and notice.
-
-## Support and maintenance
-
-Source, issues, and release history:
-https://github.com/sergio-sisternes-epam/atlas
-
-See `CONTRIBUTING.md` for validation, CI credentials, and the release handoff.
-
-## Code review panel
-
-The project-level `code-review` skill is the broad pull-request review
-entrypoint. It requires the sibling `panel-review` skill to run the cost-aware
-multi-lens review and publish its findings. Both are authored under
-`.apm/skills/`. Generate the Copilot deployment with:
-
-```text
-apm install --target copilot --frozen
-```
-
-APM deploys both skills under `.agents/skills/`. Edit the `.apm/` sources, not
-the generated copies.
-
-GitHub documents `code-review` as the review-focused directory name that makes
-Copilot code review load a skill. GitHub does not document skill-to-skill
-execution as guaranteed, so this adapter fails closed if it cannot load or
-execute `panel-review`.
-
-See `references/paths/mount.md` for the mount protocol.
