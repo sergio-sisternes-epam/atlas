@@ -1,5 +1,7 @@
 # Atlas
 
+![Atlas](docs/atlas-banner.jpg)
+
 Atlas is a knowledge graph in technologies LLMs already know: git and
 markdown, with a SCHEMA and a CLI that compile the store.
 
@@ -10,29 +12,30 @@ Atlas defines the storage protocol, following
 Like [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
 it turns working notes into durable linked pages instead of re-deriving
 answers from raw files on every question. Atlas `compile` is a later gate:
-it checks SCHEMA, frontmatter, and links — it does not ingest sources.
+it checks SCHEMA, frontmatter, and links — it ensure agents are adherening to the expected structure.
 
-Source code, tickets, and designs are systems of record. RAG is good at the
-*what*. A central ontology is bad at branch, conflict, and merge. Atlas treats
+Source code, tickets, and designs are systems of record. RAG is good at surfacing information from pre-defined data sources. A central ontology is bad at branch, conflict, and merge. Atlas allows to analyse Systems Of Record and give meaning to them. To treat
 each session’s decisions as git history so agents can share a graph without
-pretending only one story is true. The graph can span repositories: stores
+pretending only one story is true, connecting them to all your Systems Of Record. The graph can span repositories: stores
 mount as git submodules, pages link with `atlas://`, and SCHEMA plus the CLI
 keep agents from breaking the contract.
 
 > The value is not only in connecting the dots at the surface (the *what*),
 > but the trail of memories, decisions, and experiences LLMs create as they
-> work (the *why*).
+> produce (the *why*).
 
-Tried so far on GitHub Copilot and Grok: travel planning; cooking (recipes,
-shopping, purchases, prices); sky/gear trips; work and personal second-brain
-clusters (presales, delivery, offerings, job descriptions). A custom SCHEMA
-can cover other domains — SDLC decision traces, sales activity, world-building
-— without changing the substrate.
 
 Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
 package remains the format authority and a separate dependency. Atlas does not
 replace `okf`, phone home, or auto-author claims without an agent. Runtime
-detail lives in `SKILL.md`.
+detail lives in `SKILL.md`. For Semantic Knowledge Recall (SMR), It ships with a default `grep-enhanced`  search cli and a BM25+tgrep early preview SMR driver.
+
+Atlas is not enforcing a *Semantic Knowledge Organisation (SMO)*. It ships with a simple base SCHEMA that an LLM can customise with the help of `dicuss@atlas` and `atlas@atlas`. But how you organise it is entirely up to you.
+
+Atlas is not:
+- A closed Semantic Knowledge Organisation (SMO)
+- An Enterprise distributed Semantic Knowledge Recall (SMR) 
+
 
 ## Install
 
