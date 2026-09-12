@@ -16,15 +16,10 @@ root APM skill bundle; the `okf` package remains the format authority.
 
 - APM CLI 0.30.0 or newer.
 - Python 3.10 or newer.
-- The `atlas` APM marketplace, registered as:
-
-  ```text
-  apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
-  ```
-
-- Access to the private `sergio-sisternes-epam/atlas` and
-  `sergio-sisternes-epam/okf` repositories.
 - Python dependencies from `scripts/requirements.txt`.
+
+Public GitHub consumers do not need a personal access token to install Atlas
+or its separate `okf` dependency.
 
 The optional `discuss` companion skill owns wrong-frame termination workflows.
 Atlas probes for it only when that path is requested; it is not a manifest
@@ -32,10 +27,17 @@ dependency because `discuss` already depends on Atlas.
 
 ## Install
 
-After the source owner publishes an immutable tag matching the `version` in
-`apm.yml`:
+Register the public Atlas catalog, then install the package:
 
-```text
+```bash
+apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
+apm install atlas@atlas
+```
+
+After the source owner publishes an immutable tag matching the `version` in
+`apm.yml`, you may also install that tag directly:
+
+```bash
 apm install sergio-sisternes-epam/atlas#vX.Y.Z
 ```
 
