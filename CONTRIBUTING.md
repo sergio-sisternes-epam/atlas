@@ -30,9 +30,9 @@ apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 ```
 
 The `--name` flag is required. Do not use alias `me` or the default
-`atlas-marketplace` name. OKF remains private; configure an APM GitHub credential
-with read-only access to `sergio-sisternes-epam/okf` and do not store tokens in
-this repository.
+`atlas-marketplace` name. Do not store tokens in this repository. Public
+GitHub consumers do not need a personal access token to install Atlas or the
+separate `okf` dependency.
 
 Atlas mount credentials are host-scoped. Generic public GitHub tokens apply
 only to `github.com` and `*.ghe.com`. For GHES automation, set `GH_HOST` to the
@@ -83,10 +83,11 @@ target set.
 
 ## CI credential
 
-Repository Actions require an `APM_READ_TOKEN` secret. Use a fine-grained token
-or GitHub App installation token with `Contents: read` for the private Atlas
-and OKF repositories. The workflow exposes it only through APM's
-`GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM` environment variable.
+Repository Actions still use an `APM_READ_TOKEN` secret as a workflow
+implementation detail. The existing workflow exposes it only through APM's
+`GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM` environment variable. That secret is
+not a public consumer install requirement; github.com consumers do not need
+a PAT. This documentation change does not rewrite the workflow.
 
 ## Release handoff
 
@@ -123,9 +124,7 @@ If validation passed and only GitHub Release creation failed because of a
 provider outage or permission problem, rerun the failed workflow for the same
 tag after restoring the provider. Do not rebuild from a different commit.
 
-The source package workflow does not edit the marketplace catalog. Atlas is
-private, so the marketplace validation identity and intended consumers must
-also receive read access before registration can pass.
+The source package workflow does not edit the marketplace catalog.
 
 Atlas is distributed directly from its immutable Git tag. `apm pack` exports
 the dependency bundle for this root-skill project, not the Atlas skill itself,

@@ -11,6 +11,10 @@
 
 ### Changed
 
+- Consumer install docs treat Atlas as public on GitHub: register
+  `sergio-sisternes-epam/atlas-marketplace` as `atlas` and install
+  `atlas@atlas`. Direct `sergio-sisternes-epam/atlas#vX.Y.Z` remains valid.
+  github.com consumers do not need a PAT. OKF stays a separate dependency.
 - Atlas CI **Release readiness decision** now runs on pull requests. Same-repo
   PRs record `release_readiness_decision=pr-validated` when Python tests, APM
   package integrity, and consumer installs succeed. Exact-main / ready-to-tag
