@@ -13,9 +13,9 @@
 ### Changed
 
 - Root `README.md` follows the family outline: Why / what this is not,
-  Install, Use, Modules, Related, Contributing, License. The opening is
-  short prose (git process memory, OKF, compile-once wiki); extra depth
-  stays in `SKILL.md` and `CONTRIBUTING.md`.
+  Install, Use, Modules, Related, Contributing, License. Use is a session
+  `/atlas` ask (`getting-started` / `help`). Extra depth stays in
+  `SKILL.md` and `CONTRIBUTING.md`.
 - Consumer install docs treat Atlas as public on GitHub: register
   `sergio-sisternes-epam/atlas-marketplace` as `atlas` and install
   `atlas@atlas`. Direct `sergio-sisternes-epam/atlas#vX.Y.Z` remains valid.

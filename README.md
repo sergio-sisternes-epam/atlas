@@ -1,18 +1,17 @@
 # Atlas
 
 ![Atlas](docs/atlas-banner.jpg)
-
-Atlas is a knowledge graph in technologies LLMs already know: git and
-markdown, with a SCHEMA and a CLI that compile the store.
+Atlas is a distruted Semantic Knowledge Network build with technologies LLMs already know: git and
+markdown, with a SCHEMA and a CLI that ensures adherence and compliance with pre-defined, extensible domains.
 
 ## Why / what this is not
 
-Atlas defines the storage protocol, following
+Atlas operates mainly at storage level, following
 [Open Knowledge Format](https://github.com/GoogleCloudPlatform/open-knowledge-format).
 Like [Karpathy’s LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
 it turns working notes into durable linked pages instead of re-deriving
 answers from raw files on every question. Atlas `compile` is a later gate:
-it checks SCHEMA, frontmatter, and links — it ensure agents are adherening to the expected structure.
+it checks SCHEMA, frontmatter, and links — it ensure agents are adherening to the expected structure. Unlike Karpathy, it does separate raw and wiki. Building the leafs "wiki" is part of what you do, when you want and where you need.
 
 Source code, tickets, and designs are systems of record. RAG is good at surfacing information from pre-defined data sources. A central ontology is bad at branch, conflict, and merge. Atlas allows to analyse Systems Of Record and give meaning to them. To treat
 each session’s decisions as git history so agents can share a graph without
@@ -32,10 +31,7 @@ detail lives in `SKILL.md`. For Semantic Knowledge Recall (SMR), It ships with a
 
 Atlas is not enforcing a *Semantic Knowledge Organisation (SMO)*. It ships with a simple base SCHEMA that an LLM can customise with the help of `dicuss@atlas` and `atlas@atlas`. But how you organise it is entirely up to you.
 
-Atlas is not:
-- A closed Semantic Knowledge Organisation (SMO)
-- An Enterprise distributed Semantic Knowledge Recall (SMR) 
-
+Atlas is not a closed Semantic Knowledge Organisation (SMO), an Enterprise distributed Semantic Knowledge Recall (SMR)  or an Ontology solution.
 
 ## Install
 
@@ -61,10 +57,14 @@ python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 
 ## Use
 
-```bash
-python3 <atlas-skill>/scripts/atlas.py search "authentication decision" \
-  --root <atlas-root> --json
+After install, invoke Atlas in an agent session with `/atlas`. It ships
+`getting-started` and `help`. Ask those first; Atlas loads the rest.
+
+```text
+/atlas getting-started
 ```
+
+Starting is asking Atlas how to do it.
 
 ## Modules
 
