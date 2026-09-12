@@ -10,14 +10,22 @@ and the compile-once idea in [Karpathy’s LLM wiki](https://gist.github.com/kar
 Knowledge is written once, linked, and reused — not rediscovered from raw files
 on every question.
 
-Source code and tickets are systems of record. RAG is good at the *what*. A
-central ontology is bad at branch, conflict, and merge. Atlas treats each
-session’s decisions as git history so agents can share a graph without
-pretending only one story is true.
+Source code, tickets, and designs are systems of record. RAG is good at the
+*what*. A central ontology is bad at branch, conflict, and merge. Atlas treats
+each session’s decisions as git history so agents can share a graph without
+pretending only one story is true. The graph can span repositories: stores
+mount as git submodules, pages link with `atlas://`, and SCHEMA plus the CLI
+keep agents from breaking the contract.
 
 > The value is not only in connecting the dots at the surface (the *what*),
 > but the trail of memories, decisions, and experiences LLMs create as they
 > work.
+
+Tried so far on GitHub Copilot and Grok: travel planning; cooking (recipes,
+shopping, purchases, prices); sky/gear trips; work and personal second-brain
+clusters (presales, delivery, offerings, job descriptions). A custom SCHEMA
+can cover other domains — SDLC decision traces, sales activity, world-building
+— without changing the substrate.
 
 Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
 package remains the format authority and a separate dependency. Atlas does not
