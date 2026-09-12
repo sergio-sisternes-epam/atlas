@@ -7,6 +7,15 @@ markdown, with a SCHEMA and a CLI that ensures adherence and compliance with pre
 
 Compatible with GitHub Copilot, Claude Code, Cursor, Grok, Hermes and any other git-capable LLM harness that APM can target.
 
+| Property | What it is |
+| --- | --- |
+| Git-based | Stores mount as git submodules in the project. |
+| Guardrailed | SCHEMA plus CLI `compile` check shape, frontmatter, and links. |
+| Distributed | Pages link across stores with `atlas://`. |
+| Clustered | Knowledge groups into logical clusters (work hubs, second-brain slices). |
+| Shared or dedicated | Knowledge on consumer branch `atlas`, or a separate store repo. |
+| Recall | Default grep search; BM25 + tgrep as an early preview. |
+
 ## Why / what this is not
 
 Atlas operates mainly at storage level, following
@@ -22,18 +31,10 @@ pretending only one story is true, connecting them to all your Systems Of Record
 mount as git submodules, pages link with `atlas://`, and SCHEMA plus the CLI
 keep agents from breaking the contract.
 
+
 > The value is not only in connecting the dots at the surface (the *what*),
 > but the trail of memories, decisions, and experiences LLMs create as they
 > produce (the *why*).
-
-| Property | What it is |
-| --- | --- |
-| Git-based | Stores mount as git submodules in the project. |
-| Guardrailed | SCHEMA plus CLI `compile` check shape, frontmatter, and links. |
-| Distributed | Pages link across stores with `atlas://`. |
-| Clustered | Knowledge groups into logical clusters (work hubs, second-brain slices). |
-| Shared or dedicated | Knowledge on consumer branch `atlas`, or a separate store repo. |
-| Recall | Default grep search; BM25 + tgrep as an early preview. |
 
 Atlas is a root APM skill bundle with a deterministic Python CLI. The `okf`
 package remains the format authority and a separate dependency. Atlas does not
