@@ -42,18 +42,7 @@ apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 apm install atlas@atlas
 ```
 
-After the source owner publishes an immutable tag matching the `version` in
-`apm.yml`, you may also install that tag:
-
-```bash
-apm install sergio-sisternes-epam/atlas#vX.Y.Z
-```
-
-Then install CLI dependencies in the environment that runs Atlas:
-
-```bash
-python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
-```
+> IMPORTANT: Package dependencies are linked to @atlas. If you do not register the marketplace with this exact name, transient dependency installation will fail.
 
 ## Use
 
@@ -74,13 +63,13 @@ Starting is asking Atlas how to do it. It comes with its own Atlas and skill mod
 | --- | --- |
 | Getting started | First-run onboarding: how to mount, init, and ask Atlas. |
 | Help | How to use Atlas; ask Atlas how to do the next step. |
+| Init | Scaffold a new Atlas in the active git repository. |
 | Query | Find and answer from an Atlas store. |
-| Remember | Persist experiences, decisions, lessons, and recipes. |
+| Remember | Persist experiences, decisions, lessons, and recipes. A basic Sematic Knowledge Organisation (SMO). |
 | Work | Open, update, or close work hubs. |
 | Landscape | Research competitors and symbionts into comparison memory. |
-| Schema | Create, install, or uninstall SCHEMA overlays. |
+| Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss skill for `best results. |
 | Configure | Inspect and select Semantic Memory Recall. |
-| Init | Scaffold a new Atlas in the active git repository. |
 
 ## Related
 
