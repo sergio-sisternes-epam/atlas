@@ -46,17 +46,7 @@ jobs:
         with:
           apm-version: "0.30.0"
           setup-only: true
-      - name: Require private dependency credential
-        env:
-          APM_READ_TOKEN: ${{ secrets.APM_READ_TOKEN }}
-        run: |
-          if [ -z "$APM_READ_TOKEN" ]; then
-            echo "::error title=Missing APM credential::Configure the APM_READ_TOKEN Actions secret with Contents: read access to Atlas and OKF."
-            exit 1
-          fi
       - name: Register APM marketplace
-        env:
-          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
       - name: Scan committed APM primitives
         run: apm audit --no-policy --no-drift
@@ -87,12 +77,9 @@ jobs:
           apm-version: "0.30.0"
           setup-only: true
       - name: Register APM marketplace
-        env:
-          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
         run: apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
       - name: Install checked-out package into a disposable consumer
         env:
-          GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM: ${{ secrets.APM_READ_TOKEN }}
           TARGETS: ${{ matrix.target }}
         run: |
           consumer="$RUNNER_TEMP/atlas-consumer"
