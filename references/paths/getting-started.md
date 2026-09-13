@@ -21,8 +21,8 @@ subject: atlas
 path: getting-started
 path_module: references/paths/getting-started.md
 intent: Learn what Atlas does and choose a first useful step
-atlas_id: none
-root: none
+atlas_id: <selected store id, pending, or none>
+root: <resolved selected store root, pending, or none>
 atlas_status: not-queried
 atlas_used: []
 help_status: pending

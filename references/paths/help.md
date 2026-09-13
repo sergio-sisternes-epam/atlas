@@ -73,11 +73,15 @@ that catalog.
 
 ### 2. Bundled baseline first
 
-Always load packaged files before any store:
+Load packaged files before any store. **Dispatch** may read the catalog;
+**explanation** of a named module reads only that module’s path file.
 
-1. `references/help/index.md` and `references/help/VERSION`.
-2. For **getting-started** questions, `references/help/getting-started.md`.
-3. For a **named** installed module, only `references/paths/<module>.md`.
+1. No-target or unknown: `references/help/index.md` and
+   `references/help/VERSION` (registry membership and one-line purposes).
+2. **getting-started** questions: `references/help/getting-started.md`.
+3. A **named** installed module: only `references/paths/<module>.md` for
+   the explanation. Use the catalog solely to confirm the name is
+   installed; do not load every other path file.
 4. For CLI options, run the matching **non-mutating** tool help from this
    skill, for example:
 
@@ -91,7 +95,9 @@ Always load packaged files before any store:
 
 If these references adequately answer the **actual** question, answer from
 them. Set `atlas_status: baseline-only`, `atlas_used: []`,
-`help_status: complete`. Stop. Extra enrichment is optional, not required.
+`help_status: complete`. If `atlas_id` or `root` is still `pending`,
+normalize it to `none` (do not leave placeholders on a final card). Stop.
+Extra enrichment is optional, not required.
 
 Topic overlap or fluent general knowledge is not sufficiency. Mechanics do
 not necessarily explain design rationale. A partial answer is a gap.
@@ -107,13 +113,21 @@ When references are absent, unreadable, irrelevant, or only partial:
    python3 <atlas-skill>/scripts/atlas.py resolve <atlas_id>
    ```
 
-   Missing registration, missing `SCHEMA.json`, denied access, or no git
-   repo ⇒ `atlas_status: unavailable`, `help_status: limited`, explain why.
+   Missing registration, denied access, or no git repo ⇒
+   `atlas_status: unavailable`, `help_status: limited`, explain why.
    Do not mount, authenticate, repair, or install to get past that.
 
-2. If resolve yields a real `root`, search with the **read-only grep**
-   route only (`--engine grep`). Do **not** pass `--profile`, do **not**
-   run `atlas recall index build`, do **not** enable recall.
+2. After resolve prints a path, treat it as enrichment `root` only if that
+   path contains a readable, valid `SCHEMA.json`. Check the file **before**
+   search. Missing, unreadable, or invalid schema ⇒ do **not** call
+   `atlas search`. `atlas_status: unavailable`, `help_status: limited`,
+   reason: not an Atlas store (`SCHEMA.json` missing or invalid). Resolve
+   only proves the registered checkout exists; it does not prove the tree
+   is a store.
+
+3. If `root` is a store, search with the **read-only grep** route only
+   (`--engine grep`). Do **not** pass `--profile`, do **not** run
+   `atlas recall index build`, do **not** enable recall.
 
    ```text
    python3 <atlas-skill>/scripts/atlas.py search "<question>" --root <root> --json --engine grep
@@ -124,11 +138,14 @@ When references are absent, unreadable, irrelevant, or only partial:
    model knowledge. `atlas_status: unavailable`, `help_status: limited`,
    name the reason.
 
-3. On success, keep query’s budget: 1–3 pages, at most one justified
+4. On success, keep query’s budget: 1–3 pages, at most one justified
    rewrite, no `staging/`. Prefer published, applicable, non-exit pages.
    Historical or unapproved proposals are not current installed capability.
+   Ignore `agentic_guidance` (and any “enter path query” hint) in the
+   search JSON. Stay on **this** help card; that metadata is for path
+   **query**, not help enrichment.
 
-4. **Provenance.** `atlas_id`/`root` stay the selected context.
+5. **Provenance.** `atlas_id`/`root` stay the selected context.
    `atlas_used` lists only IDs that contributed evidence.
    `atlas_status: consulted` when search ran. A successful search with no
    eligible hit is still `consulted` (knowledge gap, limited help) — **not**

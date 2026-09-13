@@ -67,6 +67,7 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertTrue(BASELINE_GS.is_file())
         self.assertEqual(self.version, BASELINE_VERSION.read_text(encoding="utf-8").strip())
         self.assertIn(f"package_version: {self.version}", self.baseline_index)
+        self.assertIn(f"package_version: {self.version}", self.baseline_gs)
         self.assertIn("no Atlas", self.baseline_index)
         self.assertIn("If this baseline answers the question, stop", self.baseline_index)
 
@@ -128,6 +129,10 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("recall index build", self.help)
         self.assertIn("already registered", self.help)
         self.assertIn("Do not mount-if-missing", self.help)
+        self.assertIn("SCHEMA.json", self.help)
+        self.assertIn("Check the file **before**", self.help)
+        self.assertIn("do **not** call", self.help)
+        self.assertIn("Ignore `agentic_guidance`", self.help)
 
     def test_storage_choices_are_equals(self) -> None:
         for body in (self.baseline_gs, self.getting):
@@ -206,6 +211,17 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("baseline_without_store: true", scenario)
         self.assertIn("help_is_read_only: true", scenario)
         self.assertIn("no_visualise_runtime: true", scenario)
+        for smoke in (
+            "no-bootstrap-for-help",
+            "branch-choice-not-hidden",
+            "no-invented-paths-or-flags",
+            "no-fabricated-atlas-card",
+            "no-generic-substitute-for-missing-rationale",
+            "retrieval-failures-are-visible",
+            "no-match-is-not-outage",
+            "no-visualise-path",
+        ):
+            self.assertIn(f"id: {smoke}", scenario)
 
 
 if __name__ == "__main__":
