@@ -17,6 +17,9 @@
 
 ### Changed
 
+- `atlas resolve` fails closed when a mesh path escapes the active git
+  repository. Grep search skips markdown that resolves outside the store
+  root (symlink escape).
 - Root `README.md` follows the family outline: Why / what this is not,
   Install, Use, Modules, Related, Contributing, License. Use is a session
   `/atlas` ask. Extra depth stays in `SKILL.md` and `CONTRIBUTING.md`.

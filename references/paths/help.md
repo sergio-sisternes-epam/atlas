@@ -117,13 +117,20 @@ When references are absent, unreadable, irrelevant, or only partial:
    `atlas_status: unavailable`, `help_status: limited`, explain why.
    Do not mount, authenticate, repair, or install to get past that.
 
-2. After resolve prints a path, treat it as enrichment `root` only if that
-   path contains a readable, valid `SCHEMA.json`. Check the file **before**
-   search. Missing, unreadable, or invalid schema ⇒ do **not** call
-   `atlas search`. `atlas_status: unavailable`, `help_status: limited`,
-   reason: not an Atlas store (`SCHEMA.json` missing or invalid). Resolve
-   only proves the registered checkout exists; it does not prove the tree
-   is a store.
+2. After resolve prints a path, treat it as enrichment `root` only if
+   **both** hold. Check **before** search. Do **not** call `atlas search`
+   when either fails (`atlas_status: unavailable`, `help_status: limited`):
+
+   - The real path is **inside the active git repository** (same rule as
+     mount). Reject `../` mesh paths, symlink escapes, and any checkout
+     outside the consumer repo. Reason: resolved path is not the
+     registered in-repository checkout.
+   - That path contains a readable, valid `SCHEMA.json`. Reason: not an
+     Atlas store (`SCHEMA.json` missing or invalid).
+
+   Resolve only proves a registered path exists. It does not prove the
+   tree is in-repo or a store. If `atlas resolve` itself fails closed on
+   an escaped path, report that reason and stop.
 
 3. If `root` is a store, search with the **read-only grep** route only
    (`--engine grep`). Do **not** pass `--profile`, do **not** run

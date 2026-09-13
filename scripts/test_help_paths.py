@@ -3,13 +3,19 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 from release_readiness import manifest_version
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from atlas_cli.core.paths import iter_concept_md
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,8 +136,9 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("already registered", self.help)
         self.assertIn("Do not mount-if-missing", self.help)
         self.assertIn("SCHEMA.json", self.help)
-        self.assertIn("Check the file **before**", self.help)
-        self.assertIn("do **not** call", self.help)
+        self.assertIn("Check **before** search", self.help)
+        self.assertIn("inside the active git repository", self.help)
+        self.assertIn("Do **not** call `atlas search`", self.help)
         self.assertIn("Ignore `agentic_guidance`", self.help)
 
     def test_storage_choices_are_equals(self) -> None:
@@ -222,6 +229,71 @@ class HelpPathContractTests(unittest.TestCase):
             "no-visualise-path",
         ):
             self.assertIn(f"id: {smoke}", scenario)
+
+
+class HelpEnrichmentContainmentTests(unittest.TestCase):
+    def test_resolve_rejects_mesh_path_outside_repository(self) -> None:
+        atlas = ROOT / "scripts" / "atlas.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "parent"
+            outside = Path(tmp) / "outside-store"
+            parent.mkdir()
+            outside.mkdir()
+            (outside / "SCHEMA.json").write_text("{}", encoding="utf-8")
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main"],
+                cwd=parent,
+                check=True,
+                capture_output=True,
+            )
+            (parent / "atlas-mesh.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "stores": [
+                            {
+                                "id": "github.com/example/outside",
+                                "path": "../outside-store",
+                                "strategy": "dedicated",
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(atlas),
+                    "resolve",
+                    "github.com/example/outside",
+                    "--cwd",
+                    str(parent),
+                    "--json",
+                ],
+                cwd=parent,
+                text=True,
+                capture_output=True,
+                env={**os.environ},
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(2, result.returncode)
+            self.assertFalse(payload.get("ok"))
+            self.assertIn("inside the active git repository", payload.get("error", ""))
+
+    def test_iter_concept_md_skips_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "store"
+            outside = Path(tmp) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "ok.md").write_text("# ok\n", encoding="utf-8")
+            secret = outside / "secret.md"
+            secret.write_text("# secret\n", encoding="utf-8")
+            (root / "escape.md").symlink_to(secret)
+            names = {path.name for path in iter_concept_md(root)}
+            self.assertEqual({"ok.md"}, names)
 
 
 if __name__ == "__main__":

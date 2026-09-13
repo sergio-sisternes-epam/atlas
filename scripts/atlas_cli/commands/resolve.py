@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from ..core.gitops import git_root
+from ..core.gitops import git_root, inside_git
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, find_store
 
@@ -29,13 +29,35 @@ def run(pointer: str, start: str | None, as_json: bool) -> int:
     mount = Path(row["path"]) if row.get("path") else default_mount(project, parsed.atlas_id)
     if not mount.is_absolute():
         mount = project / mount
+    try:
+        mount = mount.resolve()
+    except OSError as e:
+        return _fail(str(e), as_json)
+    if not inside_git(project, mount):
+        return _fail(
+            "resolved path must be inside the active git repository",
+            as_json,
+        )
     if not parsed.in_store:
         target = mount
     else:
         sub = row.get("subpath") or ""
-        target = mount.joinpath(*Path(sub).parts, *Path(parsed.in_store).parts) if sub else mount.joinpath(*Path(parsed.in_store).parts)
+        target = (
+            mount.joinpath(*Path(sub).parts, *Path(parsed.in_store).parts)
+            if sub
+            else mount.joinpath(*Path(parsed.in_store).parts)
+        )
     if not target.exists():
         return _fail(f"missing path: {target}", as_json)
+    try:
+        target = target.resolve()
+    except OSError as e:
+        return _fail(str(e), as_json)
+    if not inside_git(project, target):
+        return _fail(
+            "resolved path must be inside the active git repository",
+            as_json,
+        )
     if as_json:
         print(json.dumps({"ok": True, "path": str(target), "id": parsed.atlas_id}))
     else:
