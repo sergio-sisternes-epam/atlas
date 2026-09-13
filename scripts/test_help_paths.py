@@ -232,8 +232,46 @@ class HelpPathContractTests(unittest.TestCase):
 
 
 class HelpEnrichmentContainmentTests(unittest.TestCase):
+    ATLAS = ROOT / "scripts" / "atlas.py"
+
+    def _write_mesh(self, project: Path, store_id: str, rel_path: str) -> None:
+        (project / "atlas-mesh.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "stores": [
+                        {
+                            "id": store_id,
+                            "path": rel_path,
+                            "strategy": "dedicated",
+                        }
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _resolve(self, cwd: Path, pointer: str) -> tuple[int, dict]:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.ATLAS),
+                "resolve",
+                pointer,
+                "--cwd",
+                str(cwd),
+                "--json",
+            ],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            env={**os.environ},
+        )
+        payload = json.loads(result.stdout)
+        return result.returncode, payload
+
     def test_resolve_rejects_mesh_path_outside_repository(self) -> None:
-        atlas = ROOT / "scripts" / "atlas.py"
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp) / "parent"
             outside = Path(tmp) / "outside-store"
@@ -246,41 +284,48 @@ class HelpEnrichmentContainmentTests(unittest.TestCase):
                 check=True,
                 capture_output=True,
             )
-            (parent / "atlas-mesh.json").write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "stores": [
-                            {
-                                "id": "github.com/example/outside",
-                                "path": "../outside-store",
-                                "strategy": "dedicated",
-                            }
-                        ],
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(atlas),
-                    "resolve",
-                    "github.com/example/outside",
-                    "--cwd",
-                    str(parent),
-                    "--json",
-                ],
-                cwd=parent,
-                text=True,
-                capture_output=True,
-                env={**os.environ},
-            )
-            payload = json.loads(result.stdout)
-            self.assertEqual(2, result.returncode)
+            self._write_mesh(parent, "github.com/example/outside", "../outside-store")
+            code, payload = self._resolve(parent, "github.com/example/outside")
+            self.assertEqual(2, code)
             self.assertFalse(payload.get("ok"))
             self.assertIn("inside the active git repository", payload.get("error", ""))
+
+    def test_resolve_rejects_pointer_escape_from_mount(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "parent"
+            parent.mkdir()
+            store = parent / "store"
+            other = parent / "other"
+            store.mkdir()
+            other.mkdir()
+            (store / "SCHEMA.json").write_text("{}", encoding="utf-8")
+            (other / "SCHEMA.json").write_text("{}", encoding="utf-8")
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main"],
+                cwd=parent,
+                check=True,
+                capture_output=True,
+            )
+            self._write_mesh(parent, "github.com/example/store", "store")
+            code, payload = self._resolve(
+                parent, "github.com/example/store/../other"
+            )
+            self.assertEqual(2, code)
+            self.assertFalse(payload.get("ok"))
+            self.assertIn("registered mount", payload.get("error", ""))
+
+    def test_resolve_rejects_missing_git_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "parent"
+            parent.mkdir()
+            store = parent / "store"
+            store.mkdir()
+            (store / "SCHEMA.json").write_text("{}", encoding="utf-8")
+            self._write_mesh(parent, "github.com/example/store", "store")
+            code, payload = self._resolve(parent, "github.com/example/store")
+            self.assertEqual(2, code)
+            self.assertFalse(payload.get("ok"))
+            self.assertIn("no git repository", payload.get("error", ""))
 
     def test_iter_concept_md_skips_symlink_escape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
