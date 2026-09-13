@@ -5,6 +5,9 @@
 ### Changed
 
 - Package `description` now matches the README lede.
+- Atlas CI no longer requires `APM_READ_TOKEN`. Marketplace registration and
+  consumer `apm install` run unauthenticated against public github.com. Public
+  consumers still need no PAT.
 
 ## 0.12.0 - 2026-09-13
 

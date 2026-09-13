@@ -31,8 +31,8 @@ apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
 
 The `--name` flag is required. Do not use alias `me` or the default
 `atlas-marketplace` name. Do not store tokens in this repository. Public
-GitHub consumers do not need a personal access token to install Atlas or the
-separate `okf` dependency.
+github.com consumers do not need a personal access token to register the
+marketplace or to `apm install` Atlas or the separate `okf` dependency.
 
 After a matching immutable tag exists, contributors may install that tag for
 release checks:
@@ -72,29 +72,21 @@ apm audit --no-policy --no-drift
 
 Pull requests from branches in this repository run the Python tests, the source
 primitive scan, and full install-replay drift audits in disposable consumers.
-The source scan receives `APM_READ_TOKEN` but does not run `apm install`, so the
-checked-out deployment remains unchanged. The **Release readiness decision** job
-always runs on pull requests: when those upstream jobs succeed it records
+The source scan does not run `apm install`, so the checked-out deployment
+remains unchanged. Marketplace registration and consumer `apm install` run
+unauthenticated against public github.com. The **Release readiness decision**
+job always runs on pull requests: when those upstream jobs succeed it records
 `release_readiness_decision=pr-validated` and does not require exact-main.
 Exact-main / ready-to-tag stays for `main` and tags.
 
-Pull requests from forks cannot receive repository secrets and therefore skip
-the APM and consumer gates; they still run the Python tests. The readiness job
-then records `blocked` because package integrity and consumer installs did not
-succeed. That is intended. Same-repo pull requests go green when tests, package
-integrity, and consumers pass.
+Pull requests from forks skip the APM and consumer gates; they still run the
+Python tests. The readiness job then records `blocked` because package
+integrity and consumer installs did not succeed. That is intended. Same-repo
+pull requests go green when tests, package integrity, and consumers pass.
 
 The CI workflow additionally installs the checked-out package into disposable
 consumers for both the shared Agent Skills target and APM's stable multi-runtime
 target set.
-
-## CI credential
-
-Repository Actions still use an `APM_READ_TOKEN` secret as a workflow
-implementation detail. The existing workflow exposes it only through APM's
-`GITHUB_APM_PAT_SERGIO_SISTERNES_EPAM` environment variable. That secret is
-not a public consumer install requirement; github.com consumers do not need
-a PAT. This documentation change does not rewrite the workflow.
 
 ## Release handoff
 
