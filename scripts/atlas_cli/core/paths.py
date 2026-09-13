@@ -32,10 +32,21 @@ def _under_skip(root: Path, path: Path, staging_dir: str) -> bool:
     return rel_parts[0] in skip
 
 
+def _contained(root: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def iter_concept_md(root: Path, staging_dir: str = DEFAULT_STAGING):
     """Yield concept markdown files (skip staging, templates, mesh, index artifacts)."""
+    root_res = root.resolve()
     for path in sorted(root.rglob("*.md")):
         if not path.is_file():
+            continue
+        if not _contained(root_res, path):
             continue
         if _under_skip(root, path, staging_dir):
             continue

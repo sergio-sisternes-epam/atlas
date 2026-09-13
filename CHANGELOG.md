@@ -4,6 +4,11 @@
 
 ### Added
 
+- Runtime modules **help** and **getting-started**: bundled versioned
+  references explain Atlas with no store mounted; no-target help lists the
+  installed registry; named help reads only the relevant source; unknown
+  names are explicit; optional read-only Atlas enrichment on gaps does not
+  mount, init, schema-install, remember, commit, or push.
 - Root README header banner at `docs/atlas-banner.jpg`.
 - GitHub issue and pull request templates for bugs, features, and contribution
   checks.
@@ -12,6 +17,10 @@
 
 ### Changed
 
+- `atlas resolve` fails closed when a mesh path escapes the active git
+  repository, when there is no git repository, or when a pointer/`subpath`
+  leaves the registered mount. Grep search skips markdown that resolves
+  outside the store root (symlink escape).
 - Root `README.md` follows the family outline: Why / what this is not,
   Install, Use, Modules, Related, Contributing, License. Use is a session
   `/atlas` ask. Extra depth stays in `SKILL.md` and `CONTRIBUTING.md`.

@@ -1,6 +1,6 @@
 ---
 name: atlas
-description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci) before acting. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
+description: Use for durable OKF v0.2 knowledge stores - skill process memory, decisions, work hubs, project knowledge graphs, schema governance, and Atlas CI gates. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf. Successor to okf-wiki operational layer.
 version: 0.11.2
 activation_card: on
 ---
@@ -53,6 +53,30 @@ root: <atlas store root>
 
 Then read `path_module` from the resolved Atlas skill directory and follow it.
 Do not run from this router alone.
+
+To **explain** Atlas without operating a store, emit path **help** or
+**getting-started**. Do **not** emit path **mount** first. These modules are
+read-only: they must not mount, init, schema-install, remember, commit, or
+push. If the packaged baseline answers, stop. Help with no target lists every
+module in the installed registry; do not ask for clarification just to list.
+
+```text
+skill: atlas
+skill_path: <resolved Atlas skill directory>
+mode: discussion
+subject: atlas
+path: help | getting-started
+path_module: references/paths/<path>.md
+intent: <learning goal, not an operation to execute>
+atlas_id: <selected store id, pending, or none>
+root: <resolved selected store root, pending, or none>
+atlas_status: not-queried
+atlas_used: []
+help_status: pending
+```
+
+Then load that module. Unqualified “help” outside Atlas context must not
+enter these modules.
 
 To **create** a new Atlas, emit path **init** instead of mount. Default
 **strategy is shared** (knowledge on consumer branch `atlas`). Dedicated
@@ -112,13 +136,16 @@ still copies into staging; do not use it for strategy moves.
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
 | **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection | `references/paths/configure.md` |
 | **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount | `references/paths/ci.md` |
+| **help** | Explain installed modules without running them | `references/paths/help.md` |
+| **getting-started** | First-use purpose, prerequisites, first journey, storage choices | `references/paths/getting-started.md` |
 
 Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, ...)
-are tools used inside paths.
+are tools used inside paths. **help** and **getting-started** are explanation
+modules; they are not CLI verbs.
 
 ## Hard rules
 
-1. **Formal lookup = path `query` + `atlas search`** - B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages.
+1. **Formal lookup = path `query` + `atlas search`** - B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas search --engine grep` under their own card. That is not path query. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
 3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
@@ -132,6 +159,7 @@ are tools used inside paths.
 12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
 12a. **Recall policy = path `configure` + CLI** - load `references/paths/configure.md`. Installing a contribution is not activation.
 13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
+14. **Help explains; it does not execute** - paths `help` and `getting-started` are discussion modules. Reading help for mount/init/remember/query must not run those operations. No-target help lists the installed registry without clarification. Unknown targets are explicit unknowns plus valid choices. Unqualified “help” outside Atlas context must not hijack unrelated tasks. CLI option lists come from installed non-mutating `--help`, not memory.
 
 ## CLI surface
 
@@ -192,5 +220,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, query, remember, work, landscape, schema, configure, ci). SCHEMA
-and templates live under `references/`.
+(mount, init, migrate, query, remember, work, landscape, schema, configure, ci,
+help, getting-started). Packaged help baseline lives under `references/help/`.
+SCHEMA and templates live under `references/`. Do not dump full help into this
+file.

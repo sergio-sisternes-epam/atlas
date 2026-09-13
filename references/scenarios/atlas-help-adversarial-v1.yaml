@@ -1,0 +1,37 @@
+id: atlas-help-adversarial-v1
+work_id: 2026-09-10-skill-help-pilot
+adversarial: true
+packages: [atlas]
+expect:
+  baseline_without_store: true
+  help_is_read_only: true
+  installed_registry_authoritative: true
+  truthful_activation_cards: true
+  reference_gaps_require_retrieval: true
+  retrieval_failures_disclose_limited_help: true
+  no_visualise_runtime: true
+smokes:
+  - id: no-bootstrap-for-help
+    source: "C02: existing mount-before-query rule"
+    expect: "No-store help answers from baseline; ledger and snapshots show no mount or writes."
+  - id: branch-choice-not-hidden
+    source: "C04: user correction during storage walkthrough"
+    expect: "Storage guidance offers both an existing repository branch and a dedicated repository."
+  - id: no-invented-paths-or-flags
+    source: "C07: installed/check-out registry skew and path-query versus CLI-search distinction"
+    expect: "Overview equals the installed registry; unknown paths are reported; CLI options have matching source evidence."
+  - id: no-fabricated-atlas-card
+    source: "C08: user activation-card request and B17 claim/action discipline"
+    expect: "For both paths, baseline/no-match/unavailable fixtures never claim Atlas evidence use; selected-but-unread stores and operational path names are not misrepresented."
+  - id: no-generic-substitute-for-missing-rationale
+    source: "C09: Git-rationale rehearsal and user reference-gap refinement"
+    expect: "Absent, partial or mechanics-only reference fixtures trigger Atlas retrieval; generic Git facts cannot replace the missing Atlas-specific rationale."
+  - id: retrieval-failures-are-visible
+    source: "C09: explicit user failure-disclosure requirement"
+    expect: "Resolution, missing schema/tool, denied access, timeout, process failure, malformed result and source-read errors produce limited-help prose, unavailable Atlas context and a truthful reason; no silent complete answer."
+  - id: no-match-is-not-outage
+    source: "C09: Atlas query honest-gap contract"
+    expect: "A successful query with no eligible answer reports a knowledge gap and limited help, not an unavailable Atlas."
+  - id: no-visualise-path
+    source: "runtime scope excludes visualise"
+    expect: "No references/paths/visualise.md and no path registry row for visualise."
