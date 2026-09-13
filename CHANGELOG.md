@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Package `description` now matches the README lede.
+
 ## 0.12.0 - 2026-09-13
 
 ### Added
