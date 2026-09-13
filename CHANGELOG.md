@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-09-13
+
 ### Added
 
 - Runtime modules **help** and **getting-started**: bundled versioned

@@ -203,9 +203,10 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("apm install atlas@atlas", self.readme)
 
     def test_changelog_records_unreleased_modules(self) -> None:
-        unreleased = self.changelog.split("## 0.", 1)[0]
-        self.assertIn("**help**", unreleased)
-        self.assertIn("**getting-started**", unreleased)
+        section = self.changelog.split("## 0.11.", 1)[0]
+        self.assertIn("## 0.12.0", section)
+        self.assertIn("**help**", section)
+        self.assertIn("**getting-started**", section)
 
     def test_skill_does_not_dump_full_help(self) -> None:
         self.assertIn("Do not dump full help into this", self.skill)

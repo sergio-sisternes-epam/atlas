@@ -1,14 +1,14 @@
 ---
 name: atlas/help/baseline
 description: Versioned bundled Atlas module catalog. Help lists from this file plus the SKILL.md path registry; no Atlas mount required.
-package_version: 0.11.2
+package_version: 0.12.0
 ---
 
 # Bundled help baseline
 
 This directory is the **versioned packaged baseline** for Atlas modules
 `help` and `getting-started`. It ships with this skill at
-`package_version` **0.11.2** (see `VERSION`). Help works with **no Atlas
+`package_version` **0.12.0** (see `VERSION`). Help works with **no Atlas
 mounted**. If this baseline answers the question, stop; do not query a store.
 
 The installed registry in `SKILL.md` is authoritative for names. This catalog
