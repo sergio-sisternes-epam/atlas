@@ -55,8 +55,8 @@ python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 ## Shortest useful first journey
 
 1. Install Atlas as above.
-2. Ask **getting-started** (this article) or **help** with no target to see
-   every installed module.
+2. Ask **getting-started** (this article) for purpose, storage choices, and
+   this journey. Ask **help** with no target to list every installed module.
 3. If you already have a store checkout, ask **help mount** or **help query**
    before doing anything. Explanation is not permission to run those modules.
 4. If you need a **new** store in the active git repo, ask **help init**, then

@@ -54,15 +54,12 @@ def run(pointer: str, start: str | None, as_json: bool) -> int:
             "resolved path must be inside the active git repository",
             as_json,
         )
-    if not parsed.in_store:
-        target = mount
-    else:
-        target = _join_under(mount, str(row.get("subpath") or ""), parsed.in_store)
-        if target is None:
-            return _fail(
-                "resolved path must stay under the registered mount",
-                as_json,
-            )
+    target = _join_under(mount, str(row.get("subpath") or ""), parsed.in_store)
+    if target is None:
+        return _fail(
+            "resolved path must stay under the registered mount",
+            as_json,
+        )
     if not target.exists():
         return _fail(f"missing path: {target}", as_json)
     try:

@@ -234,21 +234,22 @@ class HelpPathContractTests(unittest.TestCase):
 class HelpEnrichmentContainmentTests(unittest.TestCase):
     ATLAS = ROOT / "scripts" / "atlas.py"
 
-    def _write_mesh(self, project: Path, store_id: str, rel_path: str) -> None:
+    def _write_mesh(
+        self,
+        project: Path,
+        store_id: str,
+        rel_path: str,
+        subpath: str | None = None,
+    ) -> None:
+        row: dict[str, str] = {
+            "id": store_id,
+            "path": rel_path,
+            "strategy": "dedicated",
+        }
+        if subpath:
+            row["subpath"] = subpath
         (project / "atlas-mesh.json").write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "stores": [
-                        {
-                            "id": store_id,
-                            "path": rel_path,
-                            "strategy": "dedicated",
-                        }
-                    ],
-                }
-            )
-            + "\n",
+            json.dumps({"version": 1, "stores": [row]}) + "\n",
             encoding="utf-8",
         )
 
@@ -326,6 +327,31 @@ class HelpEnrichmentContainmentTests(unittest.TestCase):
             self.assertEqual(2, code)
             self.assertFalse(payload.get("ok"))
             self.assertIn("no git repository", payload.get("error", ""))
+
+    def test_resolve_root_pointer_applies_registered_subpath(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "parent"
+            parent.mkdir()
+            checkout = parent / "store"
+            nested = checkout / "atlas"
+            nested.mkdir(parents=True)
+            (nested / "SCHEMA.json").write_text("{}", encoding="utf-8")
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main"],
+                cwd=parent,
+                check=True,
+                capture_output=True,
+            )
+            self._write_mesh(
+                parent,
+                "github.com/example/store",
+                "store",
+                subpath="atlas",
+            )
+            code, payload = self._resolve(parent, "github.com/example/store")
+            self.assertEqual(0, code)
+            self.assertTrue(payload.get("ok"))
+            self.assertEqual(str(nested.resolve()), payload.get("path"))
 
     def test_iter_concept_md_skips_symlink_escape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
