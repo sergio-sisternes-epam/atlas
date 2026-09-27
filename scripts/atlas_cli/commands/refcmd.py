@@ -314,13 +314,80 @@ def _expand_flow_relates(text: str, drop: set[str] | None = None, *, force: bool
     return f"---{nl}{nl.join(out)}{text[end:]}", True
 
 
-def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool) -> tuple[str, int]:
-    text, expanded = _expand_flow_relates(text, drop, force=on_summary)
+def _parse_relation_item(blob: str) -> dict[str, str]:
+    wrapped = blob.strip()
+    if not wrapped.startswith("["):
+        wrapped = f"[{wrapped}]"
+    items = _parse_relation_value(wrapped)
+    if len(items) != 1:
+        raise RefError("relates_to item must be one mapping")
+    return items[0]
+
+
+def _emit_relation_item(item: dict[str, str], indent: str = "  ") -> list[str]:
+    lines: list[str] = []
+    first = True
+    for key, value in item.items():
+        scalar = _yaml_scalar(value)
+        lines.append(f"{indent}- {key}: {scalar}" if first else f"{indent}  {key}: {scalar}")
+        first = False
+    return lines
+
+
+def _expand_flow_map_items(text: str, drop: set[str] | None = None, *, force: bool = False) -> tuple[str, bool]:
+    """Turn ` - {path, kind}` items inside a block relates_to into field lines."""
     if not text.startswith("---"):
-        return text, int(expanded)
+        return text, False
     end = text.find("\n---", 3)
     if end == -1:
-        return text, 0
+        return text, False
+    nl = _newline(text)
+    lines = text[3:end].strip("\n").splitlines()
+    out: list[str] = []
+    index = 0
+    in_relates = False
+    changed = False
+    while index < len(lines):
+        line = lines[index]
+        if TOP_KEY.match(line):
+            in_relates = bool(re.match(r"^relates_to:\s*$", line))
+            out.append(line)
+            index += 1
+            continue
+        if not in_relates or not re.match(r"^\s*-\s*\{", line):
+            out.append(line)
+            index += 1
+            continue
+        indent = re.match(r"^(\s*)", line).group(1)
+        raw_lines = [line]
+        blob = line.split("-", 1)[1]
+        index += 1
+        while not _balanced_flow(blob) and index < len(lines) and not TOP_KEY.match(lines[index]):
+            raw_lines.append(lines[index])
+            blob += "\n" + lines[index]
+            index += 1
+        if not _balanced_flow(blob):
+            raise RefError("unclosed relates_to item")
+        parsed = _parse_relation_item(blob)
+        names_drop = drop is not None and _norm_path(parsed.get("path", "")) in drop
+        if not force and not names_drop:
+            out.extend(raw_lines)
+            continue
+        out.extend(_emit_relation_item(parsed, indent or "  "))
+        changed = True
+    if not changed:
+        return text, False
+    return f"---{nl}{nl.join(out)}{text[end:]}", True
+
+
+def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool) -> tuple[str, int]:
+    text, expanded = _expand_flow_relates(text, drop, force=on_summary)
+    text, map_expanded = _expand_flow_map_items(text, drop, force=on_summary)
+    if not text.startswith("---"):
+        return text, int(expanded) + int(map_expanded)
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, int(expanded) + int(map_expanded)
     nl = _newline(text)
     block = text[3:end].strip("\n")
     lines = block.splitlines()
@@ -344,7 +411,7 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
         index += 1
     body = text[end:]
     joined = nl.join(out)
-    return f"---{nl}{joined}{body}", changed + int(expanded)
+    return f"---{nl}{joined}{body}", changed + int(expanded) + int(map_expanded)
 
 
 def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
@@ -376,6 +443,7 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
 
 def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
     text, _expanded = _expand_flow_relates(text, force=True)
+    text, _map_expanded = _expand_flow_map_items(text, force=True)
     if not edges:
         return text
     if not text.startswith("---"):

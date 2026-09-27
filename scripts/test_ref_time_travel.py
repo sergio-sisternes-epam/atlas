@@ -881,6 +881,48 @@ def main() -> int:
             else:
                 print("[PASS] prune keeps a fragment when retargeting a markdown link")
 
+        flow_map = tmp / "flow-map"
+        flow_init = run(["init", "--root", str(flow_map), "--schema-version", "2.0", "--json"])
+        if flow_init.returncode != 0:
+            failures.append(f"flow-map store init failed: {flow_init.stdout} {flow_init.stderr}")
+        else:
+            git(flow_map, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (flow_map / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (flow_map / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (flow_map / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n  - {path: dead.md, kind: related}\n",
+                    f"See [dead](dead.md). {prose}",
+                ),
+                encoding="utf-8",
+            )
+            git(flow_map, ["add", "."])
+            git(flow_map, ["commit", "-m", "flow map item"])
+            mapped = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(flow_map),
+                    "--json",
+                ]
+            )
+            living = (flow_map / "living.md").read_text(encoding="utf-8")
+            if mapped.returncode != 0 or "path: dead.md" in living or "path: summary.md" not in living:
+                failures.append(f"flow-map relation was not rewritten: {mapped.stdout}\n{living}")
+            else:
+                print("[PASS] prune rewrites a flow-map relates_to item")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1
