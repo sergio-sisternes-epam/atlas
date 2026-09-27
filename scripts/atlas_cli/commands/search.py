@@ -9,6 +9,7 @@ from pathlib import Path
 from ..core.frontmatter import FrontmatterError, read_page
 from ..core.overlay import merge_overlays
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.projection import is_history_edge
 from ..core.recall import run_recall
 from ..core.recall_config import recall_enabled, schema_version
 from ..core.schema import load_schema, staging_dir_name
@@ -109,7 +110,7 @@ def _relates_preview(meta: dict) -> list[dict]:
     if not isinstance(raw, list):
         return out
     for item in raw:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or is_history_edge(item):
             continue
         path = str(item.get("path") or "").strip()
         if not path:

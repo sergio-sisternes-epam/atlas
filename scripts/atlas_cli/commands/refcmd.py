@@ -216,13 +216,13 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
     return f"---{nl}{joined}{body}", changed
 
 
-def _existing_ref_paths(text: str) -> set[str]:
+def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
     if not text.startswith("---"):
         return set()
     end = text.find("\n---", 3)
     if end == -1:
         return set()
-    found: set[str] = set()
+    found: set[tuple[str, str, str]] = set()
     current: list[str] | None = None
     items: list[list[str]] = []
     for line in text[3:end].splitlines():
@@ -237,8 +237,9 @@ def _existing_ref_paths(text: str) -> set[str]:
     for item in items:
         if _has_field(item, "ref"):
             path = _item_field(item, "path")
-            if path:
-                found.add(path)
+            ref = _item_field(item, "ref")
+            if path and ref:
+                found.add((path, _item_field(item, "kind"), ref))
     return found
 
 
@@ -344,9 +345,24 @@ def _iter_pages(root: Path) -> list[Path]:
             continue
         dirnames[:] = [name for name in dirnames if name not in skip]
         for name in filenames:
-            if name.endswith(".md"):
-                found.append(current / name)
+            if not name.endswith(".md"):
+                continue
+            page = current / name
+            if page.is_symlink():
+                continue
+            try:
+                page.resolve().relative_to(root.resolve())
+            except ValueError:
+                continue
+            found.append(page)
     return sorted(found)
+
+
+def _drop_not_file(store: Path, rel: str) -> str | None:
+    target = store / rel
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        return f"refusing to delete non-file {rel}"
+    return None
 
 
 def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath: str) -> str | None:
@@ -421,6 +437,10 @@ def run_prune(
             warning = _worktree_warning(repo, store, rel, sha, gitpath)
             if warning:
                 warnings.append(warning)
+        for rel in drop_rels:
+            problem = _drop_not_file(store, rel)
+            if problem:
+                raise RefError(problem)
         drop_set = set(drop_rels)
         rewritten: list[str] = []
         pending: list[tuple[Path, str]] = []
@@ -445,21 +465,34 @@ def run_prune(
             if fm_changes or link_changes:
                 rewritten.append(rel)
             if rel == summary_rel:
-                have = _existing_ref_paths(updated)
+                have = _existing_ref_edges(updated)
                 edges = [
-                    (item, kind, sha) for item in drop_rels if item not in have
+                    (item, kind, sha)
+                    for item in drop_rels
+                    if (item, kind, sha) not in have
                 ]
                 updated = append_ref_edges(updated, edges)
             if updated != original:
                 pending.append((page, updated))
-        for page, updated in pending:
-            page.write_text(updated, encoding="utf-8")
-        for rel in drop_rels:
-            target = store / rel
-            if target.is_file():
-                target.unlink()
-            elif target.exists():
-                raise RefError(f"refusing to delete non-file {rel}")
+        snapshots = [(page, page.read_text(encoding="utf-8")) for page, _ in pending]
+        removed: list[tuple[Path, bytes]] = []
+        try:
+            for page, updated in pending:
+                page.write_text(updated, encoding="utf-8")
+            for rel in drop_rels:
+                problem = _drop_not_file(store, rel)
+                if problem:
+                    raise RefError(problem)
+                target = store / rel
+                if target.is_file():
+                    removed.append((target, target.read_bytes()))
+                    target.unlink()
+        except Exception:
+            for page, original in snapshots:
+                page.write_text(original, encoding="utf-8")
+            for target, data in removed:
+                target.write_bytes(data)
+            raise
     except RefError as e:
         return _fail(as_json, str(e))
     if as_json:

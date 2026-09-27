@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from atlas_cli.commands.search import _relates_preview  # noqa: E402
+from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
 
 
@@ -295,6 +297,185 @@ def main() -> int:
             else:
                 print("[PASS] prune retargets tip links and writes summary ref edges")
                 print("[PASS] compile has no broken tip links after prune")
+
+        escaped = store / "escaped.md"
+        escaped.write_text(
+            page(
+                "Escaped history",
+                "relates_to:\n  - path: ../../outside.md\n    kind: related\n    ref: abcdef\n",
+                "History path must stay inside the store.",
+            ),
+            encoding="utf-8",
+        )
+        escape_run = run(["compile", "--root", str(store), "--json"])
+        escape_payload = json.loads(escape_run.stdout) if escape_run.stdout else {}
+        if not any("escapes store root" in item.get("msg", "") for item in escape_payload.get("critical", [])):
+            failures.append(f"history path should not escape the store: {escape_payload.get('critical')}")
+        else:
+            print("[PASS] history path must stay inside the store")
+        escaped.unlink()
+
+        if _bad_relation_ref(123) is None or _bad_relation_ref(None) is None:
+            failures.append("non-string ref should be rejected before stringification")
+        else:
+            print("[PASS] non-string ref is rejected")
+
+        preview = _relates_preview(
+            {
+                "relates_to": [
+                    {"path": "tip.md", "kind": "related"},
+                    {"path": "old.md", "kind": "related", "ref": "abc"},
+                ]
+            }
+        )
+        if preview != [{"path": "tip.md", "kind": "related"}]:
+            failures.append(f"search preview should omit history edges: {preview}")
+        else:
+            print("[PASS] search preview omits history edges")
+
+        outside = tmp / "outside.md"
+        outside.write_text("path: victim.md\n", encoding="utf-8")
+        (store / "linked.md").symlink_to(outside)
+        (store / "victim.md").write_text(
+            page("Victim", "relates_to: []\n", "Named drop."),
+            encoding="utf-8",
+        )
+        (store / "summary-link.md").write_text(
+            page("Link summary", "relates_to: []\n", "Summary for symlink case."),
+            encoding="utf-8",
+        )
+        git(store, ["add", "victim.md", "summary-link.md"])
+        git(store, ["commit", "-m", "victim"])
+        linked = run(
+            [
+                "ref",
+                "prune",
+                "--summary",
+                "summary-link.md",
+                "--drop",
+                "victim.md",
+                "--ref",
+                "HEAD",
+                "--kind",
+                "derived_from",
+                "--root",
+                str(store),
+                "--json",
+            ]
+        )
+        if linked.returncode != 0 or "path: victim.md" not in outside.read_text(encoding="utf-8"):
+            failures.append(f"prune followed a symlink: {linked.stdout} {outside.read_text(encoding='utf-8')}")
+        else:
+            print("[PASS] prune does not rewrite symlink pages")
+
+        (store / "dir-drop.md").write_text(
+            page("Dir drop", "relates_to: []\n", "Will become a directory."),
+            encoding="utf-8",
+        )
+        git(store, ["add", "dir-drop.md"])
+        git(store, ["commit", "-m", "dir drop blob"])
+        (store / "dir-drop.md").unlink()
+        (store / "dir-drop.md").mkdir()
+        before_summary = (store / "summary-link.md").read_text(encoding="utf-8")
+        refused_dir = run(
+            [
+                "ref",
+                "prune",
+                "--summary",
+                "summary-link.md",
+                "--drop",
+                "dir-drop.md",
+                "--ref",
+                "HEAD",
+                "--kind",
+                "derived_from",
+                "--root",
+                str(store),
+                "--json",
+            ]
+        )
+        after_summary = (store / "summary-link.md").read_text(encoding="utf-8")
+        if refused_dir.returncode == 0 or after_summary != before_summary or not (store / "dir-drop.md").is_dir():
+            failures.append(f"directory drop should refuse before rewrite: {refused_dir.stdout}")
+        else:
+            print("[PASS] prune refuses a directory drop before writing")
+
+        (store / "again.md").write_text(
+            page("Again", "relates_to: []\n", "First wording."),
+            encoding="utf-8",
+        )
+        git(store, ["add", "again.md"])
+        git(store, ["commit", "-m", "again first"])
+        old_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=store,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        (store / "summary-again.md").write_text(
+            page(
+                "Again summary",
+                f"relates_to:\n  - path: again.md\n    kind: derived_from\n    ref: {old_sha}\n",
+                "Already has an older history edge.",
+            ),
+            encoding="utf-8",
+        )
+        (store / "again.md").write_text(
+            page("Again", "relates_to: []\n", "Second wording."),
+            encoding="utf-8",
+        )
+        git(store, ["add", "again.md", "summary-again.md"])
+        git(store, ["commit", "-m", "again second"])
+        new_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=store,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        second = run(
+            [
+                "ref",
+                "prune",
+                "--summary",
+                "summary-again.md",
+                "--drop",
+                "again.md",
+                "--ref",
+                "HEAD",
+                "--kind",
+                "derived_from",
+                "--root",
+                str(store),
+                "--json",
+            ]
+        )
+        again_summary = (store / "summary-again.md").read_text(encoding="utf-8")
+        if second.returncode != 0 or again_summary.count("path: again.md") < 2 or new_sha not in again_summary or old_sha not in again_summary:
+            failures.append(f"distinct history revs should both remain: {second.stdout}\n{again_summary}")
+        else:
+            print("[PASS] prune keeps a distinct older history rev")
+
+        typed = tmp / "typed"
+        typed_init = run(["init", "--root", str(typed), "--schema-version", "2.0", "--json"])
+        if typed_init.returncode != 0:
+            failures.append(f"schema 2.0 init failed: {typed_init.stdout} {typed_init.stderr}")
+        else:
+            (typed / "numeric-ref.md").write_text(
+                page(
+                    "Numeric ref",
+                    "relates_to:\n  - path: gone.md\n    kind: related\n    ref: 123\n",
+                    "YAML integer is not a rev string.",
+                ),
+                encoding="utf-8",
+            )
+            numeric = run(["compile", "--root", str(typed), "--json"])
+            numeric_payload = json.loads(numeric.stdout) if numeric.stdout else {}
+            if not any("git rev string" in item.get("msg", "") for item in numeric_payload.get("critical", [])):
+                failures.append(f"numeric ref should fail schema 2.0 compile: {numeric_payload.get('critical')}")
+            else:
+                print("[PASS] schema 2.0 rejects a numeric ref")
 
         if failures:
             print("\n" + "\n".join(failures))

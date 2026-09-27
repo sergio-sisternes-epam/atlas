@@ -87,12 +87,23 @@ def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
 
 def _bad_relation_ref(value: object) -> str | None:
     """Relation ref is a per-edge git rev, not mount ref. Compile does not resolve it."""
-    if value is None:
-        return "ref must be a non-empty git rev without whitespace"
-    ref = str(value)
-    if not ref or ref.strip() != ref or any(ch.isspace() for ch in ref) or ref.startswith("-"):
+    if not isinstance(value, str):
+        return "ref must be a git rev string"
+    if not value or value.strip() != value or any(ch.isspace() for ch in value) or value.startswith("-"):
         return "ref must be a non-empty git rev without whitespace"
     return None
+
+
+def _relation_path_escapes(root: Path, target: str) -> bool:
+    text = target.replace("\\", "/").strip()
+    if not text or text.startswith(("/", "-")):
+        return True
+    cand = (root / text).resolve(strict=False)
+    try:
+        rel_path = cand.relative_to(root.resolve())
+    except ValueError:
+        return True
+    return not rel_path.parts or any(part == ".." for part in rel_path.parts)
 
 
 def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
@@ -133,9 +144,28 @@ def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
                         "msg": f"relates_to[{i}] {ref_problem}",
                     }
                 )
-            # History edge. Do not resolve the blob and do not require HEAD.
+            if not target.startswith(("http://", "https://", "atlas://")) and _relation_path_escapes(
+                root, target
+            ):
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] path escapes store root: {target}",
+                    }
+                )
+            # History edge. Containment is checked. Do not resolve the blob or require HEAD.
             continue
         if target.startswith(("http://", "https://", "atlas://")):
+            continue
+        if _relation_path_escapes(root, target):
+            issues.append(
+                {
+                    "id": "relates_to",
+                    "path": rel(root, path),
+                    "msg": f"relates_to[{i}] path escapes store root: {target}",
+                }
+            )
             continue
         cand = (root / target).resolve()
         if not cand.exists():
