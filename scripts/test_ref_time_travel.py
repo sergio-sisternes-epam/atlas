@@ -572,6 +572,146 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses an in-store symlink drop")
 
+        guarded = tmp / "guarded"
+        guarded_init = run(["init", "--root", str(guarded), "--json"])
+        if guarded_init.returncode != 0:
+            failures.append(f"guarded store init failed: {guarded_init.stdout} {guarded_init.stderr}")
+        else:
+            git(guarded, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (guarded / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (guarded / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            summary_name = "sum:mary.md"
+            (guarded / summary_name).write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (guarded / "notes.txt").write_text("not a page\n", encoding="utf-8")
+            (guarded / "templates" / "foo.md").write_text(page("Template", "relates_to: []\n", prose), encoding="utf-8")
+            (guarded / "staging").mkdir(exist_ok=True)
+            (guarded / "staging" / "foo.md").write_text(page("Staged", "relates_to: []\n", prose), encoding="utf-8")
+            git(guarded, ["add", "."])
+            git(guarded, ["commit", "-m", "guarded fixtures"])
+
+            quoted = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    summary_name,
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            living = (guarded / "living.md").read_text(encoding="utf-8")
+            summary = (guarded / summary_name).read_text(encoding="utf-8")
+            if quoted.returncode != 0 or 'path: "sum:mary.md"' not in living or "path: dead.md" not in summary:
+                failures.append(f"YAML-special summary path was not quoted: {quoted.stdout}\n{living}\n{summary}")
+            else:
+                print("[PASS] prune quotes a YAML-special summary path")
+
+            (guarded / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            not_md = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "notes.txt",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            if not_md.returncode == 0 or not (guarded / "dead.md").is_file() or "eligible" not in not_md.stdout:
+                failures.append(f"non-markdown summary should be refused: {not_md.stdout}")
+            else:
+                print("[PASS] prune refuses a non-markdown summary")
+
+            managed_summary = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "templates/foo.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            managed_drop = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    summary_name,
+                    "--drop",
+                    "staging/foo.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            if (
+                managed_summary.returncode == 0
+                or managed_drop.returncode == 0
+                or not (guarded / "dead.md").is_file()
+                or not (guarded / "staging" / "foo.md").is_file()
+                or "Atlas-managed" not in managed_summary.stdout
+                or "Atlas-managed" not in managed_drop.stdout
+            ):
+                failures.append(
+                    f"managed paths should be refused: {managed_summary.stdout} {managed_drop.stdout}"
+                )
+            else:
+                print("[PASS] prune refuses Atlas-managed summary and drop paths")
+
+            dirty_text = (guarded / "dead.md").read_text(encoding="utf-8") + "uncommitted edit\n"
+            (guarded / "dead.md").write_text(dirty_text, encoding="utf-8")
+            dirty = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    summary_name,
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            if dirty.returncode == 0 or (guarded / "dead.md").read_text(encoding="utf-8") != dirty_text or "dirty" not in dirty.stdout:
+                failures.append(f"dirty drop should be refused: {dirty.stdout}")
+            else:
+                print("[PASS] prune refuses a dirty drop target")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1

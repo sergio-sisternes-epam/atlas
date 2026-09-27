@@ -165,7 +165,7 @@ def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bo
     for line in lines:
         match = FIELD.match(line)
         if match and match.group(2) == "path":
-            rewritten.append(f"{match.group(1)}path: {summary}")
+            rewritten.append(f"{match.group(1)}path: {_yaml_scalar(summary)}")
             continue
         if match and match.group(2) == "ref":
             continue
@@ -390,9 +390,9 @@ def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
     for path, kind, ref in edges:
         addition.extend(
             [
-                f"  - path: {path}",
-                f"    kind: {kind}",
-                f"    ref: {ref}",
+                f"  - path: {_yaml_scalar(path)}",
+                f"    kind: {_yaml_scalar(kind)}",
+                f"    ref: {_yaml_scalar(ref)}",
             ]
         )
     inserted = False
@@ -490,6 +490,25 @@ def _iter_pages(root: Path) -> list[Path]:
     return sorted(found)
 
 
+def _managed_top(store: Path, rel: str) -> str | None:
+    schema, _ = load_schema(store)
+    top = rel.split("/", 1)[0]
+    if top in SKIP_TOP or top == staging_dir_name(schema):
+        return top
+    return None
+
+
+def _require_summary_page(store: Path, rel: str, path: Path) -> None:
+    if _managed_top(store, rel):
+        raise RefError(f"refusing Atlas-managed path {rel}")
+    walked = {page.relative_to(store).as_posix() for page in _iter_pages(store)}
+    if rel not in walked or not path.is_file():
+        raise RefError(f"summary is not an eligible tip page: {rel}")
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---") or text.find("\n---", 3) == -1:
+        raise RefError("summary page has no frontmatter")
+
+
 def _drop_not_file(store: Path, rel: str) -> str | None:
     target = store / rel
     if target.is_symlink() or (target.exists() and not target.is_file()):
@@ -502,9 +521,9 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
     if not path.is_file():
         return f"{store_rel} is absent on tip; history blob is kept at {sha}"
     code, out, _ = run_git(["hash-object", "--", str(path)], cwd=repo)
-    blob, _, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
-    if code != 0 or not blob or out != blob:
-        return f"{store_rel} differs from {sha}"
+    blob_code, blob, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
+    if code != 0 or blob_code != 0 or not blob or out != blob:
+        raise RefError(f"refusing to drop dirty {store_rel}; commit it before prune or choose a rev that matches the worktree")
     return None
 
 
@@ -552,9 +571,12 @@ def run_prune(
         store = store_root(root)
         summary_rel = _store_rel(store, summary)
         summary_path = store / summary_rel
-        if not summary_path.is_file():
-            raise RefError(f"summary is not a tip page: {summary_rel}")
+        _require_summary_page(store, summary_rel, summary_path)
         drop_rels = [_store_rel(store, item) for item in drops]
+        for rel in drop_rels:
+            managed = _managed_top(store, rel)
+            if managed:
+                raise RefError(f"refusing Atlas-managed path {rel}")
         if summary_rel in drop_rels:
             raise RefError("refusing to drop the summary")
         if len(set(drop_rels)) != len(drop_rels):
