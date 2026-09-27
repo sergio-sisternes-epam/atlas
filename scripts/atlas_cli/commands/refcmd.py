@@ -509,6 +509,18 @@ def _require_summary_page(store: Path, rel: str, path: Path) -> None:
         raise RefError("summary page has no frontmatter")
 
 
+def _require_drop_page(rel: str) -> None:
+    if not rel.endswith(".md"):
+        raise RefError(f"drop is not an eligible markdown page: {rel}")
+
+
+def _hard_linked(path: Path) -> bool:
+    try:
+        return path.stat().st_nlink > 1
+    except OSError as e:
+        raise RefError(f"cannot stat {path}") from e
+
+
 def _drop_not_file(store: Path, rel: str) -> str | None:
     target = store / rel
     if target.is_symlink() or (target.exists() and not target.is_file()):
@@ -577,6 +589,7 @@ def run_prune(
             managed = _managed_top(store, rel)
             if managed:
                 raise RefError(f"refusing Atlas-managed path {rel}")
+            _require_drop_page(rel)
         if summary_rel in drop_rels:
             raise RefError("refusing to drop the summary")
         if len(set(drop_rels)) != len(drop_rels):
@@ -627,6 +640,8 @@ def run_prune(
                 ]
                 updated = append_ref_edges(updated, edges)
             if updated != original:
+                if _hard_linked(page):
+                    raise RefError(f"refusing to rewrite hard-linked page {rel}")
                 pending.append((page, updated))
         snapshots = [(page, page.read_text(encoding="utf-8")) for page, _ in pending]
         removed: list[tuple[Path, bytes]] = []

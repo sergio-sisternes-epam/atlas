@@ -712,6 +712,78 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses a dirty drop target")
 
+        linked = tmp / "linked"
+        linked_init = run(["init", "--root", str(linked), "--json"])
+        if linked_init.returncode != 0:
+            failures.append(f"linked store init failed: {linked_init.stdout} {linked_init.stderr}")
+        else:
+            git(linked, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (linked / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (linked / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (linked / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            (linked / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
+            git(linked, ["add", "."])
+            git(linked, ["commit", "-m", "linked fixtures"])
+            outside = tmp / "outside-hard.md"
+            outside.write_text((linked / "living.md").read_text(encoding="utf-8"), encoding="utf-8")
+            (linked / "living.md").unlink()
+            os.link(outside, linked / "living.md")
+            hard = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(linked),
+                    "--json",
+                ]
+            )
+            if (
+                hard.returncode == 0
+                or "hard-linked" not in hard.stdout
+                or outside.read_text(encoding="utf-8") != (linked / "living.md").read_text(encoding="utf-8")
+                or "path: dead.md" not in outside.read_text(encoding="utf-8")
+                or not (linked / "dead.md").is_file()
+            ):
+                failures.append(f"hard-linked page should not be rewritten: {hard.stdout}")
+            else:
+                print("[PASS] prune refuses to rewrite a hard-linked page")
+
+            (linked / "living.md").unlink()
+            (linked / "living.md").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+            not_page = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "SCHEMA.json",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(linked),
+                    "--json",
+                ]
+            )
+            if not_page.returncode == 0 or not (linked / "SCHEMA.json").is_file() or "eligible" not in not_page.stdout:
+                failures.append(f"non-page drop should be refused: {not_page.stdout}")
+            else:
+                print("[PASS] prune refuses a non-page drop")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1
