@@ -51,7 +51,7 @@ Read this file before `atlas ref prune`. Missing `summary`, `drop`, `rev`, or `k
      --root <root>
    ```
 
-   Repeat `--drop` for each named path. The command refuses a rev that lacks a dropped blob, a summary that is itself in `--drop`, a path that escapes the store, a summary or drop that is not an eligible tip markdown page, an Atlas-managed path (`templates`, `staging`, `mesh`, `schema.d`, `.atlas-index`), a drop whose worktree bytes differ from the rev, and a rewrite of a hard-linked page. It deletes only the named paths, retargets inbound tip `relates_to` and markdown links onto the summary with no `ref` and the existing kind kept, and appends `ref` edges on the summary at the resolved SHA.
+   Repeat `--drop` for each named path. The command refuses a rev that lacks a page blob, a summary that is itself in `--drop`, a path that escapes the store, a summary or drop that is not an eligible tip markdown page, reserved `index.md` and `log.md`, an Atlas-managed path (`templates`, `staging`, `mesh`, `schema.d`, `.atlas-index`), a drop whose worktree bytes differ from the rev, and a rewrite of a hard-linked page. It deletes only the named paths, retargets inbound tip `relates_to` and markdown links onto the summary with no `ref` and the existing kind kept, and keeps a link fragment or query on the summary URL.
 5. **Compile** must be green before claiming tip exclusion:
 
    ```text

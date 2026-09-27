@@ -784,6 +784,103 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses a non-page drop")
 
+        reserved = tmp / "reserved"
+        reserved_init = run(["init", "--root", str(reserved), "--json"])
+        if reserved_init.returncode != 0:
+            failures.append(f"reserved store init failed: {reserved_init.stdout} {reserved_init.stderr}")
+        else:
+            git(reserved, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (reserved / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (reserved / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (reserved / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n  - path: dead.md\n    kind: related\n",
+                    f"See [trial](dead.md#why). {prose}",
+                ),
+                encoding="utf-8",
+            )
+            tree = reserved / "thing.md"
+            tree.mkdir()
+            (tree / "child.md").write_text(page("Child", "relates_to: []\n", prose), encoding="utf-8")
+            git(reserved, ["add", "."])
+            git(reserved, ["commit", "-m", "reserved fixtures"])
+            shutil.rmtree(tree)
+            drop_index = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "index.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(reserved),
+                    "--json",
+                ]
+            )
+            if drop_index.returncode == 0 or not (reserved / "index.md").is_file() or "eligible" not in drop_index.stdout:
+                failures.append(f"reserved index.md should not be dropped: {drop_index.stdout}")
+            else:
+                print("[PASS] prune refuses to drop index.md")
+
+            drop_tree = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "thing.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(reserved),
+                    "--json",
+                ]
+            )
+            show_tree = run(["ref", "show", "thing.md", "--ref", "HEAD", "--root", str(reserved), "--json"])
+            summary_text = (reserved / "summary.md").read_text(encoding="utf-8")
+            if (
+                drop_tree.returncode == 0
+                or show_tree.returncode == 0
+                or "thing.md" in summary_text
+                or "child.md" in show_tree.stdout
+            ):
+                failures.append(f"historical directory should not be a page blob: {drop_tree.stdout} {show_tree.stdout}")
+            else:
+                print("[PASS] prune and show require a page blob")
+
+            fragment = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(reserved),
+                    "--json",
+                ]
+            )
+            living = (reserved / "living.md").read_text(encoding="utf-8")
+            if fragment.returncode != 0 or "[trial](summary.md#why)" not in living or (reserved / "dead.md").exists():
+                failures.append(f"fragment link was not retargeted: {fragment.stdout}\n{living}")
+            else:
+                print("[PASS] prune keeps a fragment when retargeting a markdown link")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1

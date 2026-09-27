@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from ..core.gitops import git_root, run_git
-from ..core.paths import store_root
+from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
 
 SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
@@ -92,8 +92,8 @@ def _resolve_commit(repo: Path, rev: str) -> str:
 
 
 def _blob_exists(repo: Path, sha: str, gitpath: str) -> bool:
-    code, _, _ = run_git(["cat-file", "-e", f"{sha}:{gitpath}"], cwd=repo)
-    return code == 0
+    code, out, _ = run_git(["cat-file", "-t", f"{sha}:{gitpath}"], cwd=repo)
+    return code == 0 and out == "blob"
 
 
 def _show_bytes(repo: Path, sha: str, gitpath: str) -> bytes:
@@ -427,7 +427,17 @@ def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
     return f"---{nl}{nl.join(out)}{body}"
 
 
+def _url_path(token: str) -> tuple[str, str]:
+    cut = len(token)
+    for sep in ("#", "?"):
+        idx = token.find(sep)
+        if idx != -1:
+            cut = min(cut, idx)
+    return token[:cut], token[cut:]
+
+
 def _link_hits_drop(root: Path, page: Path, token: str, drop: set[str]) -> bool:
+    token, _suffix = _url_path(token)
     if not token or token.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
         return False
     parent_path = page.parent / token
@@ -454,7 +464,8 @@ def rewrite_markdown_links(text: str, root: Path, page: Path, drop: set[str], su
         token = raw.split()[0].strip("\"'") if raw.strip() else ""
         if not _link_hits_drop(root, page, token, drop):
             return match.group(0)
-        href = Path(os.path.relpath(summary_abs, page.parent)).as_posix()
+        _path_token, suffix = _url_path(token)
+        href = Path(os.path.relpath(summary_abs, page.parent)).as_posix() + suffix
         changed += 1
         return f"[{match.group(1)}]({raw.replace(token, href, 1)})"
 
@@ -510,7 +521,7 @@ def _require_summary_page(store: Path, rel: str, path: Path) -> None:
 
 
 def _require_drop_page(rel: str) -> None:
-    if not rel.endswith(".md"):
+    if not rel.endswith(".md") or Path(rel).name in RESERVED:
         raise RefError(f"drop is not an eligible markdown page: {rel}")
 
 
