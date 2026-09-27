@@ -39,14 +39,29 @@ def _store_rel(root: Path, raw: str) -> str:
     text = raw.strip().replace("\\", "/")
     if not text or text.startswith(("/", "-")) or text.startswith(("http://", "https://", "atlas://")):
         raise RefError(f"path escapes store root: {raw}")
-    cand = (root / text).resolve(strict=False)
+    parts: list[str] = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise RefError(f"path escapes store root: {raw}")
+        parts.append(part)
+    if not parts:
+        raise RefError(f"path escapes store root: {raw}")
+    cursor = root
+    for part in parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise RefError(f"refusing to follow symlink {raw}")
+    lexical = "/".join(parts)
+    cand = (root / lexical).resolve(strict=False)
     try:
         rel = cand.relative_to(root.resolve())
     except ValueError as e:
         raise RefError(f"path escapes store root: {raw}") from e
-    if not rel.parts or any(part == ".." for part in rel.parts):
-        raise RefError(f"path escapes store root: {raw}")
-    return rel.as_posix()
+    if not rel.parts or rel.as_posix() != lexical:
+        raise RefError(f"refusing to follow symlink {raw}")
+    return lexical
 
 
 def _repo(root: Path) -> Path:
@@ -184,9 +199,125 @@ def _rewrite_section(lines: list[str], drop: set[str], summary: str, on_summary:
     return out, changed
 
 
-def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool) -> tuple[str, int]:
+def _balanced_flow(text: str) -> bool:
+    square = curly = 0
+    quote = None
+    escaped = False
+    for ch in text:
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch == "[":
+            square += 1
+        elif ch == "]":
+            square -= 1
+        elif ch == "{":
+            curly += 1
+        elif ch == "}":
+            curly -= 1
+        if square < 0 or curly < 0:
+            return False
+    return square == 0 and curly == 0 and quote is None
+
+
+def _yaml_scalar(value: str) -> str:
+    if not value or value.strip() != value or any(ch in value for ch in ":#{}[]&*!|>%@`,\"'"):
+        return json.dumps(value)
+    return value
+
+
+def _parse_relation_value(blob: str) -> list[dict[str, str]]:
+    try:
+        import yaml
+    except ImportError as e:
+        raise RefError("PyYAML is required to parse inline relates_to") from e
+    try:
+        value = yaml.safe_load(blob)
+    except yaml.YAMLError as e:
+        raise RefError(f"cannot parse relates_to: {e}") from e
+    if value is None:
+        value = []
+    if not isinstance(value, list):
+        raise RefError("relates_to must be a list")
+    parsed: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RefError("relates_to item must be a mapping")
+        clean: dict[str, str] = {}
+        for key, field in item.items():
+            if not isinstance(key, str) or not isinstance(field, str):
+                raise RefError("relates_to fields must be strings")
+            clean[key] = field
+        parsed.append(clean)
+    return parsed
+
+
+def _emit_relates_block(items: list[dict[str, str]]) -> list[str]:
+    if not items:
+        return ["relates_to: []"]
+    lines = ["relates_to:"]
+    for item in items:
+        first = True
+        for key, value in item.items():
+            scalar = _yaml_scalar(value)
+            lines.append(f"  - {key}: {scalar}" if first else f"    {key}: {scalar}")
+            first = False
+    return lines
+
+
+def _expand_flow_relates(text: str, drop: set[str] | None = None, *, force: bool = False) -> tuple[str, bool]:
+    """Turn a flow-style relates_to list into the block form the rewriter edits."""
     if not text.startswith("---"):
-        return text, 0
+        return text, False
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, False
+    nl = _newline(text)
+    lines = text[3:end].strip("\n").splitlines()
+    out: list[str] = []
+    index = 0
+    changed = False
+    while index < len(lines):
+        line = lines[index]
+        match = re.match(r"^relates_to:\s*(\S.*)$", line)
+        if not match:
+            out.append(line)
+            index += 1
+            continue
+        raw_lines = [line]
+        value_lines = [match.group(1)]
+        index += 1
+        while not _balanced_flow("\n".join(value_lines)) and index < len(lines) and not TOP_KEY.match(lines[index]):
+            raw_lines.append(lines[index])
+            value_lines.append(lines[index])
+            index += 1
+        blob = "\n".join(value_lines).strip()
+        if not _balanced_flow(blob):
+            raise RefError("unclosed relates_to value")
+        parsed = _parse_relation_value(blob)
+        names_drop = drop is not None and any(_norm_path(item.get("path", "")) in drop for item in parsed)
+        if not force and not names_drop:
+            out.extend(raw_lines)
+            continue
+        out.extend(_emit_relates_block(parsed))
+        changed = True
+    if not changed:
+        return text, False
+    return f"---{nl}{nl.join(out)}{text[end:]}", True
+
+
+def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool) -> tuple[str, int]:
+    text, expanded = _expand_flow_relates(text, drop, force=on_summary)
+    if not text.startswith("---"):
+        return text, int(expanded)
     end = text.find("\n---", 3)
     if end == -1:
         return text, 0
@@ -213,7 +344,7 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
         index += 1
     body = text[end:]
     joined = nl.join(out)
-    return f"---{nl}{joined}{body}", changed
+    return f"---{nl}{joined}{body}", changed + int(expanded)
 
 
 def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
@@ -244,6 +375,7 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
 
 
 def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
+    text, _expanded = _expand_flow_relates(text, force=True)
     if not edges:
         return text
     if not text.startswith("---"):

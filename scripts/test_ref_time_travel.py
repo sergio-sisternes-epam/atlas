@@ -477,6 +477,101 @@ def main() -> int:
             else:
                 print("[PASS] schema 2.0 rejects a numeric ref")
 
+        inline = tmp / "inline"
+        inline_init = run(["init", "--root", str(inline), "--schema-version", "2.0", "--json"])
+        if inline_init.returncode != 0:
+            failures.append(f"inline store init failed: {inline_init.stdout} {inline_init.stderr}")
+        else:
+            git(inline, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (inline / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (inline / "other.md").write_text(page("Other", "relates_to: []\n", prose), encoding="utf-8")
+            (inline / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to: [{path: dead.md, kind: related}]\n",
+                    f"See [dead](dead.md). {prose}",
+                ),
+                encoding="utf-8",
+            )
+            (inline / "summary.md").write_text(
+                page(
+                    "Summary",
+                    "relates_to: [{path: other.md, kind: related}]\n",
+                    f"Why this frame failed. {prose}",
+                ),
+                encoding="utf-8",
+            )
+            git(inline, ["add", "dead.md", "other.md", "living.md", "summary.md"])
+            git(inline, ["commit", "-m", "inline relations"])
+            inline_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(inline),
+                    "--json",
+                ]
+            )
+            living = (inline / "living.md").read_text(encoding="utf-8")
+            summary = (inline / "summary.md").read_text(encoding="utf-8")
+            compiled = run(["compile", "--root", str(inline), "--json"])
+            compiled_ok = compiled.returncode == 0 and '"ok": true' in compiled.stdout
+            if (
+                inline_prune.returncode != 0
+                or "path: dead.md" in living
+                or "path: summary.md" not in living
+                or summary.count("relates_to:") != 1
+                or "path: dead.md" not in summary
+                or "path: other.md" not in summary
+                or not compiled_ok
+            ):
+                failures.append(
+                    f"inline relates_to was not rewritten as one list: {inline_prune.stdout}\n{living}\n{summary}\n{compiled.stdout}"
+                )
+            else:
+                print("[PASS] prune rewrites an inline relates_to list")
+
+            (inline / "victim.md").write_text(page("Victim", "relates_to: []\n", "Must survive."), encoding="utf-8")
+            git(inline, ["add", "victim.md"])
+            git(inline, ["commit", "-m", "victim blob"])
+            (inline / "alias.md").symlink_to("victim.md")
+            before_victim = (inline / "victim.md").read_text(encoding="utf-8")
+            alias_drop = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "alias.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(inline),
+                    "--json",
+                ]
+            )
+            if (
+                alias_drop.returncode == 0
+                or not (inline / "victim.md").is_file()
+                or (inline / "victim.md").read_text(encoding="utf-8") != before_victim
+                or "symlink" not in alias_drop.stdout
+            ):
+                failures.append(f"in-store symlink drop should be refused: {alias_drop.stdout}")
+            else:
+                print("[PASS] prune refuses an in-store symlink drop")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1
