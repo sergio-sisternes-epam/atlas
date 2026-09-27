@@ -85,6 +85,16 @@ def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
 
 
 
+def _bad_relation_ref(value: object) -> str | None:
+    """Relation ref is a per-edge git rev, not mount ref. Compile does not resolve it."""
+    if value is None:
+        return "ref must be a non-empty git rev without whitespace"
+    ref = str(value)
+    if not ref or ref.strip() != ref or any(ch.isspace() for ch in ref) or ref.startswith("-"):
+        return "ref must be a non-empty git rev without whitespace"
+    return None
+
+
 def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
     issues: list[dict] = []
     rels = meta.get("relates_to")
@@ -112,6 +122,18 @@ def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
                     "msg": f"relates_to[{i}] missing path",
                 }
             )
+            continue
+        if "ref" in item:
+            ref_problem = _bad_relation_ref(item.get("ref"))
+            if ref_problem:
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] {ref_problem}",
+                    }
+                )
+            # History edge. Do not resolve the blob and do not require HEAD.
             continue
         if target.startswith(("http://", "https://", "atlas://")):
             continue

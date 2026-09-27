@@ -164,9 +164,18 @@
       "path values are relative to the Atlas root (forward slashes).",
       "kind should be one of the recommended_kinds when possible.",
       "atlas compile checks that relates_to paths resolve (and Markdown links if present).",
-      "On promote/compile, agent writes relates_to first; body Related is optional echo."
+      "On promote/compile, agent writes relates_to first; body Related is optional echo.",
+      "Optional relates_to[].ref is a git rev for that path. Absent ref means the active tip (compile resolves path on HEAD). Present ref means time travel: tip compile does not resolve the blob and does not fail if the path is absent on HEAD.",
+      "Relation ref is not mount or mesh store-tracking ref. Mount ref is the branch a store tracks. Relation ref is a per-edge revision. Do not put ref next to title."
     ],
     "authoritative": "frontmatter",
+    "ref": {
+      "field": "relates_to[].ref",
+      "optional": true,
+      "absent": "tip — resolve path on HEAD; missing path is a broken relates_to",
+      "present": "git rev — not compiled; history is deliberate recall",
+      "not": "mount or mesh store-tracking ref"
+    },
     "recommended_kinds": [
       "follows",
       "records",

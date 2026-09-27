@@ -18,6 +18,7 @@ Model disagreement alone is not a trigger.
 3. Load `discuss/references/paths/terminate.md`.
 4. Follow that path on this Atlas `root`.
 5. After compile green, answer only from living pages and the exit-reason node. Do not continue the dead matrix.
+6. Tip exclusion is a separate explicit step. Discuss terminate does not delete. If the user wants the failed path off tip, enter Atlas path **prune** (`references/paths/prune.md`) after the exit-reason page exists. Do not prune inside this recipe.
 
 ## Do not
 

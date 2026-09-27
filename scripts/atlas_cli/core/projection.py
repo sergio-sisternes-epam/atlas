@@ -99,6 +99,9 @@ def _edges_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
         target = str(item.get("path") or "").strip()
         if not target:
             continue
+        # Edges that carry relation ref are history. Tip projection stays on HEAD.
+        if "ref" in item:
+            continue
         kind = str(item.get("kind") or item.get("role") or "related").strip() or "related"
         edges.append({"target": target, "kind": kind, "direction": "outgoing"})
     return edges

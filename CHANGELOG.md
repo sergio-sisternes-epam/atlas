@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
+- `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
+- Runtime modules **history**, **version-hint**, and **prune**. Query, remember, and terminate hand off to those cards. Claim A grain stays deferred.
+
 ### Changed
 
 - Package `description` now matches the README lede.
