@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from atlas_cli.commands.refcmd import RefError, _rewrite_regular  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -1002,6 +1003,36 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses a summary compile would reject")
 
+            (bare / "summary.md").write_text(
+                "---\ntype: document\ntitle: Summary\nrelates_to: []\n---\n\n" + prose + "\n",
+                encoding="utf-8",
+            )
+            missing_created = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(bare),
+                    "--json",
+                ]
+            )
+            if (
+                missing_created.returncode == 0
+                or not (bare / "dead.md").is_file()
+                or "required frontmatter" not in missing_created.stdout
+            ):
+                failures.append(f"summary missing created should be refused: {missing_created.stdout}")
+            else:
+                print("[PASS] prune refuses a summary that fails the page contract")
+
             git(bare, ["rm", "dead.md"])
             git(bare, ["commit", "-m", "remove dead from tip"])
             old = subprocess.run(
@@ -1051,6 +1082,28 @@ def main() -> int:
         else:
             print("[PASS] history ref rejects an external path")
         external.unlink()
+
+        outside = tmp / "outside-target.md"
+        outside.write_text("outside\n", encoding="utf-8")
+        linked = tmp / "linked-page.md"
+        linked.symlink_to(outside)
+        try:
+            _rewrite_regular(linked, b"rewritten\n", "linked-page.md")
+        except RefError:
+            refused_link = True
+        else:
+            refused_link = False
+        if not refused_link or outside.read_text(encoding="utf-8") != "outside\n":
+            failures.append("rewrite followed or accepted a symlink")
+        else:
+            print("[PASS] page rewrite refuses a symlink")
+        regular = tmp / "regular-page.md"
+        regular.write_text("old\n", encoding="utf-8")
+        _rewrite_regular(regular, b"new\n", "regular-page.md")
+        if regular.read_text(encoding="utf-8") != "new\n" or regular.is_symlink():
+            failures.append("atomic rewrite did not replace a regular page")
+        else:
+            print("[PASS] page rewrite replaces a regular file")
 
         if failures:
             print("\n" + "\n".join(failures))

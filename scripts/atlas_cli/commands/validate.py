@@ -207,7 +207,7 @@ def _has_kind(meta: dict, kind: str) -> bool:
 
 
 def concept_page_errors(root: Path, path: Path) -> list[str]:
-    """Critical compile messages for one concept page. Empty means compile would accept it."""
+    """Compile-blocking messages for one concept page. Empty means this page would not fail compile."""
     schema, _ = load_schema(root)
     text = path.read_text(encoding="utf-8", errors="replace")
     ignores = _ignores_in(text)
@@ -228,6 +228,8 @@ def concept_page_errors(root: Path, path: Path) -> list[str]:
         msgs.extend(issue["msg"] for issue in _check_internal_links(root, path, body))
     if "relates_to" not in ignores:
         msgs.extend(issue["msg"] for issue in _check_relates_to(root, path, meta))
+    if schema and "page_contract" not in ignores:
+        msgs.extend(issue["msg"] for issue in _page_contract_issues(root, path, meta, schema))
     return msgs
 
 

@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from ..core.gitops import git_root, run_git
@@ -596,6 +598,34 @@ def _require_drop_page(rel: str) -> None:
         raise RefError(f"drop is not an eligible markdown page: {rel}")
 
 
+def _replace_nofollow(path: Path, data: bytes) -> None:
+    """Replace a directory entry. rename does not follow a final symlink."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".atlas-prune-", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def _rewrite_regular(path: Path, data: bytes, label: str) -> None:
+    try:
+        info = path.lstat()
+    except OSError as e:
+        raise RefError(f"refusing to rewrite missing page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
+        raise RefError(f"refusing to rewrite non-regular page {label}")
+    _replace_nofollow(path, data)
+
+
 def _hard_linked(path: Path) -> bool:
     try:
         return path.stat().st_nlink > 1
@@ -731,20 +761,21 @@ def run_prune(
         removed: list[tuple[Path, bytes]] = []
         try:
             for page, updated in pending:
-                page.write_text(updated, encoding="utf-8")
+                label = page.relative_to(store).as_posix()
+                _rewrite_regular(page, updated.encode("utf-8"), label)
             for rel in drop_rels:
                 problem = _drop_not_file(store, rel)
                 if problem:
                     raise RefError(problem)
                 target = store / rel
-                if target.is_file():
+                if target.is_file() and not target.is_symlink():
                     removed.append((target, target.read_bytes()))
                     target.unlink()
         except Exception:
             for page, original in snapshots:
-                page.write_text(original, encoding="utf-8")
+                _replace_nofollow(page, original.encode("utf-8"))
             for target, data in removed:
-                target.write_bytes(data)
+                _replace_nofollow(target, data)
             raise
     except RefError as e:
         return _fail(as_json, str(e))
