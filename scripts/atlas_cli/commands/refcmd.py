@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
+import fcntl
 import json
 import os
+import platform
 import re
 import stat
 import subprocess
@@ -743,6 +746,64 @@ def _matching_restore(dirfd: int, name: str, data: bytes, label: str, mode: int)
     return again.st_dev, again.st_ino
 
 
+def _lock_fd(fd: int, label: str) -> None:
+    """Serialize cooperating writers across the check and the directory update."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        raise RefError(f"refusing to update locked page {label}") from e
+
+
+def _exchange_names(dirfd: int, src: str, dst: str) -> None:
+    """Atomically swap two names in one directory. The destination is not overwritten."""
+    src_b = os.fsencode(src)
+    dst_b = os.fsencode(dst)
+    system = platform.system()
+    if system == "Linux":
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+        renameat2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+        rc = renameat2(dirfd, src_b, dirfd, dst_b, 2)
+    elif system == "Darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameatx_np = libc.renameatx_np
+        renameatx_np.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameatx_np.restype = ctypes.c_int
+        rc = renameatx_np(dirfd, src_b, dirfd, dst_b, 2)
+    else:
+        raise RefError("refusing to rewrite without an atomic exchange")
+    if rc != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), src)
+
+
+def _rollback_exchange(dirfd: int, tmp: str, name: str, written_dev: int, written_ino: int, label: str) -> None:
+    """Put the checked page back. Never delete a name that is no longer our temp inode."""
+    try:
+        _exchange_names(dirfd, tmp, name)
+    except OSError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    try:
+        back = os.lstat(tmp, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    if back.st_dev != written_dev or back.st_ino != written_ino:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+
+
 def _write_all(fd: int, data: bytes) -> None:
     view = memoryview(data)
     while len(view):
@@ -790,11 +851,63 @@ def _rewrite_dir_file(
                 raise RefError(f"refusing to rewrite non-regular page {label}")
             if info.st_nlink > 1:
                 raise RefError(f"refusing to rewrite hard-linked page {label}")
-            if expected is not None and _read_dir_file(dirfd, name, label) != expected:
+            snapshot = _read_dir_file(dirfd, name, label)
+            if expected is not None and snapshot != expected:
                 raise RefError(f"refusing to rewrite changed page {label}")
             if expected_dev is not None and (info.st_dev != expected_dev or info.st_ino != expected_ino):
                 raise RefError(f"refusing to rewrite changed page {label}")
-            os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            written = os.lstat(tmp, dir_fd=dirfd)
+            lockfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+            try:
+                os.set_blocking(lockfd, True)
+                _lock_fd(lockfd, label)
+                locked = os.fstat(lockfd)
+                if locked.st_dev != info.st_dev or locked.st_ino != info.st_ino:
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                os.lseek(lockfd, 0, os.SEEK_SET)
+                if _read_fd(lockfd) != snapshot:
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                try:
+                    _exchange_names(dirfd, tmp, name)
+                except OSError as e:
+                    raise RefError(f"refusing to rewrite {label}") from e
+                try:
+                    displaced = os.lstat(tmp, dir_fd=dirfd)
+                    displaced_bytes = _read_dir_file(dirfd, tmp, label)
+                except (OSError, RefError) as e:
+                    try:
+                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, label)
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}") from e
+                if (
+                    displaced.st_dev != info.st_dev
+                    or displaced.st_ino != info.st_ino
+                    or displaced_bytes != snapshot
+                ):
+                    try:
+                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, label)
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                held = tmp
+                try:
+                    current = os.lstat(tmp, dir_fd=dirfd)
+                except OSError as e:
+                    tmp = ""
+                    raise RefError(f"refusing to rewrite {label}; displaced file left at {held}") from e
+                if (
+                    stat.S_ISREG(current.st_mode)
+                    and not stat.S_ISLNK(current.st_mode)
+                    and current.st_dev == info.st_dev
+                    and current.st_ino == info.st_ino
+                ):
+                    os.unlink(tmp, dir_fd=dirfd)
+                tmp = ""
+            finally:
+                os.close(lockfd)
         else:
             if mode is None:
                 raise RefError(f"refusing to restore {label} without a mode")
@@ -922,6 +1035,7 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             if not stat.S_ISREG(info.st_mode):
                 raise RefError(f"refusing to delete non-file {rel}")
             os.set_blocking(fd, True)
+            _lock_fd(fd, rel)
             data = _read_fd(fd)
             again = os.fstat(fd)
             if again.st_dev != info.st_dev or again.st_ino != info.st_ino:
@@ -945,11 +1059,28 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")
+            os.lseek(fd, 0, os.SEEK_SET)
+            claimed = _read_fd(fd)
+            claimed_info = os.fstat(fd)
+            if claimed_info.st_dev != info.st_dev or claimed_info.st_ino != info.st_ino:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            if _hash_bytes(repo, claimed) != expected or claimed_info.st_size != len(claimed):
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
+            os.lseek(fd, 0, os.SEEK_SET)
+            if _read_fd(fd) != claimed:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
             try:
                 os.unlink(tmp, dir_fd=dirfd)
             except OSError as exc:
                 _restore_failed_unlink(dirfd, name, tmp, rel, exc)
-            return data, mode
+            return claimed, stat.S_IMODE(claimed_info.st_mode)
         finally:
             os.close(fd)
     finally:

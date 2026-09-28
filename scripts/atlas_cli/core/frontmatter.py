@@ -162,16 +162,43 @@ def schema_v2_loader():
     return UniqueSafeLoader
 
 
+def _bounded_yaml_events(text: str) -> None:
+    """Reject oversized, alias-heavy, or tagged YAML before a loader expands it."""
+    if len(text.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
+        raise FrontmatterError("frontmatter exceeds size limit")
+    try:
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    count = 0
+    try:
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            count += 1
+            if count > MAX_YAML_EVENTS:
+                raise FrontmatterError("frontmatter exceeds event limit")
+            if event.__class__.__name__ == "AliasEvent":
+                raise FrontmatterError("YAML aliases are not supported")
+            tag = getattr(event, "tag", None) or ""
+            if tag in ("tag:yaml.org,2002:merge",) or tag.startswith("!"):
+                raise FrontmatterError(f"unsupported YAML tag {tag}")
+    except yaml.YAMLError as e:
+        raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
+
+
 def load_yaml_value(text: str) -> Any:
     """Parse one YAML value with the SCHEMA 2.0 scalar rules."""
+    _bounded_yaml_events(text)
     try:
         import yaml
     except ImportError as e:
         raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
     try:
-        return yaml.load(text, Loader=schema_v2_loader())
+        data = yaml.load(text, Loader=schema_v2_loader())
     except yaml.YAMLError as e:
         raise FrontmatterError(f"invalid YAML: {e}") from e
+    if data is None:
+        return None
+    return _jsonish(data)
 
 
 def split_fm_v2(text: str) -> tuple[dict, str]:
@@ -183,26 +210,12 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
         return {}, text
     block = text[3:end].strip("\n")
     body = text[end + 4 :]
-    if len(block.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
-        raise FrontmatterError("frontmatter exceeds size limit")
+    _bounded_yaml_events(block)
     try:
         import yaml
     except ImportError as e:
         raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
     UniqueSafeLoader = schema_v2_loader()
-    try:
-        count = 0
-        for event in yaml.parse(block, Loader=yaml.SafeLoader):
-            count += 1
-            if count > MAX_YAML_EVENTS:
-                raise FrontmatterError("frontmatter exceeds event limit")
-            if event.__class__.__name__ == "AliasEvent":
-                raise FrontmatterError("YAML aliases are not supported")
-            tag = getattr(event, "tag", None) or ""
-            if tag in ("tag:yaml.org,2002:merge",) or tag.startswith("!"):
-                raise FrontmatterError(f"unsupported YAML tag {tag}")
-    except yaml.YAMLError as e:
-        raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
     try:
         data = yaml.load(block, Loader=UniqueSafeLoader)
     except yaml.YAMLError as e:

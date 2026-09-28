@@ -1504,6 +1504,52 @@ def main() -> int:
         else:
             print("[PASS] failed unlink restores the page before raising")
 
+        edited = tmp / "edited-inode"
+        edited.mkdir()
+        git(edited, ["init", "-b", "main"])
+        (edited / "dead.md").write_text("same\n", encoding="utf-8")
+        git(edited, ["add", "dead.md"])
+        git(edited, ["commit", "-m", "blob"])
+        edited_blob = subprocess.run(
+            ["git", "rev-parse", "HEAD:dead.md"],
+            cwd=edited,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+        real_rename = os.rename
+        edited_once = {"done": False}
+
+        def editing_rename(src, dst, *args, **kwargs):
+            if not edited_once["done"] and src == "dead.md":
+                edited_once["done"] = True
+                dirfd = kwargs.get("src_dir_fd")
+                fd = os.open(src, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+                os.ftruncate(fd, 0)
+                os.write(fd, b"changed-after-hash\n")
+                os.close(fd)
+            return real_rename(src, dst, *args, **kwargs)
+
+        os.rename = editing_rename
+        try:
+            _unlink_store(edited, "dead.md", edited, edited_blob)
+        except RefError as exc:
+            refused_edit = "dirty" in str(exc)
+        else:
+            refused_edit = False
+        finally:
+            os.rename = real_rename
+        edited_page = edited / "dead.md"
+        if (
+            not refused_edit
+            or not edited_page.is_file()
+            or edited_page.read_bytes() != b"changed-after-hash\n"
+            or list(edited.glob(".atlas-prune-drop-*"))
+        ):
+            failures.append("unlink deleted bytes that changed after the first hash")
+        else:
+            print("[PASS] unlink restores a page edited after the first hash")
+
         null_body = "This page keeps enough prose that compile does not treat it as a link list."
         for label, scalar in (("null", "null"), ("tilde", "~")):
             empty_store = tmp / f"empty-{label}"
@@ -1799,6 +1845,38 @@ def main() -> int:
                 print("[PASS] rewrite refuses bytes that changed before rename")
         else:
             failures.append("rewrite should refuse a byte mismatch")
+
+        raced = tmp / "raced-rewrite"
+        raced.mkdir()
+        (raced / "living.md").write_text("old\n", encoding="utf-8")
+        import atlas_cli.commands.refcmd as refcmd
+
+        real_exchange = refcmd._exchange_names
+        exchanged = {"done": False}
+
+        def racing_exchange(dirfd, src, dst):
+            if not exchanged["done"] and dst == "living.md":
+                exchanged["done"] = True
+                os.unlink(dst, dir_fd=dirfd)
+                fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
+                os.write(fd, b"newer page\n")
+                os.close(fd)
+            return real_exchange(dirfd, src, dst)
+
+        refcmd._exchange_names = racing_exchange
+        try:
+            _rewrite_store(raced, "living.md", b"rewritten\n", expected=b"old\n")
+        except RefError:
+            refused_race = True
+        else:
+            refused_race = False
+        finally:
+            refcmd._exchange_names = real_exchange
+        raced_text = (raced / "living.md").read_text(encoding="utf-8")
+        if not refused_race or raced_text != "newer page\n" or list(raced.glob(".atlas-prune-*")):
+            failures.append(f"rewrite overwrote a page replaced before exchange: {raced_text!r}")
+        else:
+            print("[PASS] rewrite restores a page replaced before exchange")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")
