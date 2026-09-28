@@ -923,6 +923,45 @@ def main() -> int:
             else:
                 print("[PASS] prune rewrites a flow-map relates_to item")
 
+            summary_index = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "index.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(flow_map),
+                    "--json",
+                ]
+            )
+            if summary_index.returncode == 0 or "eligible" not in summary_index.stdout:
+                failures.append(f"reserved summary should be refused: {summary_index.stdout}")
+            else:
+                print("[PASS] prune refuses a reserved summary page")
+
+        external = store / "external-ref.md"
+        external.write_text(
+            page(
+                "External ref",
+                "relates_to:\n  - path: https://example.invalid/old.md\n    kind: related\n    ref: abcdef\n",
+                "History edge must stay inside the store.",
+            ),
+            encoding="utf-8",
+        )
+        external_run = run(["compile", "--root", str(store), "--json"])
+        external_payload = json.loads(external_run.stdout) if external_run.stdout else {}
+        if not any("store-relative" in item.get("msg", "") for item in external_payload.get("critical", [])):
+            failures.append(f"external ref path should fail compile: {external_payload.get('critical')}")
+        else:
+            print("[PASS] history ref rejects an external path")
+        external.unlink()
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1

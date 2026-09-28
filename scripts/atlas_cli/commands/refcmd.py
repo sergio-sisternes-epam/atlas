@@ -580,6 +580,8 @@ def _managed_top(store: Path, rel: str) -> str | None:
 def _require_summary_page(store: Path, rel: str, path: Path) -> None:
     if _managed_top(store, rel):
         raise RefError(f"refusing Atlas-managed path {rel}")
+    if Path(rel).name in RESERVED:
+        raise RefError(f"summary is not an eligible tip page: {rel}")
     walked = {page.relative_to(store).as_posix() for page in _iter_pages(store)}
     if rel not in walked or not path.is_file():
         raise RefError(f"summary is not an eligible tip page: {rel}")

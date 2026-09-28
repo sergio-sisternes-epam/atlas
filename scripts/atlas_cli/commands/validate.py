@@ -144,9 +144,15 @@ def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
                         "msg": f"relates_to[{i}] {ref_problem}",
                     }
                 )
-            if not target.startswith(("http://", "https://", "atlas://")) and _relation_path_escapes(
-                root, target
-            ):
+            if target.startswith(("http://", "https://", "atlas://")):
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] ref path must be store-relative: {target}",
+                    }
+                )
+            elif _relation_path_escapes(root, target):
                 issues.append(
                     {
                         "id": "relates_to",
