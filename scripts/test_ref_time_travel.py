@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.commands.refcmd import (  # noqa: E402
     RefError,
+    _open_store_parent,
     _rewrite_regular,
     _rewrite_store,
     _unlink_store,
@@ -1626,6 +1627,89 @@ def main() -> int:
                 failures.append(f"schema 2.0 shape should block prune: {extra_run.stdout}")
             else:
                 print("[PASS] prune refuses a schema 2.0 document compile would reject")
+
+        folded = tmp / "folded"
+        folded_init = run(["init", "--root", str(folded), "--schema-version", "2.0", "--json"])
+        if folded_init.returncode != 0:
+            failures.append(f"folded store init failed: {folded_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(folded, ["init", "-b", "main"])
+            (folded / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (folded / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (folded / "living.md").write_text(
+                "---\n"
+                "type: document\n"
+                "title: Living\n"
+                "created: 2026-09-27\n"
+                "relates_to:\n"
+                "  - path: >-\n"
+                "      dead.md\n"
+                "    kind: related\n"
+                "---\n\n"
+                "## Content\n\n"
+                f"{prose}\n",
+                encoding="utf-8",
+            )
+            git(folded, ["add", "."])
+            git(folded, ["commit", "-m", "folded path"])
+            folded_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(folded),
+                    "--json",
+                ]
+            )
+            living = (folded / "living.md").read_text(encoding="utf-8")
+            folded_compile = run(["compile", "--root", str(folded), "--json"])
+            if (
+                folded_run.returncode != 0
+                or "dead.md" in living
+                or "summary.md" not in living
+                or (folded / "dead.md").exists()
+                or folded_compile.returncode != 0
+            ):
+                failures.append(f"folded path was not retargeted: {folded_run.stdout}\n{living}\n{folded_compile.stdout}")
+            else:
+                print("[PASS] prune retargets a folded relates_to path")
+
+        linked_root = tmp / "linked-root"
+        real_root = tmp / "real-root"
+        real_root.mkdir()
+        (real_root / "dead.md").write_text("x\n", encoding="utf-8")
+        linked_root.symlink_to(real_root, target_is_directory=True)
+        try:
+            _open_store_parent(linked_root, "dead.md")
+        except RefError as exc:
+            if "symlink" not in str(exc):
+                failures.append(f"symlink root error should name symlink: {exc}")
+            else:
+                print("[PASS] store root open refuses a symlink")
+        else:
+            failures.append("symlink store root should be refused")
+
+        stale = tmp / "stale-page"
+        stale.mkdir()
+        (stale / "living.md").write_text("old\n", encoding="utf-8")
+        try:
+            _rewrite_store(stale, "living.md", b"new\n", expected=b"other\n")
+        except RefError:
+            if (stale / "living.md").read_text(encoding="utf-8") != "old\n":
+                failures.append("changed-page refusal rewrote the page")
+            else:
+                print("[PASS] rewrite refuses bytes that changed before rename")
+        else:
+            failures.append("rewrite should refuse a byte mismatch")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")

@@ -11,8 +11,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from ..core.frontmatter import FrontmatterError, parse_page
 from ..core.gitops import git_root, run_git
 from ..core.overlay import merge_overlays
+from ..core.recall_config import schema_version
 from .validate import concept_page_errors
 from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
@@ -181,7 +183,45 @@ def _has_field(lines: list[str], key: str) -> bool:
     return any(FIELD.match(line) and FIELD.match(line).group(2) == key for line in lines)
 
 
+def _needs_yaml_item(lines: list[str]) -> bool:
+    for line in lines:
+        if re.search(r":\s*[|>][+-]?\d*\s*(?:#.*)?$", line):
+            return True
+        if re.match(r"^.*:\s*(?:#.*)?$", line):
+            return True
+    return False
+
+
+def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
+    """Turn a block scalar that names a drop into the plain form the rewriter edits."""
+    if not lines or not _needs_yaml_item(lines):
+        return lines
+    try:
+        import yaml
+    except ImportError as e:
+        raise RefError("PyYAML is required to parse relates_to") from e
+    try:
+        value = yaml.safe_load("\n".join(lines))
+    except yaml.YAMLError as e:
+        raise RefError(f"cannot parse relates_to item: {e}") from e
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    if not isinstance(value, dict):
+        raise RefError("relates_to item must be a mapping")
+    path = _norm_path(str(value.get("path") or "").strip())
+    if path not in drop or str(value.get("ref") or "").strip():
+        return lines
+    clean: dict[str, str] = {}
+    for key, field in value.items():
+        if not isinstance(key, str) or not isinstance(field, str):
+            raise RefError("relates_to fields must be strings")
+        clean[key] = field.strip()
+    indent = re.match(r"^(\s*)", lines[0]).group(1) if lines else "  "
+    return _emit_relation_item(clean, indent or "  ")
+
+
 def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str] | None, bool]:
+    lines = _coerce_block_item(lines, drop)
     path = _item_field(lines, "path")
     if path is None or path not in drop or _has_field(lines, "ref"):
         return lines, False
@@ -575,7 +615,10 @@ def _open_store_parent(root: Path, rel: str) -> tuple[int, str]:
     parts = [part for part in rel.split("/") if part]
     if not parts or any(part in (".", "..") for part in parts):
         raise RefError(f"path escapes store root: {rel}")
-    dirfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        dirfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise RefError(f"refusing to follow symlink {root}") from e
     try:
         for part in parts[:-1]:
             try:
@@ -623,11 +666,41 @@ def _mode_store(root: Path, rel: str) -> int:
 
 
 def _read_store(root: Path, rel: str) -> bytes:
+    data, _mode, _dev, _ino = _read_identity(root, rel)
+    return data
+
+
+def _read_identity(root: Path, rel: str) -> tuple[bytes, int, int, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
-        return _read_dir_file(dirfd, name, rel)
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except OSError as e:
+            raise RefError(f"refusing to read missing page {rel}") from e
+        data = _read_dir_file(dirfd, name, rel)
+        again = os.lstat(name, dir_fd=dirfd)
+        if info.st_dev != again.st_dev or info.st_ino != again.st_ino:
+            raise RefError(f"refusing to read changed page {rel}")
+        return data, stat.S_IMODE(info.st_mode), info.st_dev, info.st_ino
     finally:
         os.close(dirfd)
+
+
+def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
+    try:
+        meta, _body = parse_page(text, version)
+    except FrontmatterError as e:
+        raise RefError(f"cannot parse page frontmatter: {e}") from e
+    rels = meta.get("relates_to")
+    if not isinstance(rels, list):
+        return None
+    for item in rels:
+        if not isinstance(item, dict) or str(item.get("ref") or "").strip():
+            continue
+        path = _norm_path(str(item.get("path") or "").strip())
+        if path in drop:
+            return path
+    return None
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -647,7 +720,10 @@ def _rewrite_dir_file(
     *,
     must_exist: bool,
     mode: int | None = None,
-) -> None:
+    expected: bytes | None = None,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+) -> tuple[int, int]:
     if must_exist:
         try:
             info = os.lstat(name, dir_fd=dirfd)
@@ -674,8 +750,14 @@ def _rewrite_dir_file(
                 raise RefError(f"refusing to rewrite non-regular page {label}")
             if info.st_nlink > 1:
                 raise RefError(f"refusing to rewrite hard-linked page {label}")
+            if expected is not None and _read_dir_file(dirfd, name, label) != expected:
+                raise RefError(f"refusing to rewrite changed page {label}")
+            if expected_dev is not None and (info.st_dev != expected_dev or info.st_ino != expected_ino):
+                raise RefError(f"refusing to rewrite changed page {label}")
         os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
         tmp = ""
+        replaced = os.lstat(name, dir_fd=dirfd)
+        return replaced.st_dev, replaced.st_ino
     finally:
         if tmp:
             try:
@@ -691,10 +773,23 @@ def _rewrite_store(
     *,
     must_exist: bool = True,
     mode: int | None = None,
-) -> None:
+    expected: bytes | None = None,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+) -> tuple[int, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
-        _rewrite_dir_file(dirfd, name, data, rel, must_exist=must_exist, mode=mode)
+        return _rewrite_dir_file(
+            dirfd,
+            name,
+            data,
+            rel,
+            must_exist=must_exist,
+            mode=mode,
+            expected=expected,
+            expected_dev=expected_dev,
+            expected_ino=expected_ino,
+        )
     finally:
         os.close(dirfd)
 
@@ -958,13 +1053,16 @@ def run_prune(
                 raise RefError(problem)
         drop_set = set(drop_rels)
         rewritten: list[str] = []
-        pending: list[tuple[str, str]] = []
+        pending: list[tuple[str, str, bytes, int, int, int]] = []
         summary_final: str | None = None
+        _schema, _schema_err = load_schema(store)
+        version = schema_version(_schema)
         for page in _iter_pages(store):
             rel = _store_rel(store, page.relative_to(store).as_posix())
             if rel in drop_set:
                 continue
-            original = _read_store(store, rel).decode("utf-8")
+            original_bytes, mode, dev, ino = _read_identity(store, rel)
+            original = original_bytes.decode("utf-8")
             updated, fm_changes = rewrite_relates_to(
                 original,
                 drop_set,
@@ -989,18 +1087,36 @@ def run_prune(
                 ]
                 updated = append_ref_edges(updated, edges)
                 summary_final = updated
+            leftover = _remaining_drop_edge(updated, drop_set, version)
+            if leftover:
+                raise RefError(f"unsupported relates_to scalar on {rel} still names {leftover}")
             if updated != original:
-                pending.append((rel, updated))
+                before = set(concept_page_errors(store, page, text=original))
+                introduced = [
+                    item for item in concept_page_errors(store, page, text=updated) if item not in before
+                ]
+                if introduced:
+                    raise RefError(f"{rel} would fail compile: {introduced[0]}")
+                pending.append((rel, updated, original_bytes, mode, dev, ino))
         if summary_final is None:
             raise RefError(f"summary is not an eligible tip page: {summary_rel}")
         transformed = concept_page_errors(store, summary_path, text=summary_final)
         if transformed:
             raise RefError(f"summary would fail compile: {transformed[0]}")
-        snapshots = [(rel, _read_store(store, rel), _mode_store(store, rel)) for rel, _ in pending]
         removed: list[tuple[str, bytes, int]] = []
+        written: list[tuple[str, bytes, int, int, int, bytes]] = []
         try:
-            for rel, updated in pending:
-                _rewrite_store(store, rel, updated.encode("utf-8"))
+            for rel, updated, original_bytes, _mode, dev, ino in pending:
+                new_bytes = updated.encode("utf-8")
+                new_dev, new_ino = _rewrite_store(
+                    store,
+                    rel,
+                    new_bytes,
+                    expected=original_bytes,
+                    expected_dev=dev,
+                    expected_ino=ino,
+                )
+                written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
             for rel in drop_rels:
                 gitpath = _git_path(store, repo, rel)
                 _code, expected, _err = run_git(
@@ -1011,11 +1127,23 @@ def run_prune(
                     raise RefError(f"ref {sha} does not contain {rel}")
                 data, mode = _unlink_store(store, rel, repo, expected)
                 removed.append((rel, data, mode))
-        except Exception:
-            for rel, original, mode in snapshots:
-                _rewrite_store(store, rel, original, must_exist=False, mode=mode)
-            for rel, data, mode in removed:
-                _rewrite_store(store, rel, data, must_exist=False, mode=mode)
+        except Exception as exc:
+            try:
+                for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
+                    _rewrite_store(
+                        store,
+                        rel,
+                        original_bytes,
+                        must_exist=True,
+                        mode=mode,
+                        expected=new_bytes,
+                        expected_dev=new_dev,
+                        expected_ino=new_ino,
+                    )
+                for rel, data, mode in removed:
+                    _rewrite_store(store, rel, data, must_exist=False, mode=mode)
+            except Exception as restore_exc:
+                raise restore_exc from exc
             raise
     except RefError as e:
         return _fail(as_json, str(e))
