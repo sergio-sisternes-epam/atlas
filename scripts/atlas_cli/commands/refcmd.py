@@ -610,6 +610,14 @@ def _read_dir_file(dirfd: int, name: str, label: str) -> bytes:
         os.close(fd)
 
 
+def _mode_store(root: Path, rel: str) -> int:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        return stat.S_IMODE(os.lstat(name, dir_fd=dirfd).st_mode)
+    finally:
+        os.close(dirfd)
+
+
 def _read_store(root: Path, rel: str) -> bytes:
     dirfd, name = _open_store_parent(root, rel)
     try:
@@ -618,7 +626,15 @@ def _read_store(root: Path, rel: str) -> bytes:
         os.close(dirfd)
 
 
-def _rewrite_dir_file(dirfd: int, name: str, data: bytes, label: str, *, must_exist: bool) -> None:
+def _rewrite_dir_file(
+    dirfd: int,
+    name: str,
+    data: bytes,
+    label: str,
+    *,
+    must_exist: bool,
+    mode: int | None = None,
+) -> None:
     if must_exist:
         try:
             info = os.lstat(name, dir_fd=dirfd)
@@ -628,9 +644,12 @@ def _rewrite_dir_file(dirfd: int, name: str, data: bytes, label: str, *, must_ex
             raise RefError(f"refusing to rewrite non-regular page {label}")
         if info.st_nlink > 1:
             raise RefError(f"refusing to rewrite hard-linked page {label}")
+        mode = stat.S_IMODE(info.st_mode)
     tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
     try:
+        if mode is not None:
+            os.fchmod(fd, mode)
         os.write(fd, data)
         os.fsync(fd)
     finally:
@@ -652,26 +671,52 @@ def _rewrite_dir_file(dirfd: int, name: str, data: bytes, label: str, *, must_ex
                 pass
 
 
-def _rewrite_store(root: Path, rel: str, data: bytes, *, must_exist: bool = True) -> None:
+def _rewrite_store(
+    root: Path,
+    rel: str,
+    data: bytes,
+    *,
+    must_exist: bool = True,
+    mode: int | None = None,
+) -> None:
     dirfd, name = _open_store_parent(root, rel)
     try:
-        _rewrite_dir_file(dirfd, name, data, rel, must_exist=must_exist)
+        _rewrite_dir_file(dirfd, name, data, rel, must_exist=must_exist, mode=mode)
     finally:
         os.close(dirfd)
 
 
-def _unlink_store(root: Path, rel: str) -> bytes | None:
+def _hash_bytes(repo: Path, data: bytes) -> str:
+    hashed = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        cwd=repo,
+        input=data,
+        capture_output=True,
+        check=False,
+    )
+    out = hashed.stdout.decode("utf-8", errors="replace").strip() if hashed.returncode == 0 else ""
+    if hashed.returncode != 0 or not out:
+        raise RefError("cannot hash worktree page")
+    return out
+
+
+def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
         try:
             info = os.lstat(name, dir_fd=dirfd)
-        except FileNotFoundError:
-            return None
+        except FileNotFoundError as e:
+            raise RefError(f"refusing to drop absent tip page {rel}") from e
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise RefError(f"refusing to delete non-file {rel}")
         data = _read_dir_file(dirfd, name, rel)
+        if _hash_bytes(repo, data) != expected:
+            raise RefError(
+                f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+            )
+        mode = stat.S_IMODE(info.st_mode)
         os.unlink(name, dir_fd=dirfd)
-        return data
+        return data, mode
     finally:
         os.close(dirfd)
 
@@ -725,9 +770,13 @@ def _require_summary_page(store: Path, rel: str, path: Path) -> None:
     if Path(rel).name in RESERVED:
         raise RefError(f"summary is not an eligible tip page: {rel}")
     walked = {page.relative_to(store).as_posix() for page in _iter_pages(store)}
-    if rel not in walked or not path.is_file():
+    if rel not in walked:
         raise RefError(f"summary is not an eligible tip page: {rel}")
-    problems = concept_page_errors(store, path)
+    try:
+        raw = _read_store(store, rel)
+    except RefError as e:
+        raise RefError(f"summary is not an eligible tip page: {rel}") from e
+    problems = concept_page_errors(store, path, text=raw.decode("utf-8", errors="replace"))
     if problems:
         raise RefError(f"summary would fail compile: {problems[0]}")
     _require_summary_index(store, rel)
@@ -761,6 +810,10 @@ def _replace_nofollow(path: Path, data: bytes) -> None:
     try:
         os.write(fd, data)
         os.fsync(fd)
+        try:
+            os.fchmod(fd, stat.S_IMODE(path.lstat().st_mode))
+        except OSError:
+            pass
         os.close(fd)
         fd = -1
         os.replace(tmp, path)
@@ -801,7 +854,7 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
         data = _read_store(root, store_rel)
     except RefError as e:
         if "missing page" in str(e):
-            return f"{store_rel} is absent on tip; history blob is kept at {sha}"
+            raise RefError(f"refusing to drop absent tip page {store_rel}") from e
         raise
     if not _blob_exists(repo, _resolve_commit(repo, "HEAD"), gitpath):
         raise RefError(f"refusing to delete untracked {store_rel}")
@@ -923,20 +976,26 @@ def run_prune(
                 updated = append_ref_edges(updated, edges)
             if updated != original:
                 pending.append((rel, updated))
-        snapshots = [(rel, _read_store(store, rel)) for rel, _ in pending]
-        removed: list[tuple[str, bytes]] = []
+        snapshots = [(rel, _read_store(store, rel), _mode_store(store, rel)) for rel, _ in pending]
+        removed: list[tuple[str, bytes, int]] = []
         try:
             for rel, updated in pending:
                 _rewrite_store(store, rel, updated.encode("utf-8"))
             for rel in drop_rels:
-                data = _unlink_store(store, rel)
-                if data is not None:
-                    removed.append((rel, data))
+                gitpath = _git_path(store, repo, rel)
+                _code, expected, _err = run_git(
+                    ["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"],
+                    cwd=repo,
+                )
+                if _code != 0 or not expected:
+                    raise RefError(f"ref {sha} does not contain {rel}")
+                data, mode = _unlink_store(store, rel, repo, expected)
+                removed.append((rel, data, mode))
         except Exception:
-            for rel, original in snapshots:
-                _rewrite_store(store, rel, original, must_exist=False)
-            for rel, data in removed:
-                _rewrite_store(store, rel, data, must_exist=False)
+            for rel, original, mode in snapshots:
+                _rewrite_store(store, rel, original, must_exist=False, mode=mode)
+            for rel, data, mode in removed:
+                _rewrite_store(store, rel, data, must_exist=False, mode=mode)
             raise
     except RefError as e:
         return _fail(as_json, str(e))

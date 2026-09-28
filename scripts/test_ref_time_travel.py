@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from atlas_cli.commands.refcmd import RefError, _rewrite_regular, _rewrite_store  # noqa: E402
+from atlas_cli.commands.refcmd import RefError, _rewrite_regular, _rewrite_store, _unlink_store  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -1305,6 +1306,106 @@ def main() -> int:
                 failures.append(f"fifo neighbor blocked prune: {fifo_run.stdout} {fifo_run.stderr}")
             else:
                 print("[PASS] prune ignores a non-regular markdown name")
+
+        absent = tmp / "absent-drop"
+        absent_init = run(["init", "--root", str(absent), "--json"])
+        if absent_init.returncode != 0:
+            failures.append(f"absent store init failed: {absent_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(absent, ["init", "-b", "main"])
+            (absent / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (absent / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(absent, ["add", "."])
+            git(absent, ["commit", "-m", "present"])
+            old = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=absent,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            (absent / "dead.md").unlink()
+            git(absent, ["add", "dead.md"])
+            git(absent, ["commit", "-m", "remove dead"])
+            absent_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    old,
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(absent),
+                    "--json",
+                ]
+            )
+            summary_text = (absent / "summary.md").read_text(encoding="utf-8")
+            if absent_run.returncode == 0 or "absent" not in absent_run.stdout or "ref:" in summary_text:
+                failures.append(f"absent drop should be refused before rewrite: {absent_run.stdout}\n{summary_text}")
+            else:
+                print("[PASS] prune refuses an absent tip drop")
+
+        modes = tmp / "modes"
+        modes_init = run(["init", "--root", str(modes), "--json"])
+        if modes_init.returncode != 0:
+            failures.append(f"mode store init failed: {modes_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(modes, ["init", "-b", "main"])
+            (modes / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (modes / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (modes / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            os.chmod(modes / "living.md", 0o640)
+            git(modes, ["add", "."])
+            git(modes, ["commit", "-m", "modes"])
+            mode_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(modes),
+                    "--json",
+                ]
+            )
+            kept = stat.S_IMODE((modes / "living.md").stat().st_mode)
+            if mode_run.returncode != 0 or kept != 0o640:
+                failures.append(f"rewrite changed page mode {oct(kept)}: {mode_run.stdout}")
+            else:
+                print("[PASS] prune keeps rewritten page mode")
+
+        mismatch = tmp / "mismatch"
+        mismatch.mkdir()
+        git(mismatch, ["init", "-b", "main"])
+        (mismatch / "dead.md").write_text("same\n", encoding="utf-8")
+        git(mismatch, ["add", "dead.md"])
+        git(mismatch, ["commit", "-m", "blob"])
+        try:
+            _unlink_store(mismatch, "dead.md", mismatch, "0" * 40)
+        except RefError:
+            refused_hash = True
+        else:
+            refused_hash = False
+        if not refused_hash or not (mismatch / "dead.md").is_file():
+            failures.append("unlink should recheck the blob before delete")
+        else:
+            print("[PASS] unlink refuses bytes that no longer match the blob")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")

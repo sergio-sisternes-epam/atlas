@@ -197,11 +197,14 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     return _jsonish(data), body
 
 
-def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def parse_page(text: str, schema_version: str = "1.0") -> tuple[dict, str]:
     if str(schema_version).strip() == "2.0":
         return split_fm_v2(text)
     return split_fm(text)
+
+
+def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
+    return parse_page(path.read_text(encoding="utf-8", errors="replace"), schema_version)
 
 
 def leftover_prose(body: str) -> str:
