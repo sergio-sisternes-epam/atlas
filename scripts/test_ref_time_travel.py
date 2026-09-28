@@ -1733,6 +1733,137 @@ def main() -> int:
         else:
             print("[PASS] page rewrite replaces a regular file")
 
+        hist = tmp / "hist-link"
+        hist_init = run(["init", "--root", str(hist), "--json"])
+        if hist_init.returncode != 0:
+            failures.append(f"historical symlink store init failed: {hist_init.stdout}")
+        else:
+            git(hist, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (hist / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (hist / "dead.md").symlink_to("summary.md")
+            git(hist, ["add", "."])
+            git(hist, ["commit", "-m", "symlink page"])
+            (hist / "dead.md").unlink()
+            (hist / "dead.md").write_bytes(b"summary.md")
+            show_link = run(["ref", "show", "dead.md", "--ref", "HEAD", "--root", str(hist), "--json"])
+            prune_link = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(hist),
+                    "--json",
+                ]
+            )
+            if (
+                show_link.returncode == 0
+                or "non-regular" not in show_link.stdout
+                or '"ok": true' in show_link.stdout
+                or prune_link.returncode == 0
+                or "non-regular" not in prune_link.stdout
+                or not (hist / "dead.md").is_file()
+                or (hist / "dead.md").read_bytes() != b"summary.md"
+            ):
+                failures.append(
+                    f"historical symlink should be refused: {show_link.stdout} {prune_link.stdout}"
+                )
+            else:
+                print("[PASS] show and prune refuse a historical symlink blob")
+
+        bad_utf = tmp / "bad-utf"
+        bad_init = run(["init", "--root", str(bad_utf), "--json"])
+        if bad_init.returncode != 0:
+            failures.append(f"non-utf-8 store init failed: {bad_init.stdout}")
+        else:
+            git(bad_utf, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (bad_utf / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (bad_utf / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(bad_utf, ["add", "."])
+            git(bad_utf, ["commit", "-m", "utf pages"])
+            (bad_utf / "living.md").write_bytes(b"\xff\xfe not utf-8\n")
+            bad_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(bad_utf),
+                    "--json",
+                ]
+            )
+            if (
+                bad_run.returncode == 0
+                or "non-utf-8" not in bad_run.stdout
+                or not (bad_utf / "dead.md").is_file()
+            ):
+                failures.append(f"non-utf-8 page should block prune: {bad_run.stdout} {bad_run.stderr}")
+            else:
+                print("[PASS] prune refuses a non-utf-8 page before deletion")
+
+        restore = tmp / "restore"
+        restore.mkdir()
+        _rewrite_store(restore, "gone.md", b"back\n", must_exist=False, mode=0o644)
+        restored = restore / "gone.md"
+        leftover = list(restore.glob(".atlas-prune-*"))
+        if (
+            restored.read_bytes() != b"back\n"
+            or restored.is_symlink()
+            or stat.S_IMODE(restored.stat().st_mode) != 0o644
+            or restored.stat().st_nlink != 1
+            or leftover
+        ):
+            failures.append(f"absent rollback did not restore a regular page: {leftover}")
+        else:
+            print("[PASS] rollback creates an absent page without a temp link")
+        foreign = restore / "foreign.md"
+        foreign.write_bytes(b"other\n")
+        foreign.chmod(0o644)
+        try:
+            _rewrite_store(restore, "foreign.md", b"back\n", must_exist=False, mode=0o644)
+        except RefError:
+            if foreign.read_bytes() != b"other\n":
+                failures.append("rollback replaced a foreign page")
+            else:
+                print("[PASS] rollback refuses to replace a foreign page")
+        else:
+            failures.append("rollback should refuse a foreign page")
+        same = restore / "same.md"
+        same.write_bytes(b"back\n")
+        same.chmod(0o644)
+        _rewrite_store(restore, "same.md", b"back\n", must_exist=False, mode=0o644)
+        if same.read_bytes() != b"back\n" or same.stat().st_nlink != 1:
+            failures.append("matching rollback changed an already restored page")
+        else:
+            print("[PASS] rollback accepts an already restored page")
+        link = restore / "link.md"
+        link.symlink_to("foreign.md")
+        try:
+            _rewrite_store(restore, "link.md", b"back\n", must_exist=False, mode=0o644)
+        except RefError:
+            if not link.is_symlink() or link.read_bytes() != b"other\n":
+                failures.append("rollback replaced a symlink")
+            else:
+                print("[PASS] rollback refuses to replace a symlink")
+        else:
+            failures.append("rollback should refuse a symlink")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1

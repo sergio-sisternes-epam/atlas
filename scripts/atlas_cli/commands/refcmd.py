@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
 
 SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
+_REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 TOP_KEY = re.compile(r"^[A-Za-z_][\w-]*:")
 ITEM_START = re.compile(r"^\s*-\s+")
@@ -97,12 +99,40 @@ def _resolve_commit(repo: Path, rev: str) -> str:
     return out
 
 
+def _historical_mode(repo: Path, sha: str, gitpath: str) -> str | None:
+    """Return the tree mode for one path. Symlinks are blobs, so type is not enough."""
+    code, out, err = run_git(
+        ["ls-tree", "--end-of-options", sha, "--", gitpath],
+        cwd=repo,
+    )
+    if code != 0:
+        raise RefError(err or f"cannot read tree entry {gitpath} at {sha}")
+    lines = [line for line in out.splitlines() if line]
+    if len(lines) != 1 or " blob " not in lines[0]:
+        return None
+    return lines[0].split(" ", 1)[0]
+
+
 def _blob_exists(repo: Path, sha: str, gitpath: str) -> bool:
-    code, out, _ = run_git(["cat-file", "-t", f"{sha}:{gitpath}"], cwd=repo)
-    return code == 0 and out == "blob"
+    return _historical_mode(repo, sha, gitpath) in _REGULAR_BLOB_MODES
+
+
+def _require_regular_blob(repo: Path, sha: str, gitpath: str, label: str, missing: str) -> None:
+    mode = _historical_mode(repo, sha, gitpath)
+    if mode is None:
+        raise RefError(missing)
+    if mode not in _REGULAR_BLOB_MODES:
+        raise RefError(f"refusing non-regular historical blob {label} at {sha}")
 
 
 def _show_bytes(repo: Path, sha: str, gitpath: str) -> bytes:
+    _require_regular_blob(
+        repo,
+        sha,
+        gitpath,
+        gitpath,
+        missing=f"missing blob {gitpath} at {sha}",
+    )
     proc = subprocess.run(
         ["git", "show", "--end-of-options", f"{sha}:{gitpath}"],
         cwd=repo,
@@ -703,6 +733,24 @@ def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
     return None
 
 
+def _matching_restore(dirfd: int, name: str, data: bytes, label: str, mode: int) -> tuple[int, int]:
+    """Accept an existing entry only when it is already the removed page."""
+    try:
+        info = os.lstat(name, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to restore over changed page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != mode:
+        raise RefError(f"refusing to restore over existing page {label}")
+    try:
+        current = _read_dir_file(dirfd, name, label)
+    except RefError as e:
+        raise RefError(f"refusing to restore over existing page {label}") from e
+    again = os.lstat(name, dir_fd=dirfd)
+    if info.st_dev != again.st_dev or info.st_ino != again.st_ino or current != data:
+        raise RefError(f"refusing to restore over existing page {label}")
+    return again.st_dev, again.st_ino
+
+
 def _write_all(fd: int, data: bytes) -> None:
     view = memoryview(data)
     while len(view):
@@ -754,7 +802,30 @@ def _rewrite_dir_file(
                 raise RefError(f"refusing to rewrite changed page {label}")
             if expected_dev is not None and (info.st_dev != expected_dev or info.st_ino != expected_ino):
                 raise RefError(f"refusing to rewrite changed page {label}")
-        os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+        else:
+            if mode is None:
+                raise RefError(f"refusing to restore {label} without a mode")
+            try:
+                os.link(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd, follow_symlinks=False)
+            except FileExistsError:
+                replaced = _matching_restore(dirfd, name, data, label, mode)
+                return replaced
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise RefError(f"refusing to restore {label}") from e
+                replaced = _matching_restore(dirfd, name, data, label, mode)
+                return replaced
+            written = os.lstat(tmp, dir_fd=dirfd)
+            replaced_info = os.lstat(name, dir_fd=dirfd)
+            if (
+                stat.S_ISLNK(replaced_info.st_mode)
+                or not stat.S_ISREG(replaced_info.st_mode)
+                or replaced_info.st_dev != written.st_dev
+                or replaced_info.st_ino != written.st_ino
+            ):
+                raise RefError(f"refusing to restore replaced page {label}")
+            return replaced_info.st_dev, replaced_info.st_ino
         tmp = ""
         replaced = os.lstat(name, dir_fd=dirfd)
         return replaced.st_dev, replaced.st_ino
@@ -989,8 +1060,13 @@ def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
         gitpath = _git_path(store, repo, rel)
-        if not _blob_exists(repo, sha, gitpath):
-            raise RefError(f"missing blob {rel} at {sha}")
+        _require_regular_blob(
+            repo,
+            sha,
+            gitpath,
+            rel,
+            missing=f"missing blob {rel} at {sha}",
+        )
         payload = _show_bytes(repo, sha, gitpath)
     except RefError as e:
         return _fail(as_json, str(e))
@@ -1042,8 +1118,13 @@ def run_prune(
         warnings: list[str] = []
         for rel in drop_rels:
             gitpath = _git_path(store, repo, rel)
-            if not _blob_exists(repo, sha, gitpath):
-                raise RefError(f"ref {sha} does not contain {rel}")
+            _require_regular_blob(
+                repo,
+                sha,
+                gitpath,
+                rel,
+                missing=f"ref {sha} does not contain {rel}",
+            )
             warning = _worktree_warning(repo, store, rel, sha, gitpath)
             if warning:
                 warnings.append(warning)
@@ -1062,7 +1143,10 @@ def run_prune(
             if rel in drop_set:
                 continue
             original_bytes, mode, dev, ino = _read_identity(store, rel)
-            original = original_bytes.decode("utf-8")
+            try:
+                original = original_bytes.decode("utf-8")
+            except UnicodeDecodeError as e:
+                raise RefError(f"refusing non-utf-8 page {rel}") from e
             updated, fm_changes = rewrite_relates_to(
                 original,
                 drop_set,
