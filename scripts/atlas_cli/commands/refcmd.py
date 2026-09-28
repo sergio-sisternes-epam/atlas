@@ -12,7 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..core.frontmatter import FrontmatterError, parse_page
+from ..core.frontmatter import FrontmatterError, load_yaml_value, parse_page
 from ..core.gitops import git_root, run_git
 from ..core.overlay import merge_overlays
 from ..core.recall_config import schema_version
@@ -227,12 +227,8 @@ def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
     if not lines or not _needs_yaml_item(lines):
         return lines
     try:
-        import yaml
-    except ImportError as e:
-        raise RefError("PyYAML is required to parse relates_to") from e
-    try:
-        value = yaml.safe_load("\n".join(lines))
-    except yaml.YAMLError as e:
+        value = load_yaml_value("\n".join(lines))
+    except FrontmatterError as e:
         raise RefError(f"cannot parse relates_to item: {e}") from e
     if isinstance(value, list) and len(value) == 1:
         value = value[0]
@@ -332,12 +328,8 @@ def _yaml_scalar(value: str) -> str:
 
 def _parse_relation_value(blob: str) -> list[dict[str, str]]:
     try:
-        import yaml
-    except ImportError as e:
-        raise RefError("PyYAML is required to parse inline relates_to") from e
-    try:
-        value = yaml.safe_load(blob)
-    except yaml.YAMLError as e:
+        value = load_yaml_value(blob)
+    except FrontmatterError as e:
         raise RefError(f"cannot parse relates_to: {e}") from e
     if value is None:
         value = []

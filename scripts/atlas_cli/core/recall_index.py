@@ -11,11 +11,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .projection import ProjectedPage, cheap_fingerprint, project_store
+from .projection import ProjectedPage, _edges_from_meta, cheap_fingerprint, project_store
 from .recall_config import fts5_available, recall_enabled
 
 INDEX_DIR = ".atlas-index"
 CURRENT_NAME = "current.json"
+INDEX_FORMAT = 2
 
 
 class IndexError_(ValueError):
@@ -97,6 +98,7 @@ def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
             inserted += 1
         conn.execute("INSERT INTO meta VALUES ('corpus_digest', ?)", (digest,))
         conn.execute("INSERT INTO meta VALUES ('page_count', ?)", (str(inserted),))
+        conn.execute("INSERT INTO meta VALUES ('index_format', ?)", (str(INDEX_FORMAT),))
         conn.commit()
     finally:
         conn.close()
@@ -120,7 +122,12 @@ def publish_generation(
         return {"published": False, "reason": "incomplete"}
     digest = projection["corpus_digest"]
     cur = load_current(store)
-    if cur and cur.get("complete") and cur.get("corpus_digest") == digest:
+    if (
+        cur
+        and cur.get("complete")
+        and cur.get("corpus_digest") == digest
+        and cur.get("index_format") == INDEX_FORMAT
+    ):
         db = _pointer_db(store, cur.get("db"))
         if db is not None:
             pointer = {
@@ -130,6 +137,7 @@ def publish_generation(
                 "db": cur.get("db"),
                 "complete": True,
                 "count": cur.get("count"),
+                "index_format": INDEX_FORMAT,
             }
             ptr_tmp = current_pointer(store).with_suffix(".json.tmp")
             ptr_tmp.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +169,7 @@ def publish_generation(
         "db": str(db_path.relative_to(store)),
         "complete": True,
         "count": inserted,
+        "index_format": INDEX_FORMAT,
     }
     ptr_tmp = current_pointer(store).with_suffix(".json.tmp")
     ptr_tmp.parent.mkdir(parents=True, exist_ok=True)
@@ -188,16 +197,20 @@ def _pointer_db(store: Path, raw: object) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _current_format(cur: dict[str, Any] | None) -> bool:
+    return bool(cur) and cur.get("index_format") == INDEX_FORMAT
+
+
 def matching_generation(store: Path, digest: str) -> Path | None:
     cur = load_current(store)
-    if not cur or cur.get("corpus_digest") != digest or not cur.get("complete"):
+    if not _current_format(cur) or cur.get("corpus_digest") != digest or not cur.get("complete"):
         return None
     return _pointer_db(store, cur.get("db"))
 
 
 def matching_fast_path(store: Path, schema: dict[str, Any] | None) -> Path | None:
     cur = load_current(store)
-    if not cur or not cur.get("complete") or not cur.get("cheap_fingerprint"):
+    if not _current_format(cur) or not cur.get("complete") or not cur.get("cheap_fingerprint"):
         return None
     if cur.get("cheap_fingerprint") != cheap_fingerprint(store, schema):
         return None
@@ -226,6 +239,7 @@ def pages_from_db(db_path: Path) -> list[ProjectedPage]:
             meta = {}
         if not isinstance(edges, list):
             edges = []
+        edges = _edges_from_meta(meta)
         pages.append(
             ProjectedPage(
                 page_id=str(row[0]),

@@ -118,22 +118,10 @@ def _jsonish(value: Any, depth: int = 0) -> Any:
     raise FrontmatterError(f"unsupported frontmatter value type {type(value).__name__}")
 
 
-def split_fm_v2(text: str) -> tuple[dict, str]:
-    """Safe YAML frontmatter for SCHEMA 2.0 stores."""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, text
-    block = text[3:end].strip("\n")
-    body = text[end + 4 :]
-    if len(block.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
-        raise FrontmatterError("frontmatter exceeds size limit")
-    try:
-        import yaml
-        from yaml.nodes import MappingNode
-    except ImportError as e:
-        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+def schema_v2_loader():
+    """Safe YAML loader that keeps YAML 1.1 booleans and timestamps as strings."""
+    import yaml
+    from yaml.nodes import MappingNode
 
     class UniqueSafeLoader(yaml.SafeLoader):
         pass
@@ -171,6 +159,37 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     UniqueSafeLoader.add_constructor(
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
     )
+    return UniqueSafeLoader
+
+
+def load_yaml_value(text: str) -> Any:
+    """Parse one YAML value with the SCHEMA 2.0 scalar rules."""
+    try:
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    try:
+        return yaml.load(text, Loader=schema_v2_loader())
+    except yaml.YAMLError as e:
+        raise FrontmatterError(f"invalid YAML: {e}") from e
+
+
+def split_fm_v2(text: str) -> tuple[dict, str]:
+    """Safe YAML frontmatter for SCHEMA 2.0 stores."""
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}, text
+    block = text[3:end].strip("\n")
+    body = text[end + 4 :]
+    if len(block.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
+        raise FrontmatterError("frontmatter exceeds size limit")
+    try:
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    UniqueSafeLoader = schema_v2_loader()
     try:
         count = 0
         for event in yaml.parse(block, Loader=yaml.SafeLoader):

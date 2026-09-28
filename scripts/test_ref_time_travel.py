@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from atlas_cli.commands.refcmd import (  # noqa: E402
     RefError,
     _open_store_parent,
+    _parse_relation_value,
     _rewrite_regular,
     _rewrite_store,
     _unlink_store,
@@ -26,6 +27,8 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
     _write_all,
     append_ref_edges,
 )
+from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: E402
+from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -1863,6 +1866,96 @@ def main() -> int:
                 print("[PASS] rollback refuses to replace a symlink")
         else:
             failures.append("rollback should refuse a symlink")
+
+        try:
+            yes_kind = _parse_relation_value("[{path: dead.md, kind: yes}]")
+        except RefError as exc:
+            failures.append(f"schema 2.0 kind yes should stay a string: {exc}")
+        else:
+            if yes_kind != [{"path": "dead.md", "kind": "yes"}]:
+                failures.append(f"schema 2.0 kind yes was coerced: {yes_kind}")
+            else:
+                print("[PASS] relation parser keeps YAML 1.1 yes as a string")
+
+        yes_store = tmp / "yes-kind"
+        yes_init = run(["init", "--root", str(yes_store), "--schema-version", "2.0", "--json"])
+        if yes_init.returncode != 0:
+            failures.append(f"yes-kind store init failed: {yes_init.stdout}")
+        else:
+            git(yes_store, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (yes_store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (yes_store / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (yes_store / "living.md").write_text(
+                page("Living", "relates_to: [{path: dead.md, kind: yes}]\n", prose),
+                encoding="utf-8",
+            )
+            git(yes_store, ["add", "."])
+            git(yes_store, ["commit", "-m", "yes kind"])
+            yes_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(yes_store),
+                    "--json",
+                ]
+            )
+            living = (yes_store / "living.md").read_text(encoding="utf-8")
+            if yes_run.returncode != 0 or "kind: yes" not in living or "path: summary.md" not in living:
+                failures.append(f"kind yes should be retargeted: {yes_run.stdout}\n{living}")
+            else:
+                print("[PASS] prune retargets a schema 2.0 kind yes relation")
+
+        stale = tmp / "stale-index"
+        stale.mkdir()
+        (stale / "living.md").write_text("tip\n", encoding="utf-8")
+        poisoned = ProjectedPage(
+            page_id="living.md",
+            path="living.md",
+            role="concept",
+            digest="d",
+            meta={"title": "Living", "relates_to": [{"path": "dead.md", "kind": "related", "ref": "abc"}]},
+            body="tip",
+            title="Living",
+            description="",
+            edges=[{"target": "dead.md", "kind": "related", "direction": "outgoing"}],
+        )
+        db_dir = stale / ".atlas-index" / "recall" / "generations" / "old"
+        db_dir.mkdir(parents=True)
+        db = db_dir / "projection.sqlite"
+        recall_index._write_sqlite(db, [poisoned], "digest")
+        loaded = recall_index.pages_from_db(db)
+        if not loaded or loaded[0].edges:
+            failures.append(f"persisted history edge should not load: {loaded[0].edges if loaded else loaded}")
+        else:
+            print("[PASS] recall load drops a persisted history edge")
+        pointer = {
+            "complete": True,
+            "corpus_digest": "digest",
+            "cheap_fingerprint": cheap_fingerprint(stale, None),
+            "db": ".atlas-index/recall/generations/old/projection.sqlite",
+        }
+        current = stale / ".atlas-index" / "recall" / "current.json"
+        current.write_text(json.dumps(pointer), encoding="utf-8")
+        if recall_index.matching_fast_path(stale, None) is not None:
+            failures.append("old recall generation should not take the fast path")
+        else:
+            print("[PASS] fast path rejects a pre-fence recall generation")
+        pointer["index_format"] = recall_index.INDEX_FORMAT
+        current.write_text(json.dumps(pointer), encoding="utf-8")
+        if recall_index.matching_fast_path(stale, None) != db.resolve():
+            failures.append("current recall generation should still take the fast path")
+        else:
+            print("[PASS] fast path accepts the current recall format")
 
         if failures:
             print("\n" + "\n".join(failures))
