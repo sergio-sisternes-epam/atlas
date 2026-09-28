@@ -891,6 +891,23 @@ def _restore_displaced(dirfd: int, name: str, tmp: str, label: str) -> None:
     raise RefError(f"refusing to drop replaced page {label}; displaced file left at {tmp}")
 
 
+def _restore_failed_unlink(dirfd: int, name: str, tmp: str, label: str, exc: OSError) -> None:
+    """Put the checked page back when delete fails, so it is not stranded under a temp name."""
+    try:
+        os.lstat(name, dir_fd=dirfd)
+    except FileNotFoundError:
+        try:
+            os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+        except OSError as restore_exc:
+            raise RefError(
+                f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
+            ) from restore_exc
+        raise RefError(f"refusing to drop {label}; deletion failed") from exc
+    raise RefError(
+        f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
+    ) from exc
+
+
 def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
@@ -928,7 +945,10 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")
-            os.unlink(tmp, dir_fd=dirfd)
+            try:
+                os.unlink(tmp, dir_fd=dirfd)
+            except OSError as exc:
+                _restore_failed_unlink(dirfd, name, tmp, rel, exc)
             return data, mode
         finally:
             os.close(fd)

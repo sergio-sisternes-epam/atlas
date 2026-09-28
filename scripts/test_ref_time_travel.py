@@ -1464,6 +1464,46 @@ def main() -> int:
         else:
             print("[PASS] unlink refuses a page replaced before delete")
 
+        failed_delete = tmp / "failed-delete"
+        failed_delete.mkdir()
+        git(failed_delete, ["init", "-b", "main"])
+        (failed_delete / "dead.md").write_text("same\n", encoding="utf-8")
+        git(failed_delete, ["add", "dead.md"])
+        git(failed_delete, ["commit", "-m", "blob"])
+        delete_blob = subprocess.run(
+            ["git", "rev-parse", "HEAD:dead.md"],
+            cwd=failed_delete,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+        real_unlink = os.unlink
+
+        def failing_unlink(path, *args, **kwargs):
+            if str(path).startswith(".atlas-prune-drop-"):
+                raise OSError("injected unlink failure")
+            return real_unlink(path, *args, **kwargs)
+
+        os.unlink = failing_unlink
+        try:
+            _unlink_store(failed_delete, "dead.md", failed_delete, delete_blob)
+        except RefError as exc:
+            refused_delete = "deletion failed" in str(exc)
+        else:
+            refused_delete = False
+        finally:
+            os.unlink = real_unlink
+        restored = failed_delete / "dead.md"
+        if (
+            not refused_delete
+            or not restored.is_file()
+            or restored.read_bytes() != b"same\n"
+            or list(failed_delete.glob(".atlas-prune-drop-*"))
+        ):
+            failures.append("failed unlink left the page under a hidden temp name")
+        else:
+            print("[PASS] failed unlink restores the page before raising")
+
         null_body = "This page keeps enough prose that compile does not treat it as a link list."
         for label, scalar in (("null", "null"), ("tilde", "~")):
             empty_store = tmp / f"empty-{label}"
