@@ -44,10 +44,17 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
             continue
         # strip optional title
         target = target.split()[0].strip("\"'")
-        cand = (parent / target).resolve()
+        path_part = target
+        for sep in ("#", "?"):
+            idx = path_part.find(sep)
+            if idx != -1:
+                path_part = path_part[:idx]
+        if not path_part:
+            continue
+        cand = (parent / path_part).resolve()
         if not cand.exists():
             # try as root-relative
-            cand2 = (root / target.lstrip("/")).resolve()
+            cand2 = (root / path_part.lstrip("/")).resolve()
             if not cand2.exists():
                 issues.append(
                     {
@@ -197,6 +204,31 @@ def _has_kind(meta: dict, kind: str) -> bool:
         if k == want and str(item.get("path") or "").strip():
             return True
     return False
+
+
+def concept_page_errors(root: Path, path: Path) -> list[str]:
+    """Critical compile messages for one concept page. Empty means compile would accept it."""
+    schema, _ = load_schema(root)
+    text = path.read_text(encoding="utf-8", errors="replace")
+    ignores = _ignores_in(text)
+    msgs: list[str] = []
+    try:
+        meta, body = read_page(path, schema_version(schema) if schema else "1.0")
+    except FrontmatterError as e:
+        return [str(e)]
+    if not meta:
+        if "frontmatter" not in ignores:
+            msgs.append("missing frontmatter")
+        return msgs
+    if not str(meta.get("type") or "").strip() and "frontmatter" not in ignores and "okf_compliance" not in ignores:
+        msgs.append("missing type")
+    if is_just_links(body, min_body_chars(schema)) and "not_just_links" not in ignores:
+        msgs.append(f"body has < {min_body_chars(schema)} non-link prose chars (thin / link-list page)")
+    if "internal_links" not in ignores:
+        msgs.extend(issue["msg"] for issue in _check_internal_links(root, path, body))
+    if "relates_to" not in ignores:
+        msgs.extend(issue["msg"] for issue in _check_relates_to(root, path, meta))
+    return msgs
 
 
 def _page_contract_issues(root: Path, path: Path, meta: dict, schema: dict) -> list[dict]:

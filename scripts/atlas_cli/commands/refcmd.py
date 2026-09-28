@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ..core.gitops import git_root, run_git
+from .validate import concept_page_errors
 from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
 
@@ -585,9 +586,9 @@ def _require_summary_page(store: Path, rel: str, path: Path) -> None:
     walked = {page.relative_to(store).as_posix() for page in _iter_pages(store)}
     if rel not in walked or not path.is_file():
         raise RefError(f"summary is not an eligible tip page: {rel}")
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---") or text.find("\n---", 3) == -1:
-        raise RefError("summary page has no frontmatter")
+    problems = concept_page_errors(store, path)
+    if problems:
+        raise RefError(f"summary would fail compile: {problems[0]}")
 
 
 def _require_drop_page(rel: str) -> None:
@@ -613,6 +614,8 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
     path = root / store_rel
     if not path.is_file():
         return f"{store_rel} is absent on tip; history blob is kept at {sha}"
+    if not _blob_exists(repo, _resolve_commit(repo, "HEAD"), gitpath):
+        raise RefError(f"refusing to delete untracked {store_rel}")
     code, out, _ = run_git(["hash-object", "--", str(path)], cwd=repo)
     blob_code, blob, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
     if code != 0 or blob_code != 0 or not blob or out != blob:

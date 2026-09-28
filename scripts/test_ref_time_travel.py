@@ -158,7 +158,11 @@ def main() -> int:
             encoding="utf-8",
         )
         (store / "summary.md").write_text(
-            page("Terminate summary", "relates_to: []\n", "Why the trial ended."),
+            page(
+                "Terminate summary",
+                "relates_to: []\n",
+                "Why the trial ended. The frame closed after the claim failed.",
+            ),
             encoding="utf-8",
         )
         (store / "living.md").write_text(
@@ -341,7 +345,11 @@ def main() -> int:
             encoding="utf-8",
         )
         (store / "summary-link.md").write_text(
-            page("Link summary", "relates_to: []\n", "Summary for symlink case."),
+            page(
+                "Link summary",
+                "relates_to: []\n",
+                "Summary for symlink case. This page is a real concept.",
+            ),
             encoding="utf-8",
         )
         git(store, ["add", "victim.md", "summary-link.md"])
@@ -417,7 +425,7 @@ def main() -> int:
             page(
                 "Again summary",
                 f"relates_to:\n  - path: again.md\n    kind: derived_from\n    ref: {old_sha}\n",
-                "Already has an older history edge.",
+                "Already has an older history edge. The summary stays a concept page.",
             ),
             encoding="utf-8",
         )
@@ -876,8 +884,17 @@ def main() -> int:
                 ]
             )
             living = (reserved / "living.md").read_text(encoding="utf-8")
-            if fragment.returncode != 0 or "[trial](summary.md#why)" not in living or (reserved / "dead.md").exists():
-                failures.append(f"fragment link was not retargeted: {fragment.stdout}\n{living}")
+            fragment_compile = run(["compile", "--root", str(reserved), "--json"])
+            if (
+                fragment.returncode != 0
+                or "[trial](summary.md#why)" not in living
+                or (reserved / "dead.md").exists()
+                or fragment_compile.returncode != 0
+                or '"ok": true' not in fragment_compile.stdout
+            ):
+                failures.append(
+                    f"fragment link was not retargeted: {fragment.stdout}\n{living}\n{fragment_compile.stdout}"
+                )
             else:
                 print("[PASS] prune keeps a fragment when retargeting a markdown link")
 
@@ -944,6 +961,79 @@ def main() -> int:
                 failures.append(f"reserved summary should be refused: {summary_index.stdout}")
             else:
                 print("[PASS] prune refuses a reserved summary page")
+
+        bare = tmp / "bare-summary"
+        bare_init = run(["init", "--root", str(bare), "--json"])
+        if bare_init.returncode != 0:
+            failures.append(f"bare summary store init failed: {bare_init.stdout} {bare_init.stderr}")
+        else:
+            git(bare, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (bare / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (bare / "summary.md").write_text(
+                "---\ntitle: Summary\n---\n\n" + prose + "\n",
+                encoding="utf-8",
+            )
+            git(bare, ["add", "."])
+            git(bare, ["commit", "-m", "bare summary"])
+            refused_summary = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(bare),
+                    "--json",
+                ]
+            )
+            if (
+                refused_summary.returncode == 0
+                or not (bare / "dead.md").is_file()
+                or "compile" not in refused_summary.stdout
+            ):
+                failures.append(f"invalid summary should be refused before delete: {refused_summary.stdout}")
+            else:
+                print("[PASS] prune refuses a summary compile would reject")
+
+            git(bare, ["rm", "dead.md"])
+            git(bare, ["commit", "-m", "remove dead from tip"])
+            old = subprocess.run(
+                ["git", "rev-parse", "HEAD~1"],
+                cwd=bare,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            (bare / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (bare / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            untracked = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    old,
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(bare),
+                    "--json",
+                ]
+            )
+            if untracked.returncode == 0 or not (bare / "dead.md").is_file() or "untracked" not in untracked.stdout:
+                failures.append(f"untracked drop should be refused: {untracked.stdout}")
+            else:
+                print("[PASS] prune refuses an untracked drop")
 
         external = store / "external-ref.md"
         external.write_text(
