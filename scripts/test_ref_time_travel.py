@@ -1418,6 +1418,52 @@ def main() -> int:
         else:
             print("[PASS] unlink refuses bytes that no longer match the blob")
 
+        replaced = tmp / "replaced-inode"
+        replaced.mkdir()
+        git(replaced, ["init", "-b", "main"])
+        (replaced / "dead.md").write_text("same\n", encoding="utf-8")
+        git(replaced, ["add", "dead.md"])
+        git(replaced, ["commit", "-m", "blob"])
+        blob = subprocess.run(
+            ["git", "rev-parse", "HEAD:dead.md"],
+            cwd=replaced,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+        real_rename = os.rename
+        swapped = {"done": False}
+
+        def swapping_rename(src, dst, *args, **kwargs):
+            if not swapped["done"] and src == "dead.md":
+                swapped["done"] = True
+                dirfd = kwargs.get("src_dir_fd")
+                os.unlink(src, dir_fd=dirfd)
+                fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
+                os.write(fd, b"same\n")
+                os.close(fd)
+            return real_rename(src, dst, *args, **kwargs)
+
+        os.rename = swapping_rename
+        try:
+            _unlink_store(replaced, "dead.md", replaced, blob)
+        except RefError:
+            refused_inode = True
+        else:
+            refused_inode = False
+        finally:
+            os.rename = real_rename
+        survivor = replaced / "dead.md"
+        if (
+            not refused_inode
+            or not survivor.is_file()
+            or survivor.read_bytes() != b"same\n"
+            or list(replaced.glob(".atlas-prune-drop-*"))
+        ):
+            failures.append("unlink deleted a page that replaced the checked inode")
+        else:
+            print("[PASS] unlink refuses a page replaced before delete")
+
         null_body = "This page keeps enough prose that compile does not treat it as a link list."
         for label, scalar in (("null", "null"), ("tilde", "~")):
             empty_store = tmp / f"empty-{label}"

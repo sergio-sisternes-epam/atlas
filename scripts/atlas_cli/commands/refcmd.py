@@ -871,23 +871,67 @@ def _hash_bytes(repo: Path, data: bytes) -> str:
     return out
 
 
+def _read_fd(fd: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _restore_displaced(dirfd: int, name: str, tmp: str, label: str) -> None:
+    """Put a renamed replacement back when the checked inode was not the one moved."""
+    try:
+        os.lstat(name, dir_fd=dirfd)
+    except FileNotFoundError:
+        os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+        return
+    raise RefError(f"refusing to drop replaced page {label}; displaced file left at {tmp}")
+
+
 def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
         try:
-            info = os.lstat(name, dir_fd=dirfd)
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
         except FileNotFoundError as e:
             raise RefError(f"refusing to drop absent tip page {rel}") from e
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-            raise RefError(f"refusing to delete non-file {rel}")
-        data = _read_dir_file(dirfd, name, rel)
-        if _hash_bytes(repo, data) != expected:
-            raise RefError(
-                f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
-            )
-        mode = stat.S_IMODE(info.st_mode)
-        os.unlink(name, dir_fd=dirfd)
-        return data, mode
+        except OSError as e:
+            raise RefError(f"refusing to delete non-file {rel}") from e
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise RefError(f"refusing to delete non-file {rel}")
+            os.set_blocking(fd, True)
+            data = _read_fd(fd)
+            again = os.fstat(fd)
+            if again.st_dev != info.st_dev or again.st_ino != info.st_ino:
+                raise RefError(f"refusing to drop replaced page {rel}")
+            if _hash_bytes(repo, data) != expected:
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
+            named = os.lstat(name, dir_fd=dirfd)
+            if (
+                stat.S_ISLNK(named.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or named.st_dev != info.st_dev
+                or named.st_ino != info.st_ino
+            ):
+                raise RefError(f"refusing to drop replaced page {rel}")
+            mode = stat.S_IMODE(info.st_mode)
+            tmp = f".atlas-prune-drop-{os.getpid()}-{os.urandom(4).hex()}.tmp"
+            os.rename(name, tmp, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            moved = os.lstat(tmp, dir_fd=dirfd)
+            if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            os.unlink(tmp, dir_fd=dirfd)
+            return data, mode
+        finally:
+            os.close(fd)
     finally:
         os.close(dirfd)
 
