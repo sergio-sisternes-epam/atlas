@@ -16,7 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from atlas_cli.commands.refcmd import RefError, _rewrite_regular, _rewrite_store, _unlink_store  # noqa: E402
+from atlas_cli.commands.refcmd import (  # noqa: E402
+    RefError,
+    _rewrite_regular,
+    _rewrite_store,
+    _unlink_store,
+    _write_all,
+    append_ref_edges,
+)
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -1406,6 +1413,138 @@ def main() -> int:
             failures.append("unlink should recheck the blob before delete")
         else:
             print("[PASS] unlink refuses bytes that no longer match the blob")
+
+        null_body = "This page keeps enough prose that compile does not treat it as a link list."
+        for label, scalar in (("null", "null"), ("tilde", "~")):
+            empty_store = tmp / f"empty-{label}"
+            empty_init = run(["init", "--root", str(empty_store), "--schema-version", "2.0", "--json"])
+            if empty_init.returncode != 0:
+                failures.append(f"{label} store init failed: {empty_init.stdout}")
+                continue
+            git(empty_store, ["init", "-b", "main"])
+            (empty_store / "dead.md").write_text(page("Dead", "relates_to: []\n", null_body), encoding="utf-8")
+            (empty_store / "summary.md").write_text(
+                page("Summary", f"relates_to: {scalar}\n", null_body),
+                encoding="utf-8",
+            )
+            git(empty_store, ["add", "."])
+            git(empty_store, ["commit", "-m", f"empty {label}"])
+            empty_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(empty_store),
+                    "--json",
+                ]
+            )
+            summary_text = (empty_store / "summary.md").read_text(encoding="utf-8")
+            compile_run = run(["compile", "--root", str(empty_store), "--json"])
+            relates_keys = [
+                line for line in summary_text.splitlines() if line.startswith("relates_to:")
+            ]
+            if (
+                empty_run.returncode != 0
+                or relates_keys != ["relates_to:"]
+                or "ref:" not in summary_text
+                or compile_run.returncode != 0
+            ):
+                failures.append(
+                    f"{label} relates_to should become one edge list: {empty_run.stdout}\n{summary_text}\n{compile_run.stdout}"
+                )
+            else:
+                print(f"[PASS] prune folds relates_to {scalar} into one key")
+
+        kind_store = tmp / "kind-summary"
+        kind_init = run(["init", "--root", str(kind_store), "--json"])
+        if kind_init.returncode != 0:
+            failures.append(f"kind store init failed: {kind_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(kind_store, ["init", "-b", "main"])
+            (kind_store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (kind_store / "summary.md").write_text(
+                page(
+                    "Summary",
+                    "type: protostar\nrelates_to:\n  - path: dead.md\n    kind: derived_from\n",
+                    prose,
+                ).replace("type: document\n", "", 1),
+                encoding="utf-8",
+            )
+            before = (kind_store / "summary.md").read_text(encoding="utf-8")
+            git(kind_store, ["add", "."])
+            git(kind_store, ["commit", "-m", "required kind"])
+            kind_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(kind_store),
+                    "--json",
+                ]
+            )
+            after = (kind_store / "summary.md").read_text(encoding="utf-8")
+            if kind_run.returncode == 0 or "derived_from" not in kind_run.stdout or after != before or not (kind_store / "dead.md").is_file():
+                failures.append(f"required live kind should block prune: {kind_run.stdout}\n{after}")
+            else:
+                print("[PASS] prune refuses a summary that loses its live kind")
+
+        fd, name = tempfile.mkstemp(prefix="atlas-write-")
+        try:
+            real_write = os.write
+
+            def short_write(target: int, data: bytes | memoryview) -> int:
+                chunk = bytes(memoryview(data)[:1])
+                return real_write(target, chunk)
+
+            os.write = short_write  # type: ignore[assignment]
+            try:
+                _write_all(fd, b"abcd")
+            finally:
+                os.write = real_write
+            os.lseek(fd, 0, os.SEEK_SET)
+            if os.read(fd, 8) != b"abcd":
+                failures.append("short writes were not retried")
+            else:
+                print("[PASS] replacement writes retry a short write")
+            os.write = lambda target, data: 0  # type: ignore[assignment]
+            try:
+                try:
+                    _write_all(fd, b"more")
+                except RefError:
+                    print("[PASS] replacement write refuses zero progress")
+                else:
+                    failures.append("zero-progress write should fail")
+            finally:
+                os.write = real_write
+        finally:
+            os.close(fd)
+            Path(name).unlink(missing_ok=True)
+
+        folded = append_ref_edges(
+            "---\nrelates_to: null\n---\n\nbody\n",
+            [("dead.md", "derived_from", "abc")],
+        )
+        if folded.count("relates_to:") != 1:
+            failures.append(f"null relates_to gained a second key:\n{folded}")
+        else:
+            print("[PASS] append treats null relates_to as empty")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")

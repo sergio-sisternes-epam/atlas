@@ -422,7 +422,7 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
     index = 0
     while index < len(lines):
         line = lines[index]
-        if line.strip() == "relates_to: []" or re.match(r"^relates_to:\s*$", line):
+        if _empty_relates(line) or re.match(r"^relates_to:\s*$", line):
             out.append(line)
             index += 1
             section: list[str] = []
@@ -467,6 +467,10 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
     return found
 
 
+def _empty_relates(line: str) -> bool:
+    return bool(re.match(r"^relates_to:\s*(?:\[\]|~|null|Null|NULL)\s*(?:#.*)?$", line))
+
+
 def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
     text, _expanded = _expand_flow_relates(text, force=True)
     text, _map_expanded = _expand_flow_map_items(text, force=True)
@@ -494,7 +498,7 @@ def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
     index = 0
     while index < len(lines):
         line = lines[index]
-        if line.strip() == "relates_to: []":
+        if _empty_relates(line):
             out.append("relates_to:")
             out.extend(addition)
             inserted = True
@@ -626,6 +630,15 @@ def _read_store(root: Path, rel: str) -> bytes:
         os.close(dirfd)
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while len(view):
+        written = os.write(fd, view)
+        if written <= 0:
+            raise RefError("failed to write replacement page")
+        view = view[written:]
+
+
 def _rewrite_dir_file(
     dirfd: int,
     name: str,
@@ -650,7 +663,7 @@ def _rewrite_dir_file(
     try:
         if mode is not None:
             os.fchmod(fd, mode)
-        os.write(fd, data)
+        _write_all(fd, data)
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -808,7 +821,7 @@ def _replace_nofollow(path: Path, data: bytes) -> None:
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".atlas-prune-", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
-        os.write(fd, data)
+        _write_all(fd, data)
         os.fsync(fd)
         try:
             os.fchmod(fd, stat.S_IMODE(path.lstat().st_mode))
@@ -946,6 +959,7 @@ def run_prune(
         drop_set = set(drop_rels)
         rewritten: list[str] = []
         pending: list[tuple[str, str]] = []
+        summary_final: str | None = None
         for page in _iter_pages(store):
             rel = _store_rel(store, page.relative_to(store).as_posix())
             if rel in drop_set:
@@ -974,8 +988,14 @@ def run_prune(
                     if (item, kind, sha) not in have
                 ]
                 updated = append_ref_edges(updated, edges)
+                summary_final = updated
             if updated != original:
                 pending.append((rel, updated))
+        if summary_final is None:
+            raise RefError(f"summary is not an eligible tip page: {summary_rel}")
+        transformed = concept_page_errors(store, summary_path, text=summary_final)
+        if transformed:
+            raise RefError(f"summary would fail compile: {transformed[0]}")
         snapshots = [(rel, _read_store(store, rel), _mode_store(store, rel)) for rel, _ in pending]
         removed: list[tuple[str, bytes, int]] = []
         try:
