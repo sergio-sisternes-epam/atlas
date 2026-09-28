@@ -468,7 +468,7 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
 
 
 def _empty_relates(line: str) -> bool:
-    return bool(re.match(r"^relates_to:\s*(?:\[\]|~|null|Null|NULL)\s*(?:#.*)?$", line))
+    return bool(re.match(r"^relates_to:\s*(?:\[\]|~|null|Null|NULL)?\s*(?:#.*)?$", line))
 
 
 def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:

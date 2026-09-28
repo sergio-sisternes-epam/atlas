@@ -208,18 +208,54 @@ def _has_kind(meta: dict, kind: str) -> bool:
     return False
 
 
+def schema_compile_issues(root: Path) -> tuple[dict | None, list[dict], list[dict]]:
+    """Schema-level compile issues. Schema is None when page checks must not use it."""
+    critical: list[dict] = []
+    warnings: list[dict] = []
+    schema, schema_err = load_schema(root)
+    if schema_err:
+        critical.append({"id": "schema_present", "path": "SCHEMA.json", "msg": schema_err})
+        return None, critical, warnings
+    tmpl = schema.get("templates")
+    if tmpl is not None and not isinstance(tmpl, dict):
+        critical.append(
+            {
+                "id": "schema_shape",
+                "path": "SCHEMA.json",
+                "msg": "SCHEMA.templates must be an object",
+            }
+        )
+    elif isinstance(tmpl, dict):
+        by = tmpl.get("by_type")
+        if by is not None and not isinstance(by, dict):
+            critical.append(
+                {
+                    "id": "schema_shape",
+                    "path": "SCHEMA.json",
+                    "msg": "SCHEMA.templates.by_type must be an object",
+                }
+            )
+    merged, overlay_critical, overlay_warnings = merge_overlays(schema, root)
+    critical.extend(overlay_critical)
+    warnings.extend(overlay_warnings)
+    critical.extend(receipt_issues(root))
+    shape_msgs = validate_schema_shape(merged)
+    for msg in shape_msgs:
+        critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
+    if shape_msgs:
+        return None, critical, warnings
+    for msg in validate_against_contract(merged, load_contract()):
+        critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
+    if schema_version(merged) == "2.0":
+        for msg in validate_store_v2(merged):
+            critical.append({"id": "schema_v2", "path": "SCHEMA.json", "msg": msg})
+    return merged, critical, warnings
+
+
 def concept_page_errors(root: Path, path: Path, text: str | None = None) -> list[str]:
     """Compile-blocking messages for one concept page. Empty means this page would not fail compile."""
-    schema, schema_err = load_schema(root)
-    msgs: list[str] = []
-    if schema_err:
-        msgs.append(schema_err)
-        schema = None
-    elif schema is not None:
-        merged, overlay_critical, _overlay_warnings = merge_overlays(schema, root)
-        msgs.extend(issue["msg"] for issue in overlay_critical if issue.get("msg"))
-        msgs.extend(issue["msg"] for issue in receipt_issues(root) if issue.get("msg"))
-        schema = merged
+    schema, schema_issues, _schema_warnings = schema_compile_issues(root)
+    msgs = [issue["msg"] for issue in schema_issues if issue.get("msg")]
     if text is None:
         text = path.read_text(encoding="utf-8", errors="replace")
     ignores = _ignores_in(text)
@@ -390,47 +426,9 @@ def run(
     focused = bool(want_type or want_path)
     focus_path: Path | None = None
 
-    schema, schema_err = load_schema(r)
-    if schema_err:
-        critical.append({"id": "schema_present", "path": "SCHEMA.json", "msg": schema_err})
-        schema = None
-    else:
-        assert schema is not None
-        tmpl = schema.get("templates")
-        if tmpl is not None and not isinstance(tmpl, dict):
-            critical.append(
-                {
-                    "id": "schema_shape",
-                    "path": "SCHEMA.json",
-                    "msg": "SCHEMA.templates must be an object",
-                }
-            )
-        elif isinstance(tmpl, dict):
-            by = tmpl.get("by_type")
-            if by is not None and not isinstance(by, dict):
-                critical.append(
-                    {
-                        "id": "schema_shape",
-                        "path": "SCHEMA.json",
-                        "msg": "SCHEMA.templates.by_type must be an object",
-                    }
-                )
-        merged, ov_crit, ov_warn = merge_overlays(schema, r)
-        critical.extend(ov_crit)
-        warnings.extend(ov_warn)
-        critical.extend(receipt_issues(r))
-        schema = merged
-        shape_msgs = validate_schema_shape(schema)
-        for msg in shape_msgs:
-            critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
-        if shape_msgs:
-            schema = None
-        else:
-            for msg in validate_against_contract(schema, load_contract()):
-                critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
-            if schema is not None and schema_version(schema) == "2.0":
-                for msg in validate_store_v2(schema):
-                    critical.append({"id": "schema_v2", "path": "SCHEMA.json", "msg": msg})
+    schema, schema_critical, schema_warnings = schema_compile_issues(r)
+    critical.extend(schema_critical)
+    warnings.extend(schema_warnings)
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)

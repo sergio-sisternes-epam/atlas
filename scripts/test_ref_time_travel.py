@@ -21,6 +21,7 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
     _rewrite_regular,
     _rewrite_store,
     _unlink_store,
+    _empty_relates,
     _write_all,
     append_ref_edges,
 )
@@ -742,7 +743,6 @@ def main() -> int:
                 page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
                 encoding="utf-8",
             )
-            (linked / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
             git(linked, ["add", "."])
             git(linked, ["commit", "-m", "linked fixtures"])
             outside = tmp / "outside-hard.md"
@@ -1545,6 +1545,87 @@ def main() -> int:
             failures.append(f"null relates_to gained a second key:\n{folded}")
         else:
             print("[PASS] append treats null relates_to as empty")
+
+        commented_empty = "---\ntype: document\ntitle: Summary\nrelates_to: # none\n---\n\nbody\n"
+        folded_comment = append_ref_edges(commented_empty, [("dead.md", "derived_from", "abc")])
+        if not _empty_relates("relates_to: # none") or folded_comment.count("relates_to:") != 1:
+            failures.append(f"commented empty relates_to gained a second key:\n{folded_comment}")
+        else:
+            print("[PASS] append treats a commented empty relates_to as empty")
+
+        broken = tmp / "broken-schema"
+        broken_init = run(["init", "--root", str(broken), "--json"])
+        if broken_init.returncode != 0:
+            failures.append(f"broken schema init failed: {broken_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(broken, ["init", "-b", "main"])
+            (broken / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (broken / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(broken, ["add", "."])
+            git(broken, ["commit", "-m", "pages"])
+            schema_path = broken / "SCHEMA.json"
+            schema_doc = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema_doc.pop("atlas_id", None)
+            schema_path.write_text(json.dumps(schema_doc), encoding="utf-8")
+            broken_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(broken),
+                    "--json",
+                ]
+            )
+            if broken_run.returncode == 0 or "SCHEMA" not in broken_run.stdout or not (broken / "dead.md").is_file():
+                failures.append(f"invalid schema should block prune: {broken_run.stdout}")
+            else:
+                print("[PASS] prune refuses a schema compile would reject")
+
+        extra = tmp / "extra-schema"
+        extra_init = run(["init", "--root", str(extra), "--schema-version", "2.0", "--json"])
+        if extra_init.returncode != 0:
+            failures.append(f"extra schema init failed: {extra_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(extra, ["init", "-b", "main"])
+            (extra / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (extra / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(extra, ["add", "."])
+            git(extra, ["commit", "-m", "pages"])
+            extra_path = extra / "SCHEMA.json"
+            extra_doc = json.loads(extra_path.read_text(encoding="utf-8"))
+            extra_doc["not_a_field"] = True
+            extra_path.write_text(json.dumps(extra_doc), encoding="utf-8")
+            extra_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(extra),
+                    "--json",
+                ]
+            )
+            if extra_run.returncode == 0 or not (extra / "dead.md").is_file():
+                failures.append(f"schema 2.0 shape should block prune: {extra_run.stdout}")
+            else:
+                print("[PASS] prune refuses a schema 2.0 document compile would reject")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")
