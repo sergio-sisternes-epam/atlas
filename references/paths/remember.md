@@ -26,14 +26,14 @@ root: <atlas store root>
 ## Procedure
 
 1. **Resolve root** (same as query — path `mount`). If there is no active git repository, **stop**. Do not persist.
-2. **Wrong-frame trigger** — if the user explicitly kills a comparison or thesis (“wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”), do **not** keep writing the dead matrix. Load catalog skill **discuss** (substrate contract) and path `references/paths/terminate.md`. Pass `atlas_root` = this root, `subject_node`, and `living_node`. Return to remember only for living pages terminate asked you to author. Recipe: `references/recipes/terminate-wrong-path.md`.
+2. **Wrong-frame trigger** — if the user explicitly kills a comparison or thesis (“wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”), do **not** keep writing the dead matrix. Load catalog skill **discuss** (substrate contract) and path `references/paths/terminate.md`. Pass `atlas_root` = this root, `subject_node`, and `living_node`. Return to remember only for living pages terminate asked you to author. Recipe: `references/recipes/terminate-wrong-path.md`. Do not enter path **prune** inside that step.
    - **Thoughtful current-theory** — if the pages are `lesson`, live `decision`, or `recipe`, first think a designed inventory (path, type, one-line claim, source URIs). The remember card from Enter is enough; do not emit a second card. Persist may then proceed **without** human approval. If the human has asked for review on this persist (or named it important / hold for approval), show the inventory and **stop** until they approve or cut the set. Episodic `experience` and discussion-graph types are not this step. Recipe: `references/recipes/gated-memory-building.md`.
 3. **Choose type and path** — recommended types: `experience`, `decision`, `lesson`, `recipe`, `work`, `document`, `protostar` (and folder conventions under SCHEMA). Recommended frontmatter: `origin` (internal|third-party|user|derived), `sensitivity` (public|internal|restricted). A protostar is a forming idea (`kva: forming`, `growth: true`) parked beside its origin; never a `residuals/` folder.
 4. **Write** a claim-bearing page (frontmatter + body). Or:
    - `atlas migrate <source> --root <root>` into staging only, then
    - `atlas promote <staging-file> --to <target> [--type …] --root <root>`, then
    - complete claims (promote only scaffolds).
-5. **relates_to (authoritative)** — list `{path, kind}` edges. Recommended kinds: `follows`, `records`, `supersedes`, `implements`, `derived_from`, `related`.
+5. **relates_to (authoritative)** — list `{path, kind}` edges. Recommended kinds: `follows`, `records`, `supersedes`, `implements`, `derived_from`, `related`. Absent `ref` is tip. Do not write `ref` on this path. A living version hint is path **version-hint**. Tip exclusion after terminate is path **prune**, and only when the user asks for it. Relation `ref` is not mount `ref`.
 6. **Work cluster** — if the page has a `work_id`, include:
    ```yaml
    - path: work/<work_id>.md

@@ -88,6 +88,11 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None) -> str:
     return h.hexdigest()
 
 
+def is_history_edge(item: dict[str, Any]) -> bool:
+    """Relation ref is history. Tip projection and search must not present it as a hop."""
+    return "ref" in item
+
+
 def _edges_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
     raw = meta.get("relates_to") or []
     edges: list[dict[str, str]] = []
@@ -98,6 +103,8 @@ def _edges_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
             continue
         target = str(item.get("path") or "").strip()
         if not target:
+            continue
+        if is_history_edge(item):
             continue
         kind = str(item.get("kind") or item.get("role") or "related").strip() or "related"
         edges.append({"target": target, "kind": kind, "direction": "outgoing"})

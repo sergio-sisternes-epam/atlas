@@ -94,6 +94,9 @@ how to get started. Starting is asking Atlas how to do it.
 | Landscape | Research competitors and symbionts into comparison memory. |
 | Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss` skill for best results. |
 | Configure | Inspect and select Semantic Memory Recall. |
+| History | Read one store path at a git rev. A `ref` edge is not a tip hop. |
+| Version hint | Point a living page at a prior git rev without copying the old body. |
+| Prune | After terminate, drop named failed-path pages from tip onto one summary. |
 
 ## Related
 
