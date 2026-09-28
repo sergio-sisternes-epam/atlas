@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from ..core.gitops import git_root, run_git
+from ..core.overlay import merge_overlays
 from .validate import concept_page_errors
 from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
@@ -124,11 +125,33 @@ def _newline(text: str) -> str:
     return "\r\n" if "\r\n" in text else "\n"
 
 
+def _yaml_scalar_text(raw: str) -> str:
+    text = raw.strip()
+    if not text:
+        return ""
+    if text[0] in ("'", '"'):
+        quote = text[0]
+        out: list[str] = []
+        escaped = False
+        for ch in text[1:]:
+            if escaped:
+                out.append(ch)
+                escaped = False
+                continue
+            if ch == "\\" and quote == '"':
+                escaped = True
+                continue
+            if ch == quote:
+                return "".join(out)
+        return text
+    comment = re.search(r"\s+#", text)
+    if comment:
+        text = text[: comment.start()]
+    return text.strip()
+
+
 def _unquote(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        return value[1:-1]
-    return value
+    return _yaml_scalar_text(value)
 
 
 def _norm_path(value: str) -> str:
@@ -543,6 +566,116 @@ def rewrite_markdown_links(text: str, root: Path, page: Path, drop: set[str], su
     return MD_LINK.sub(repl, text), changed
 
 
+def _open_store_parent(root: Path, rel: str) -> tuple[int, str]:
+    """Open the parent of a store-relative path without following any component."""
+    parts = [part for part in rel.split("/") if part]
+    if not parts or any(part in (".", "..") for part in parts):
+        raise RefError(f"path escapes store root: {rel}")
+    dirfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            try:
+                nextfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except OSError as e:
+                raise RefError(f"refusing to follow symlink {rel}") from e
+            os.close(dirfd)
+            dirfd = nextfd
+        return dirfd, parts[-1]
+    except Exception:
+        os.close(dirfd)
+        raise
+
+
+def _read_dir_file(dirfd: int, name: str, label: str) -> bytes:
+    try:
+        info = os.lstat(name, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to read missing page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise RefError(f"refusing to read non-regular page {label}")
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise RefError(f"refusing to read non-regular page {label}")
+        os.set_blocking(fd, True)
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _read_store(root: Path, rel: str) -> bytes:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        return _read_dir_file(dirfd, name, rel)
+    finally:
+        os.close(dirfd)
+
+
+def _rewrite_dir_file(dirfd: int, name: str, data: bytes, label: str, *, must_exist: bool) -> None:
+    if must_exist:
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except OSError as e:
+            raise RefError(f"refusing to rewrite missing page {label}") from e
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise RefError(f"refusing to rewrite non-regular page {label}")
+        if info.st_nlink > 1:
+            raise RefError(f"refusing to rewrite hard-linked page {label}")
+    tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        if must_exist:
+            info = os.lstat(name, dir_fd=dirfd)
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise RefError(f"refusing to rewrite non-regular page {label}")
+            if info.st_nlink > 1:
+                raise RefError(f"refusing to rewrite hard-linked page {label}")
+        os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+        tmp = ""
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp, dir_fd=dirfd)
+            except OSError:
+                pass
+
+
+def _rewrite_store(root: Path, rel: str, data: bytes, *, must_exist: bool = True) -> None:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        _rewrite_dir_file(dirfd, name, data, rel, must_exist=must_exist)
+    finally:
+        os.close(dirfd)
+
+
+def _unlink_store(root: Path, rel: str) -> bytes | None:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise RefError(f"refusing to delete non-file {rel}")
+        data = _read_dir_file(dirfd, name, rel)
+        os.unlink(name, dir_fd=dirfd)
+        return data
+    finally:
+        os.close(dirfd)
+
+
 def _iter_pages(root: Path) -> list[Path]:
     schema, _ = load_schema(root)
     skip = set(SKIP_TOP) | {staging_dir_name(schema)}
@@ -562,12 +695,18 @@ def _iter_pages(root: Path) -> list[Path]:
             if not name.endswith(".md"):
                 continue
             page = current / name
-            if page.is_symlink():
-                continue
             try:
-                page.resolve().relative_to(root.resolve())
-            except ValueError:
+                info = page.lstat()
+            except OSError:
                 continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            rel = page.relative_to(root).as_posix()
+            try:
+                dirfd, _name = _open_store_parent(root, rel)
+            except (RefError, OSError):
+                continue
+            os.close(dirfd)
             found.append(page)
     return sorted(found)
 
@@ -591,6 +730,23 @@ def _require_summary_page(store: Path, rel: str, path: Path) -> None:
     problems = concept_page_errors(store, path)
     if problems:
         raise RefError(f"summary would fail compile: {problems[0]}")
+    _require_summary_index(store, rel)
+
+
+def _require_summary_index(store: Path, rel: str) -> None:
+    schema, err = load_schema(store)
+    if err or not schema:
+        return
+    merged, _, _ = merge_overlays(schema, store)
+    structure = merged.get("structure") or {}
+    if not bool(structure.get("require_index_in_folders", True)):
+        return
+    parent = Path(rel).parent.as_posix()
+    index_rel = "index.md" if parent == "." else f"{parent}/index.md"
+    try:
+        _read_store(store, index_rel)
+    except RefError as e:
+        raise RefError(f"summary folder has no index.md: {rel}") from e
 
 
 def _require_drop_page(rel: str) -> None:
@@ -641,14 +797,24 @@ def _drop_not_file(store: Path, rel: str) -> str | None:
 
 
 def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath: str) -> str | None:
-    path = root / store_rel
-    if not path.is_file():
-        return f"{store_rel} is absent on tip; history blob is kept at {sha}"
+    try:
+        data = _read_store(root, store_rel)
+    except RefError as e:
+        if "missing page" in str(e):
+            return f"{store_rel} is absent on tip; history blob is kept at {sha}"
+        raise
     if not _blob_exists(repo, _resolve_commit(repo, "HEAD"), gitpath):
         raise RefError(f"refusing to delete untracked {store_rel}")
-    code, out, _ = run_git(["hash-object", "--", str(path)], cwd=repo)
+    hashed = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        cwd=repo,
+        input=data,
+        capture_output=True,
+        check=False,
+    )
+    out = hashed.stdout.decode("utf-8", errors="replace").strip() if hashed.returncode == 0 else ""
     blob_code, blob, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
-    if code != 0 or blob_code != 0 or not blob or out != blob:
+    if hashed.returncode != 0 or blob_code != 0 or not blob or out != blob:
         raise RefError(f"refusing to drop dirty {store_rel}; commit it before prune or choose a rev that matches the worktree")
     return None
 
@@ -657,6 +823,8 @@ def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
     try:
         store = store_root(root)
         rel = _store_rel(store, path)
+        if _managed_top(store, rel):
+            raise RefError(f"refusing Atlas-managed path {rel}")
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
         gitpath = _git_path(store, repo, rel)
@@ -724,12 +892,12 @@ def run_prune(
                 raise RefError(problem)
         drop_set = set(drop_rels)
         rewritten: list[str] = []
-        pending: list[tuple[Path, str]] = []
+        pending: list[tuple[str, str]] = []
         for page in _iter_pages(store):
             rel = _store_rel(store, page.relative_to(store).as_posix())
             if rel in drop_set:
                 continue
-            original = page.read_text(encoding="utf-8")
+            original = _read_store(store, rel).decode("utf-8")
             updated, fm_changes = rewrite_relates_to(
                 original,
                 drop_set,
@@ -754,28 +922,21 @@ def run_prune(
                 ]
                 updated = append_ref_edges(updated, edges)
             if updated != original:
-                if _hard_linked(page):
-                    raise RefError(f"refusing to rewrite hard-linked page {rel}")
-                pending.append((page, updated))
-        snapshots = [(page, page.read_text(encoding="utf-8")) for page, _ in pending]
-        removed: list[tuple[Path, bytes]] = []
+                pending.append((rel, updated))
+        snapshots = [(rel, _read_store(store, rel)) for rel, _ in pending]
+        removed: list[tuple[str, bytes]] = []
         try:
-            for page, updated in pending:
-                label = page.relative_to(store).as_posix()
-                _rewrite_regular(page, updated.encode("utf-8"), label)
+            for rel, updated in pending:
+                _rewrite_store(store, rel, updated.encode("utf-8"))
             for rel in drop_rels:
-                problem = _drop_not_file(store, rel)
-                if problem:
-                    raise RefError(problem)
-                target = store / rel
-                if target.is_file() and not target.is_symlink():
-                    removed.append((target, target.read_bytes()))
-                    target.unlink()
+                data = _unlink_store(store, rel)
+                if data is not None:
+                    removed.append((rel, data))
         except Exception:
-            for page, original in snapshots:
-                _replace_nofollow(page, original.encode("utf-8"))
-            for target, data in removed:
-                _replace_nofollow(target, data)
+            for rel, original in snapshots:
+                _rewrite_store(store, rel, original, must_exist=False)
+            for rel, data in removed:
+                _rewrite_store(store, rel, data, must_exist=False)
             raise
     except RefError as e:
         return _fail(as_json, str(e))

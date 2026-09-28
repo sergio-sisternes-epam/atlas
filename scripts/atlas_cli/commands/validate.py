@@ -201,6 +201,8 @@ def _has_kind(meta: dict, kind: str) -> bool:
         if not isinstance(item, dict):
             continue
         k = str(item.get("kind") or item.get("role") or "").strip().lower()
+        if str(item.get("ref") or "").strip():
+            continue
         if k == want and str(item.get("path") or "").strip():
             return True
     return False
@@ -208,14 +210,22 @@ def _has_kind(meta: dict, kind: str) -> bool:
 
 def concept_page_errors(root: Path, path: Path) -> list[str]:
     """Compile-blocking messages for one concept page. Empty means this page would not fail compile."""
-    schema, _ = load_schema(root)
+    schema, schema_err = load_schema(root)
+    msgs: list[str] = []
+    if schema_err:
+        msgs.append(schema_err)
+        schema = None
+    elif schema is not None:
+        merged, overlay_critical, _overlay_warnings = merge_overlays(schema, root)
+        msgs.extend(issue["msg"] for issue in overlay_critical if issue.get("msg"))
+        msgs.extend(issue["msg"] for issue in receipt_issues(root) if issue.get("msg"))
+        schema = merged
     text = path.read_text(encoding="utf-8", errors="replace")
     ignores = _ignores_in(text)
-    msgs: list[str] = []
     try:
         meta, body = read_page(path, schema_version(schema) if schema else "1.0")
     except FrontmatterError as e:
-        return [str(e)]
+        return msgs + [str(e)]
     if not meta:
         if "frontmatter" not in ignores:
             msgs.append("missing frontmatter")

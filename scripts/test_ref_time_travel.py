@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from atlas_cli.commands.refcmd import RefError, _rewrite_regular  # noqa: E402
+from atlas_cli.commands.refcmd import RefError, _rewrite_regular, _rewrite_store  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -1082,6 +1082,229 @@ def main() -> int:
         else:
             print("[PASS] history ref rejects an external path")
         external.unlink()
+
+        commented = tmp / "commented"
+        commented_init = run(["init", "--root", str(commented), "--schema-version", "2.0", "--json"])
+        if commented_init.returncode != 0:
+            failures.append(f"commented store init failed: {commented_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(commented, ["init", "-b", "main"])
+            (commented / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (commented / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (commented / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md # gone\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            git(commented, ["add", "."])
+            git(commented, ["commit", "-m", "commented edge"])
+            commented_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(commented),
+                    "--json",
+                ]
+            )
+            living = (commented / "living.md").read_text(encoding="utf-8")
+            if commented_prune.returncode != 0 or "path: dead.md" in living or not (commented / "summary.md").is_file():
+                failures.append(f"commented relation was not rewritten: {commented_prune.stdout}\n{living}")
+            else:
+                print("[PASS] prune rewrites a commented schema 2.0 path")
+
+        shown = tmp / "shown"
+        shown_init = run(["init", "--root", str(shown), "--json"])
+        if shown_init.returncode != 0:
+            failures.append(f"show store init failed: {shown_init.stdout}")
+        else:
+            git(shown, ["init", "-b", "main"])
+            staged = shown / "staging" / "secret.md"
+            staged.parent.mkdir(exist_ok=True)
+            staged.write_text(page("Secret", "relates_to: []\n", "Staging must not answer."), encoding="utf-8")
+            git(shown, ["add", "staging/secret.md"])
+            git(shown, ["commit", "-m", "stage"])
+            shown_run = run(["ref", "show", "staging/secret.md", "--ref", "HEAD", "--root", str(shown), "--json"])
+            if shown_run.returncode == 0 or "managed" not in shown_run.stdout:
+                failures.append(f"show should refuse staging: {shown_run.stdout}")
+            else:
+                print("[PASS] show refuses an Atlas-managed path")
+
+        hub = store / "hub-only-history.md"
+        hub.write_text(
+            page(
+                "Hub",
+                "work_id: trial\nrelates_to:\n  - path: missing.md\n    kind: implements\n    ref: abcdef\n",
+                "A history edge is not a live work hub.",
+            ),
+            encoding="utf-8",
+        )
+        hub_run = run(["compile", "--root", str(store), "--json"])
+        hub_payload = json.loads(hub_run.stdout) if hub_run.stdout else {}
+        if not any("work_id" in item.get("msg", "") for item in hub_payload.get("warnings", [])):
+            failures.append(f"history implements edge should not satisfy work_id: {hub_payload.get('warnings')}")
+        else:
+            print("[PASS] history ref does not satisfy a live kind contract")
+        hub.unlink()
+
+        nested = tmp / "nested-link"
+        nested.mkdir()
+        outside_dir = tmp / "outside-dir"
+        outside_dir.mkdir()
+        outside_page = outside_dir / "page.md"
+        outside_page.write_text("outside\n", encoding="utf-8")
+        (nested / "linked").symlink_to(outside_dir, target_is_directory=True)
+        try:
+            _rewrite_store(nested, "linked/page.md", b"pwned\n")
+        except RefError:
+            refused_parent = True
+        else:
+            refused_parent = False
+        if not refused_parent or outside_page.read_text(encoding="utf-8") != "outside\n":
+            failures.append("store rewrite followed an intermediate symlink")
+        else:
+            print("[PASS] store rewrite refuses an intermediate symlink")
+
+        indexed = tmp / "indexed"
+        indexed_init = run(["init", "--root", str(indexed), "--json"])
+        if indexed_init.returncode != 0:
+            failures.append(f"index store init failed: {indexed_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(indexed, ["init", "-b", "main"])
+            (indexed / "notes").mkdir()
+            (indexed / "notes" / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (indexed / "notes" / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(indexed, ["add", "."])
+            git(indexed, ["commit", "-m", "no folder index"])
+            missing_index = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "notes/summary.md",
+                    "--drop",
+                    "notes/dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(indexed),
+                    "--json",
+                ]
+            )
+            if missing_index.returncode == 0 or not (indexed / "notes" / "dead.md").is_file() or "index.md" not in missing_index.stdout:
+                failures.append(f"summary folder without index should be refused: {missing_index.stdout}")
+            else:
+                print("[PASS] prune refuses a summary folder without index.md")
+
+        overlaid = tmp / "overlaid"
+        overlaid_init = run(["init", "--root", str(overlaid), "--json"])
+        if overlaid_init.returncode != 0:
+            failures.append(f"overlay store init failed: {overlaid_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(overlaid, ["init", "-b", "main"])
+            (overlaid / "schema.d").mkdir()
+            (overlaid / "schema.d" / "trial.json").write_text(
+                json.dumps(
+                    {
+                        "contribution_id": "trial",
+                        "claimed_folders": [],
+                        "templates": {
+                            "by_type": {
+                                "trial-note": {
+                                    "frontmatter": {"required": ["type", "title", "created", "owner"]}
+                                }
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (overlaid / "schema.d" / "trial.receipt.json").write_text(
+                json.dumps({"written": ["schema.d/trial.json"]}),
+                encoding="utf-8",
+            )
+            (overlaid / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (overlaid / "summary.md").write_text(
+                "---\ntype: trial-note\ntitle: Summary\ncreated: 2026-09-27\nrelates_to: []\n---\n\n"
+                + prose
+                + "\n",
+                encoding="utf-8",
+            )
+            git(overlaid, ["add", "."])
+            git(overlaid, ["commit", "-m", "overlay"])
+            overlay_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(overlaid),
+                    "--json",
+                ]
+            )
+            if overlay_prune.returncode == 0 or not (overlaid / "dead.md").is_file() or "owner" not in overlay_prune.stdout:
+                failures.append(f"overlay-required summary field should be refused: {overlay_prune.stdout}")
+            else:
+                print("[PASS] prune uses overlay-required frontmatter")
+
+        fifo_store = tmp / "fifo"
+        fifo_init = run(["init", "--root", str(fifo_store), "--json"])
+        if fifo_init.returncode != 0:
+            failures.append(f"fifo store init failed: {fifo_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(fifo_store, ["init", "-b", "main"])
+            (fifo_store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (fifo_store / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            os.mkfifo(fifo_store / "noise.md")
+            git(fifo_store, ["add", "dead.md", "summary.md"])
+            git(fifo_store, ["commit", "-m", "fifo neighbor"])
+            fifo_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(ATLAS),
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(fifo_store),
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                timeout=5,
+            )
+            if fifo_run.returncode != 0 or (fifo_store / "dead.md").exists():
+                failures.append(f"fifo neighbor blocked prune: {fifo_run.stdout} {fifo_run.stderr}")
+            else:
+                print("[PASS] prune ignores a non-regular markdown name")
 
         outside = tmp / "outside-target.md"
         outside.write_text("outside\n", encoding="utf-8")
