@@ -47,8 +47,12 @@ python3 <atlas-skill>/scripts/atlas.py compile --root <root> --json --dry-run
 `--dry-run` still reports every finding (including `legacy_document`,
 `missing_gist`, `gist_parent`, `frame_members`), but never writes
 `mesh.json` and never publishes the recall index — an unfocused compile
-would otherwise do both. Report the memory rung in effect and the finding
-ids present. Write nothing. Do not edit `SCHEMA.json`.
+would otherwise do both. The compile JSON includes a `memory_rung` field:
+the effective rung (`info`, `warn`, or `error`) resolved the same way as
+`SCHEMA.memory.rung`, where an absent `memory` key or a blank/malformed
+`rung` value means `info`. Report the memory rung in effect (read from
+`memory_rung`) and the finding ids present. Write nothing. Do not edit
+`SCHEMA.json`.
 
 ### inventory
 

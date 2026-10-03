@@ -169,7 +169,8 @@ the following commands relative to the consumer project.
 
 ```text
 python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force] [--schema-version 1.0|2.0]
-python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
+python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>] [--dry-run]
+                       # --dry-run reports findings (including memory_rung) without writing mesh.json or publishing the recall index
 python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
                        # query tokens: type: kva: status: work_id: path:
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]

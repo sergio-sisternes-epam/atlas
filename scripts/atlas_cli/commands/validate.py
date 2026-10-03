@@ -772,6 +772,7 @@ def run(
         },
         "recall_index": index_info,
         "dry_run": dry_run,
+        "memory_rung": memory_rung,
     }
 
     if as_json:

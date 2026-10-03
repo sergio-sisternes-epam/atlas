@@ -712,6 +712,11 @@ def main() -> int:
             str(payload10.get("recall_index")),
         )
         check("dry-run compile marks dry_run true", payload10.get("dry_run") is True)
+        check(
+            "dry-run compile reports memory_rung info (absent SCHEMA memory/rung)",
+            payload10.get("memory_rung") == "info",
+            str(payload10.get("memory_rung")),
+        )
 
         code10b, payload10b = run_json(["compile", "--root", str(store10), "--json"])
         check(
@@ -729,6 +734,27 @@ def main() -> int:
             "non-dry-run compile reports recall_index published",
             (payload10b.get("recall_index") or {}).get("published") is True,
             str(payload10b.get("recall_index")),
+        )
+        check(
+            "non-dry-run compile reports memory_rung info (absent SCHEMA memory/rung)",
+            payload10b.get("memory_rung") == "info",
+            str(payload10b.get("memory_rung")),
+        )
+
+        rung10 = run(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store10), "--json"]
+        )
+        check("schema memory-rung --set warn ok (store10)", rung10.returncode == 0, rung10.stderr)
+        code10c, payload10c = run_json(["compile", "--root", str(store10), "--json"])
+        check(
+            "compile after schema memory-rung --set warn: memory_rung warn",
+            payload10c.get("memory_rung") == "warn",
+            str(payload10c.get("memory_rung")),
+        )
+        check(
+            "compile after schema memory-rung --set warn: exit policy unchanged",
+            code10c == 0,
+            f"exit={code10c} payload={payload10c}",
         )
 
         # --- Fixture 11: inline atlas-ignore comments suppress memory findings ---
@@ -1144,6 +1170,22 @@ def main() -> int:
                 code == 0,
                 f"exit={code} critical={payload.get('critical')}",
             )
+            check(
+                f"absent/blank rung ({case_name}): memory_rung effective ladder is info",
+                payload.get("memory_rung") == "info",
+                f"memory_rung={payload.get('memory_rung')}",
+            )
+
+        # Malformed rung also reports effective ladder info in memory_rung,
+        # even though it raises the memory_rung critical finding above.
+        schema16["memory"] = {"rung": 0}
+        schema16_path.write_text(json.dumps(schema16, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store16), "--json"])
+        check(
+            "malformed rung (0): memory_rung field still reports info",
+            payload.get("memory_rung") == "info",
+            f"memory_rung={payload.get('memory_rung')}",
+        )
 
         # --- File-content assertions ---
         skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
