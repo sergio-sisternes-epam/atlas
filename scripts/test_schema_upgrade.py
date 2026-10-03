@@ -55,7 +55,7 @@ def main() -> int:
     check("upgrade-does-not-enable", schema.get("recall", {}).get("enabled") is False)
     check("compat-overlay", (store / "schema.d" / "atlas-compat-v1.json").is_file())
 
-    search = run(["search", "Initialised", "--root", str(store), "--json"])
+    search = run(["recall", "run", "Initialised", "--root", str(store), "--json"])
     sp = json.loads(search.stdout) if search.stdout.strip().startswith("{") else {}
     check("legacy-search-until-opt-in", search.returncode == 0 and "recall" not in sp)
 
@@ -63,7 +63,7 @@ def main() -> int:
     check("activate-scan", act.returncode == 0, act.stderr[:200] or act.stdout[:200])
     tgrep = run(["recall", "activate", "--profile", "atlas:tgrep", "--root", str(store), "--json"])
     check("tgrep-activate", tgrep.returncode == 0, tgrep.stderr[:200] or tgrep.stdout[:200])
-    tsearch = run(["search", "Initialised", "--root", str(store), "--profile", "atlas:tgrep", "--json"])
+    tsearch = run(["recall", "run", "Initialised", "--root", str(store), "--profile", "atlas:tgrep", "--json"])
     tp = json.loads(tsearch.stdout) if tsearch.stdout.strip().startswith("{") else {}
     if shutil.which("tgrep"):
         check(

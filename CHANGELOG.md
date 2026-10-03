@@ -33,6 +33,11 @@
   consumer `apm install` run unauthenticated against public github.com. Public
   consumers still need no PAT.
 
+### Removed
+
+- Path `query` and root CLI commands `search` and `query` (hard cut, no
+  alias): use path `recall` and `atlas recall run` instead.
+
 ## 0.12.0 - 2026-09-13
 
 ### Added

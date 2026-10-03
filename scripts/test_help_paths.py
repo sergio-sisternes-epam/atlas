@@ -105,7 +105,7 @@ class HelpPathContractTests(unittest.TestCase):
     def test_named_help_reads_only_relevant_source(self) -> None:
         self.assertIn("not every module", self.help)
         self.assertIn("references/paths/<module>.md", self.help)
-        self.assertIn("python3 <atlas-skill>/scripts/atlas.py search --help", self.help)
+        self.assertIn("python3 <atlas-skill>/scripts/atlas.py recall run --help", self.help)
         self.assertIn("not from memory", self.help)
 
     def test_explain_does_not_execute(self) -> None:
@@ -126,7 +126,7 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIsNone(re.search(r"atlas\.py compile", proc))
         self.assertIsNone(re.search(r"atlas\.py store init(?! --help)", proc))
         self.assertIn("scripts/atlas.py resolve", proc)
-        self.assertIn("scripts/atlas.py search", proc)
+        self.assertIn("scripts/atlas.py recall run", proc)
         self.assertIn("--engine grep", proc)
 
     def test_read_only_search_does_not_build_indexes(self) -> None:
@@ -138,7 +138,7 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("SCHEMA.json", self.help)
         self.assertIn("Check **before** search", self.help)
         self.assertIn("inside the active git repository", self.help)
-        self.assertIn("Do **not** call `atlas search`", self.help)
+        self.assertIn("Do **not** call `atlas recall run`", self.help)
         self.assertIn("Ignore `agentic_guidance`", self.help)
 
     def test_storage_choices_are_equals(self) -> None:

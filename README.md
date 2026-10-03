@@ -88,7 +88,7 @@ how to get started. Starting is asking Atlas how to do it.
 | Getting started | First-use purpose, prerequisites, shortest useful journey, and storage choices. |
 | Help | Explain installed modules without running them. |
 | Init | Scaffold a new Atlas in the active git repository. |
-| Query | Find and answer from an Atlas store. |
+| Recall | Find and answer from an Atlas store. |
 | Remember | Persist experiences, decisions, lessons, and recipes. A basic Semantic Knowledge Organisation (SMO). |
 | Work | Open, update, or close work hubs. |
 | Landscape | Research competitors and symbionts into comparison memory. |

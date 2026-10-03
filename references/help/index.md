@@ -24,7 +24,7 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **init** | New Atlas; shared (`atlas` branch) or dedicated existing remote; never creates the repo |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated |
 | **memory-migrate** | Assess or migrate a document-era store toward page, gist, and frame. Assess and inventory write nothing. |
-| **query** | Find / answer from an Atlas |
+| **recall** | Find / answer from an Atlas |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green |
 | **work** | Open, update, or close `work_id` hubs |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory |

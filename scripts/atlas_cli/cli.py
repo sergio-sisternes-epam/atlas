@@ -193,77 +193,6 @@ def store_rehost_cmd(
     )
 
 
-@main.command("search")
-@click.argument("query")
-@click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--limit", default=10, show_default=True, help="max hits")
-@click.option(
-    "--engine",
-    type=click.Choice(["grep", "bm25"], case_sensitive=False),
-    default=None,
-    help="override SCHEMA query.search_engine",
-)
-@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
-@click.option(
-    "--include-exits",
-    is_flag=True,
-    help="include kva/status terminated|deprecated|superseded (also via kva:terminated)",
-)
-@click.option("--profile", default=None, help="request-scoped SCHEMA 2.0 recall profile")
-@click.option(
-    "--allow-partial",
-    is_flag=True,
-    help="SCHEMA 2.0: return incomplete corpus results (exit 1)",
-)
-def search_cmd(
-    query: str,
-    root: str | None,
-    limit: int,
-    engine: str | None,
-    as_json: bool,
-    include_exits: bool,
-    profile: str | None,
-    allow_partial: bool,
-) -> None:
-    """Discover concepts (tool). Agent protocol is path query + B17 card."""
-    raise SystemExit(
-        cmd_search.run(
-            root, query, limit, as_json, engine, include_exits, profile, allow_partial
-        )
-    )
-
-
-@main.command("query")
-@click.argument("query")
-@click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--limit", default=10, show_default=True)
-@click.option(
-    "--engine",
-    type=click.Choice(["grep", "bm25"], case_sensitive=False),
-    default=None,
-)
-@click.option("--json", "as_json", is_flag=True)
-@click.option("--include-exits", is_flag=True)
-@click.option("--profile", default=None)
-@click.option("--allow-partial", is_flag=True)
-def query_cmd(
-    query: str,
-    root: str | None,
-    limit: int,
-    engine: str | None,
-    as_json: bool,
-    include_exits: bool,
-    profile: str | None,
-    allow_partial: bool,
-) -> None:
-    """Alias of search (agent-facing verb from the mesh plan)."""
-    raise SystemExit(
-        cmd_search.run(
-            root, query, limit, as_json, engine, include_exits, profile, allow_partial
-        )
-    )
-
-
 @main.command("migrate")
 @click.argument("source")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
@@ -384,6 +313,46 @@ def schema_upgrade_cmd(
 @main.group("recall")
 def recall_group() -> None:
     """Inspect, validate, activate, or index SCHEMA 2.0 recall."""
+
+
+@recall_group.command("run")
+@click.argument("query")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--limit", default=10, show_default=True, help="max hits")
+@click.option(
+    "--engine",
+    type=click.Choice(["grep", "bm25"], case_sensitive=False),
+    default=None,
+    help="override SCHEMA query.search_engine",
+)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+@click.option(
+    "--include-exits",
+    is_flag=True,
+    help="include kva/status terminated|deprecated|superseded (also via kva:terminated)",
+)
+@click.option("--profile", default=None, help="request-scoped SCHEMA 2.0 recall profile")
+@click.option(
+    "--allow-partial",
+    is_flag=True,
+    help="SCHEMA 2.0: return incomplete corpus results (exit 1)",
+)
+def recall_run_cmd(
+    query: str,
+    root: str | None,
+    limit: int,
+    engine: str | None,
+    as_json: bool,
+    include_exits: bool,
+    profile: str | None,
+    allow_partial: bool,
+) -> None:
+    """Discover concepts (tool). Agent protocol is path recall + B17 card."""
+    raise SystemExit(
+        cmd_search.run(
+            root, query, limit, as_json, engine, include_exits, profile, allow_partial
+        )
+    )
 
 
 @recall_group.command("profiles")

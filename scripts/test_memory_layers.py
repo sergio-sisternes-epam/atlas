@@ -1137,23 +1137,23 @@ def main() -> int:
             "memory-migrate.md says assess and inventory do not write",
             "assess" in mm_text.lower() and "write nothing" in mm_text.lower(),
         )
-        query_text = (ROOT / "references/paths/query.md").read_text(encoding="utf-8")
+        recall_text = (ROOT / "references/paths/recall.md").read_text(encoding="utf-8")
         check(
-            "query.md mentions index.md, frame, gist, page, and atlas search",
+            "recall.md mentions index.md, frame, gist, page, and atlas recall run",
             all(
-                term in query_text
-                for term in ("index.md", "frame", "gist", "page", "atlas search")
+                term in recall_text
+                for term in ("index.md", "frame", "gist", "page", "atlas recall run")
             ),
         )
         check(
-            "query.md still requires search_cmd on exit",
-            "search_cmd" in query_text
-            and "without `search_cmd`" in query_text
-            and "incomplete Exit" in query_text,
+            "recall.md still requires recall_cmd on exit",
+            "recall_cmd" in recall_text
+            and "without `recall_cmd`" in recall_text
+            and "incomplete Exit" in recall_text,
         )
         check(
-            "query.md still tells the reader to stop when the gist answers",
-            "Stop there when the gist answers the ask" in query_text,
+            "recall.md still tells the reader to stop when the gist answers",
+            "Stop there when the gist answers the ask" in recall_text,
         )
         check(
             "SKILL.md has no checkpoint/constellation path row",

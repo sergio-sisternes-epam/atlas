@@ -1,6 +1,6 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, memory-migrate, query, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
 version: 0.13.0
 activation_card: on
 ---
@@ -45,7 +45,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape | schema | configure | ci | memory-migrate
+path: recall | remember | work | landscape | schema | configure | ci | memory-migrate
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -130,7 +130,7 @@ still copies into staging; do not use it for strategy moves.
 | **init** | New Atlas; default shared (`atlas` branch) or dedicated existing remote; never creates the repo | `references/paths/init.md` |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated | `references/paths/migrate.md` |
 | **memory-migrate** | Assess, inventory, or apply a named batch from a document-era store toward memory | `references/paths/memory-migrate.md` |
-| **query** | Find / answer from an Atlas | `references/paths/query.md` |
+| **recall** | Find / answer from an Atlas | `references/paths/recall.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
@@ -140,13 +140,13 @@ still copies into staging; do not use it for strategy moves.
 | **help** | Explain installed modules without running them | `references/paths/help.md` |
 | **getting-started** | First-use purpose, prerequisites, first journey, storage choices | `references/paths/getting-started.md` |
 
-Paths are **not** separate catalog skills. CLI verbs (`search`, `compile`, ...)
+Paths are **not** separate catalog skills. CLI verbs (`recall run`, `compile`, ...)
 are tools used inside paths. **help** and **getting-started** are explanation
 modules; they are not CLI verbs.
 
 ## Hard rules
 
-1. **Formal lookup = path `query` + `atlas search`** - B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas search --engine grep` under their own card. That is not path query. They must not mount-if-missing, build recall indexes, or run the explained operation.
+1. **Formal lookup = path `recall` + `atlas recall run`** - B17 card `path: recall`, load `references/paths/recall.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path recall. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas recall run --engine grep` under their own card. That is not path recall. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
 3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
@@ -160,7 +160,7 @@ modules; they are not CLI verbs.
 12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
 12a. **Recall policy = path `configure` + CLI** - load `references/paths/configure.md`. Installing a contribution is not activation.
 13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
-14. **Help explains; it does not execute** - paths `help` and `getting-started` are discussion modules. Reading help for mount/init/remember/query must not run those operations. No-target help lists the installed registry without clarification. Unknown targets are explicit unknowns plus valid choices. Unqualified “help” outside Atlas context must not hijack unrelated tasks. CLI option lists come from installed non-mutating `--help`, not memory.
+14. **Help explains; it does not execute** - paths `help` and `getting-started` are discussion modules. Reading help for mount/init/remember/recall must not run those operations. No-target help lists the installed registry without clarification. Unknown targets are explicit unknowns plus valid choices. Unqualified “help” outside Atlas context must not hijack unrelated tasks. CLI option lists come from installed non-mutating `--help`, not memory.
 
 ## CLI surface
 
@@ -170,7 +170,7 @@ the following commands relative to the consumer project.
 ```text
 python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force] [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>]
-python3 <atlas-skill>/scripts/atlas.py search "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
+python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
                        # query tokens: type: kva: status: work_id: path:
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
@@ -189,7 +189,7 @@ python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info|warn|error --root <atlas>
 ```
 
-Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `query` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
+Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
 
 ## Core contract (summary)
 
@@ -222,7 +222,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, memory-migrate, query, remember, work, landscape, schema, configure, ci,
+(mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci,
 help, getting-started). Packaged help baseline lives under `references/help/`.
 SCHEMA and templates live under `references/`. Do not dump full help into this
 file.

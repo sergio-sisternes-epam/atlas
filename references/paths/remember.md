@@ -27,7 +27,7 @@ root: <atlas store root>
 
 ## Procedure
 
-1. **Resolve root** (same as query — path `mount`). If there is no active git repository, **stop**. Do not persist.
+1. **Resolve root** (same as recall — path `mount`). If there is no active git repository, **stop**. Do not persist.
 2. **Wrong-frame trigger** — if the user explicitly kills a comparison or thesis (“wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”), do **not** keep writing the dead matrix. Load catalog skill **discuss** (substrate contract) and path `references/paths/terminate.md`. Pass `atlas_root` = this root, `subject_node`, and `living_node`. Return to remember only for living pages terminate asked you to author. Recipe: `references/recipes/terminate-wrong-path.md`.
    - **Thoughtful current-theory** — if the pages are `lesson`, live `decision`, or `recipe`, first think a designed inventory (path, type, one-line claim, source URIs). The remember card from Enter is enough; do not emit a second card. Persist may then proceed **without** human approval. If the human has asked for review on this persist (or named it important / hold for approval), show the inventory and **stop** until they approve or cut the set. Episodic `experience` and discussion-graph types are not this step. Recipe: `references/recipes/gated-memory-building.md`.
 3. **Choose type and path** — recommended types: `experience`, `decision`, `lesson`, `recipe`, `work`, `protostar`, `page`, `gist`, `frame` (and folder conventions under SCHEMA). `document` is an existing legacy type that remains valid to read; it is not a recommended choice for new writes. Recommended frontmatter: `origin` (internal|third-party|user|derived), `sensitivity` (public|internal|restricted). A protostar is a forming idea (`kva: forming`, `growth: true`) parked beside its origin; never a `residuals/` folder.
@@ -49,7 +49,7 @@ root: <atlas store root>
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
    Exit ≠ 0 → fix critical issues; do **not** edit `index.md` yet and do **not** claim memory stored.
-10. **Index once compile is green** — insert a new gist at the top of the owning folder's `index.md` (the hot list) — top, not bottom. Path `query` reads that list; it never writes it.
+10. **Index once compile is green** — insert a new gist at the top of the owning folder's `index.md` (the hot list) — top, not bottom. Path `recall` reads that list; it never writes it.
 11. **Compile again** — must succeed after the index edit:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
@@ -64,5 +64,5 @@ root: <atlas store root>
 
 ## Non-goals
 
-- Answering questions (use **query**).
+- Answering questions (use **recall**).
 - Opening/closing work status alone (use **work**; remember may create pages under an existing hub).

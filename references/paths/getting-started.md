@@ -9,7 +9,7 @@ path_id: getting-started
 ## When
 
 The user is new to Atlas, asks how it works, how to start, or where knowledge
-can live. Explain. Do not execute init, mount, query, or remember.
+can live. Explain. Do not execute init, mount, recall, or remember.
 
 ## Enter
 
@@ -55,7 +55,7 @@ proof a store was used.
    If enrichment ran, refresh before the explanation with final
    `atlas_status`, resolved `root`, and `atlas_used` listing only stores
    whose evidence contributed. Final cards contain no `pending`.
-5. **Stop.** Suggest next modules (help, then init or query when the user
+5. **Stop.** Suggest next modules (help, then init or recall when the user
    actually wants those operations). Do not run them.
 
 ## Outputs
@@ -66,8 +66,8 @@ No new git remotes. No schema overlay install.
 ## Side effects and boundaries
 
 **Forbidden during this module:** `atlas mount`, `atlas init`,
-`atlas store init`, schema install, `atlas remember`, `atlas search` used as
-path **query**, compile, commit, push, index build, `gh repo create`.
+`atlas store init`, schema install, `atlas remember`, `atlas recall run` used as
+path **recall**, compile, commit, push, index build, `gh repo create`.
 
 Reading this module is not authority to create a store.
 
