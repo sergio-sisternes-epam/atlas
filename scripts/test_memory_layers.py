@@ -267,6 +267,17 @@ def main() -> int:
             "good gist not flagged gist_parent",
             ("gist_parent", "concepts/good_gist.md") not in info_paths,
         )
+        check(
+            "parent.md covered by good_gist is not missing_gist",
+            ("missing_gist", "concepts/parent.md") not in info_paths,
+            str(info_paths),
+        )
+        check(
+            "parent2.md is only 'covered' by the malformed two-parent gist, "
+            "so it still reports missing_gist",
+            ("missing_gist", "concepts/parent2.md") in info_paths,
+            str(info_paths),
+        )
 
         # --- Fixture 4: frame members ---
         store4 = tmp / "store4"
@@ -644,6 +655,72 @@ def main() -> int:
                 for i in payload9.get("critical", [])
             ),
             f"critical={payload9.get('critical')}",
+        )
+
+        # --- Fixture 10: --dry-run compile writes nothing (mesh.json, recall) ---
+        store10 = tmp / "store10"
+        init10 = run(["init", "--root", str(store10), "--schema-version", "2.0", "--json"])
+        check("init store10", init10.returncode == 0, init10.stderr)
+
+        (store10 / "mesh.fragment.json").write_text(
+            json.dumps(
+                {
+                    "atlases": [
+                        {"id": "demo", "root": "github.com/demo/demo", "access": "read"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        activate10 = run(
+            ["recall", "activate", "--profile", "atlas:scan", "--root", str(store10), "--json"]
+        )
+        check("recall activate atlas:scan on store10", activate10.returncode == 0, activate10.stderr)
+
+        mesh_path10 = store10 / "mesh.json"
+        recall_pointer10 = store10 / ".atlas-index" / "recall" / "current.json"
+
+        code10, payload10 = run_json(["compile", "--root", str(store10), "--json", "--dry-run"])
+        check("dry-run compile exits 0", code10 == 0, f"exit={code10} payload={payload10}")
+        check("dry-run compile does not write mesh.json", not mesh_path10.exists())
+        check(
+            "dry-run compile reports mesh.written as None",
+            payload10.get("mesh", {}).get("written") is None,
+            str(payload10.get("mesh")),
+        )
+        check(
+            "dry-run compile still reports mesh atlas_count",
+            payload10.get("mesh", {}).get("atlas_count") == 1,
+            str(payload10.get("mesh")),
+        )
+        check(
+            "dry-run compile does not publish recall index",
+            not recall_pointer10.exists(),
+        )
+        check(
+            "dry-run compile reports recall_index reason dry_run",
+            (payload10.get("recall_index") or {}).get("reason") == "dry_run",
+            str(payload10.get("recall_index")),
+        )
+        check("dry-run compile marks dry_run true", payload10.get("dry_run") is True)
+
+        code10b, payload10b = run_json(["compile", "--root", str(store10), "--json"])
+        check(
+            "non-dry-run compile exits 0 after dry-run (unchanged behaviour)",
+            code10b == 0,
+            f"exit={code10b} payload={payload10b}",
+        )
+        check("non-dry-run compile writes mesh.json", mesh_path10.exists())
+        check(
+            "non-dry-run compile reports mesh.written as mesh.json",
+            payload10b.get("mesh", {}).get("written") == "mesh.json",
+        )
+        check("non-dry-run compile publishes recall index", recall_pointer10.exists())
+        check(
+            "non-dry-run compile reports recall_index published",
+            (payload10b.get("recall_index") or {}).get("published") is True,
+            str(payload10b.get("recall_index")),
         )
 
         # --- File-content assertions ---

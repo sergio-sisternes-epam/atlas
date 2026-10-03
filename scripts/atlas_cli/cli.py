@@ -31,14 +31,21 @@ def main() -> None:
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option("--type", "type_name", default=None, help="focus page walk on this frontmatter type")
 @click.option("--path", "path_prefix", default=None, help="focus page walk on this store-relative prefix")
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    help="report findings only; never write mesh.json or publish the recall index",
+)
 def validate_cmd(
     root: str | None,
     as_json: bool,
     type_name: str | None,
     path_prefix: str | None,
+    dry_run: bool,
 ) -> None:
     """Hard gate: SCHEMA contract, staging empty, OKF type, links, page contract."""
-    raise SystemExit(cmd_validate.run(root, as_json, type_name, path_prefix))
+    raise SystemExit(cmd_validate.run(root, as_json, type_name, path_prefix, dry_run))
 
 
 @main.command("compile")
@@ -46,14 +53,21 @@ def validate_cmd(
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option("--type", "type_name", default=None, help="focus page walk on this frontmatter type")
 @click.option("--path", "path_prefix", default=None, help="focus page walk on this store-relative prefix")
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    help="report findings only; never write mesh.json or publish the recall index",
+)
 def compile_cmd(
     root: str | None,
     as_json: bool,
     type_name: str | None,
     path_prefix: str | None,
+    dry_run: bool,
 ) -> None:
     """Alias for validate (compile success = validate green + staging empty)."""
-    raise SystemExit(cmd_validate.run(root, as_json, type_name, path_prefix))
+    raise SystemExit(cmd_validate.run(root, as_json, type_name, path_prefix, dry_run))
 
 
 @main.command("id")

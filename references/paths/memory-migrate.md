@@ -41,12 +41,14 @@ incomplete.
 Run:
 
 ```bash
-python3 <atlas-skill>/scripts/atlas.py compile --root <root> --json
+python3 <atlas-skill>/scripts/atlas.py compile --root <root> --json --dry-run
 ```
 
-Report the memory rung in effect and the finding ids present: `legacy_document`,
-`missing_gist`, `gist_parent`, `frame_members`. Write nothing. Do not edit
-`SCHEMA.json`.
+`--dry-run` still reports every finding (including `legacy_document`,
+`missing_gist`, `gist_parent`, `frame_members`), but never writes
+`mesh.json` and never publishes the recall index — an unfocused compile
+would otherwise do both. Report the memory rung in effect and the finding
+ids present. Write nothing. Do not edit `SCHEMA.json`.
 
 ### inventory
 

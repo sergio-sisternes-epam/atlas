@@ -366,17 +366,43 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             return None
         return str(cand.relative_to(resolved_root)).replace("\\", "/")
 
-    # Index gists by the path of the parent they are derived_from.
+    def _valid_gist_parent(m: dict) -> str | None:
+        """Return the canonical parent path for a well-formed gist, else None.
+
+        A gist only counts toward ``gist_parent`` coverage when it has
+        exactly one ``derived_from`` parent, that parent resolves to a page
+        inside the store, and the parent's type is a valid gist-parent type
+        (not itself a gist). This mirrors the ``gist_parent`` ok check below
+        so a malformed gist (zero/two+ parents, gist-of-gist, outside the
+        store, wrong type) never suppresses ``missing_gist`` for its target.
+        """
+        parents = _related(m, "derived_from")
+        if len(parents) != 1:
+            return None
+        target = str(parents[0].get("path") or "").strip()
+        if not target:
+            return None
+        canon = _canonical_local_target(target)
+        found = by_rel_path.get(canon if canon is not None else target)
+        if found is None:
+            return None
+        _, tmeta = found
+        ttype = str(tmeta.get("type") or "").strip()
+        if ttype not in GIST_PARENT_TYPES:
+            return None
+        return canon if canon is not None else target
+
+    # Index gists by the path of the parent they are derived_from — only for
+    # valid single-parent gists; a malformed gist must not suppress the
+    # target's missing_gist finding.
     gists_by_parent: dict[str, list[str]] = {}
     for p, m in pages:
         if str(m.get("type") or "").strip() != "gist":
             continue
         gp = rel(root, p)
-        for item in _related(m, "derived_from"):
-            target = str(item.get("path") or "").strip()
-            if target:
-                canon = _canonical_local_target(target) or target
-                gists_by_parent.setdefault(canon, []).append(gp)
+        canon = _valid_gist_parent(m)
+        if canon is not None:
+            gists_by_parent.setdefault(canon, []).append(gp)
 
     findings: list[dict] = []
     for p, m in pages:
@@ -409,18 +435,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             )
 
         if ptype == "gist":
-            parents = _related(m, "derived_from")
-            ok = False
-            if len(parents) == 1:
-                target = str(parents[0].get("path") or "").strip()
-                canon = _canonical_local_target(target)
-                found = by_rel_path.get(canon if canon is not None else target)
-                if found is not None:
-                    _, tmeta = found
-                    ttype = str(tmeta.get("type") or "").strip()
-                    if ttype in GIST_PARENT_TYPES:
-                        ok = True
-            if not ok:
+            if _valid_gist_parent(m) is None:
                 findings.append(
                     {
                         "id": "gist_parent",
@@ -468,6 +483,7 @@ def run(
     as_json: bool = False,
     type_name: str | None = None,
     path_prefix: str | None = None,
+    dry_run: bool = False,
 ) -> int:
     r = store_root(root)
     critical: list[dict] = []
@@ -569,7 +585,7 @@ def run(
                 info.append(finding)
 
     # mesh consolidate (when fragments present)
-    mesh_result = mesh_consolidate(r)
+    mesh_result = mesh_consolidate(r, write=not dry_run)
     critical.extend(mesh_result.get("critical") or [])
     warnings.extend(mesh_result.get("warnings") or [])
     warnings.extend(_unknown_atlas_uri_warnings(r))
@@ -694,16 +710,19 @@ def run(
 
     index_info = None
     if not focused and not critical and recall_enabled(schema):
-        try:
-            index_info = publish_generation(r, schema, focused=False)
-        except (IndexError_, Exception) as e:
-            critical.append(
-                {
-                    "id": "recall_index",
-                    "path": ".atlas-index/recall",
-                    "msg": f"failed to publish recall generation: {e}",
-                }
-            )
+        if dry_run:
+            index_info = {"published": False, "reason": "dry_run"}
+        else:
+            try:
+                index_info = publish_generation(r, schema, focused=False)
+            except (IndexError_, Exception) as e:
+                critical.append(
+                    {
+                        "id": "recall_index",
+                        "path": ".atlas-index/recall",
+                        "msg": f"failed to publish recall generation: {e}",
+                    }
+                )
 
     result = {
         "root": str(r),
@@ -724,6 +743,7 @@ def run(
             "note": mesh_result.get("note"),
         },
         "recall_index": index_info,
+        "dry_run": dry_run,
     }
 
     if as_json:
