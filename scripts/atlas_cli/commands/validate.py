@@ -284,6 +284,10 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
     No memory key, a memory object with no/empty rung, or any shape problem
     all resolve to info (and a malformed memory block also raises a critical
     memory_rung issue while still treating the ladder as info).
+
+    Distinguish absent/blank string from a non-string rung value: falsey
+    non-strings (0, false, [], {}) must not collapse via ``or ""`` into an
+    absent rung on SCHEMA 1.0 stores that skip the v2 JSON Schema check.
     """
     if not schema:
         return "info", []
@@ -298,7 +302,21 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
                 "msg": "SCHEMA.memory must be an object; treating memory rung as info",
             }
         ]
-    rung = str(memory.get("rung") or "").strip().lower()
+    if "rung" not in memory or memory.get("rung") is None:
+        return "info", []
+    raw = memory["rung"]
+    if not isinstance(raw, str):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": (
+                    "SCHEMA.memory.rung must be a string (info, warn, or error); "
+                    f"got {type(raw).__name__} {raw!r}; treating memory rung as info"
+                ),
+            }
+        ]
+    rung = raw.strip().lower()
     if not rung:
         return "info", []
     if rung not in ("info", "warn", "error"):

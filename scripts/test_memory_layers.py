@@ -1050,6 +1050,73 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
+        # --- Fixture 16: falsey non-string memory.rung is critical (SCHEMA 1.0) ---
+        # SCHEMA 1.0 stores skip the v2 JSON Schema check, so 0/false/[]/{} must
+        # not collapse via `or ""` into an absent rung that lets compile exit 0.
+        store16 = tmp / "store16"
+        init16 = run(["init", "--root", str(store16), "--json"])
+        check("init store16", init16.returncode == 0, init16.stderr)
+        schema16_path = store16 / "SCHEMA.json"
+        schema16 = json.loads(schema16_path.read_text(encoding="utf-8"))
+        write_page(
+            store16 / "notes" / "alone.md",
+            "page",
+            "Alone",
+            "2026-10-03",
+        )
+        write_index(store16 / "notes", "Notes")
+
+        for falsey in (0, False, [], {}):
+            schema16["memory"] = {"rung": falsey}
+            schema16_path.write_text(json.dumps(schema16, indent=2) + "\n", encoding="utf-8")
+            code, payload = run_json(["compile", "--root", str(store16), "--json"])
+            label = type(falsey).__name__
+            crit_ids = findings_by_id(payload, "critical")
+            check(
+                f"falsey non-string rung ({label}={falsey!r}): exit != 0",
+                code != 0,
+                f"exit={code} critical={payload.get('critical')}",
+            )
+            check(
+                f"falsey non-string rung ({label}={falsey!r}): memory_rung critical",
+                "memory_rung" in crit_ids,
+                f"critical={payload.get('critical')}",
+            )
+            check(
+                f"falsey non-string rung ({label}={falsey!r}): message names type",
+                any(
+                    i.get("id") == "memory_rung"
+                    and "must be a string" in (i.get("msg") or "")
+                    for i in payload.get("critical", [])
+                ),
+                f"critical={payload.get('critical')}",
+            )
+
+        # Absent / blank string remain info (no memory_rung critical)
+        for case_name, memory_block in (
+            ("missing memory key", None),
+            ("memory without rung", {}),
+            ("rung null", {"rung": None}),
+            ("rung blank", {"rung": "   "}),
+        ):
+            if memory_block is None:
+                schema16.pop("memory", None)
+            else:
+                schema16["memory"] = memory_block
+            schema16_path.write_text(json.dumps(schema16, indent=2) + "\n", encoding="utf-8")
+            code, payload = run_json(["compile", "--root", str(store16), "--json"])
+            crit_ids = findings_by_id(payload, "critical")
+            check(
+                f"absent/blank rung ({case_name}): no memory_rung critical",
+                "memory_rung" not in crit_ids,
+                f"exit={code} critical={payload.get('critical')}",
+            )
+            check(
+                f"absent/blank rung ({case_name}): compile exit 0",
+                code == 0,
+                f"exit={code} critical={payload.get('critical')}",
+            )
+
         # --- File-content assertions ---
         skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         check(
