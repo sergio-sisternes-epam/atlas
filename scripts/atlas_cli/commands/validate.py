@@ -427,10 +427,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 {
                     "id": "missing_gist",
                     "path": rp,
-                    "msg": (
-                        "no gist is derived_from this page; a gist is not required "
-                        "while the memory rung is info."
-                    ),
+                    "msg": "no gist is derived_from this page.",
                 }
             )
 
