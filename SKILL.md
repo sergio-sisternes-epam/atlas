@@ -1,7 +1,7 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, query, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.12.0
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas search, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, memory-migrate, query, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+version: 0.13.0
 activation_card: on
 ---
 
@@ -129,6 +129,7 @@ still copies into staging; do not use it for strategy moves.
 | **mount** | Mount-if-missing and resolve `--root` | `references/paths/mount.md` |
 | **init** | New Atlas; default shared (`atlas` branch) or dedicated existing remote; never creates the repo | `references/paths/init.md` |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated | `references/paths/migrate.md` |
+| **memory-migrate** | Assess, inventory, or apply a named batch from a document-era store toward memory | `references/paths/memory-migrate.md` |
 | **query** | Find / answer from an Atlas | `references/paths/query.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
@@ -147,7 +148,7 @@ modules; they are not CLI verbs.
 
 1. **Formal lookup = path `query` + `atlas search`** - B17 card `path: query`, load `references/paths/query.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path query. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas search --engine grep` under their own card. That is not path query. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored.
+3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
 5. **Work cluster** - pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** - append only for structural store changes (not every experience).
@@ -185,6 +186,7 @@ python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--typ
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]
 python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <atlas> [--force]
 python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info|warn|error --root <atlas>
 ```
 
 Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `query` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
@@ -194,7 +196,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 | Topic | Rule |
 |-------|------|
 | Structure | Free layout; mandatory `SCHEMA.json`; short-lived `staging/`; `index.md` / `log.md` per OKF |
-| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document`, `protostar` (recommended, not closed) |
+| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `page`, `gist`, `frame` (recommended, not closed) |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind}]` - kinds: follows, records, supersedes, implements, derived_from, related |
 | Composition | Optional mesh; consolidated in compile |
@@ -220,7 +222,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, query, remember, work, landscape, schema, configure, ci,
+(mount, init, migrate, memory-migrate, query, remember, work, landscape, schema, configure, ci,
 help, getting-started). Packaged help baseline lives under `references/help/`.
 SCHEMA and templates live under `references/`. Do not dump full help into this
 file.

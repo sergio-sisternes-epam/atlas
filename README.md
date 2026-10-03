@@ -93,6 +93,7 @@ how to get started. Starting is asking Atlas how to do it.
 | Work | Open, update, or close work hubs. |
 | Landscape | Research competitors and symbionts into comparison memory. |
 | Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss` skill for best results. |
+| Memory migrate | Assess or migrate a document-era store toward page, gist, and frame. Assess and inventory write nothing. |
 | Configure | Inspect and select Semantic Memory Recall. |
 
 ## Related

@@ -332,6 +332,21 @@ def schema_uninstall_cmd(cid: str, root: str | None, as_json: bool) -> None:
     raise SystemExit(cmd_schema.run_uninstall(cid, root, as_json))
 
 
+@schema_group.command("memory-rung")
+@click.option(
+    "--set",
+    "rung",
+    required=True,
+    type=click.Choice(["info", "warn", "error"]),
+    help="memory.rung severity for legacy_document/missing_gist/gist_parent/frame_members",
+)
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def schema_memory_rung_cmd(rung: str, root: str | None, as_json: bool) -> None:
+    """Write SCHEMA.memory.rung (the only writer of that block)."""
+    raise SystemExit(cmd_schema.run_memory_rung(rung, root, as_json))
+
+
 @schema_group.command("upgrade")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
 @click.option("--to", "to_version", default="2.0", show_default=True)

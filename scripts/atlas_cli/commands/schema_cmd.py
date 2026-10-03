@@ -19,7 +19,7 @@ from ..core.overlay import (
     write_json,
     write_receipt,
 )
-from ..core.paths import rel, store_root
+from ..core.paths import SCHEMA_NAME, rel, store_root
 from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
 from ..core.schema import load_schema, staging_dir_name
 from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
@@ -300,6 +300,39 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
     if notes:
         payload["warning"] = "orphan overlay types remain on pages"
     _print(as_json, payload)
+    return 0
+
+
+def run_memory_rung(
+    rung: str,
+    root: str | None,
+    as_json: bool = False,
+) -> int:
+    r = store_root(root)
+    value = (rung or "").strip().lower()
+    if value not in ("info", "warn", "error"):
+        _print(as_json, {"ok": False, "error": f"unsupported --set {rung}", "root": str(r)})
+        return 2
+    schema, err = load_schema(r)
+    if err or schema is None:
+        _print(as_json, {"ok": False, "error": err or "missing SCHEMA.json", "root": str(r)})
+        return 2
+    schema["memory"] = {
+        "rung": value,
+        "layers": ["frame", "gist", "page"],
+        "legacy_types": ["document"],
+    }
+    schema_path = r / SCHEMA_NAME
+    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    _print(
+        as_json,
+        {
+            "ok": True,
+            "root": str(r),
+            "rung": value,
+            "notes": [f"wrote SCHEMA.json memory.rung={value}"],
+        },
+    )
     return 0
 
 

@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""Memory layers (page/gist/frame) regressions. Run: python3 scripts/test_memory_layers.py"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+ATLAS = ROOT / "scripts" / "atlas.py"
+
+
+def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ATLAS), *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+
+def run_json(args: list[str]) -> tuple[int, dict]:
+    result = run(args)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise AssertionError(
+            f"invalid JSON for {args}: {error}; stdout={result.stdout!r} stderr={result.stderr!r}"
+        ) from error
+    return result.returncode, payload
+
+
+PROSE = (
+    "This page carries enough non-link prose content to pass the "
+    "not_just_links body length check used across the test fixtures."
+)
+
+
+def write_page(path: Path, type_name: str, title: str, created: str, relates_to=None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rel_lines = ""
+    if relates_to:
+        rel_lines = "relates_to:\n" + "".join(
+            f"  - path: {item['path']}\n    kind: {item['kind']}\n" for item in relates_to
+        )
+    else:
+        rel_lines = "relates_to: []\n"
+    path.write_text(
+        "---\n"
+        f"type: {type_name}\n"
+        f"title: {title}\n"
+        f"created: {created}\n"
+        f"{rel_lines}"
+        "---\n\n"
+        "## Content\n\n"
+        f"{PROSE}\n",
+        encoding="utf-8",
+    )
+
+
+def write_index(folder: Path, label: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "index.md").write_text(f"# {label}\n\n- items\n", encoding="utf-8")
+
+
+def findings_by_id(payload: dict, bucket: str) -> list[str]:
+    return [i.get("id") for i in payload.get(bucket, [])]
+
+
+def main() -> int:
+    failures: list[str] = []
+
+    def check(name: str, condition: bool, detail: str = "") -> None:
+        status = "PASS" if condition else "FAIL"
+        print(f"[{status}] {name}")
+        if not condition:
+            failures.append(f"{name}: {detail}")
+
+    tmp = Path(tempfile.mkdtemp(prefix="atlas-memory-layers-"))
+    try:
+        # --- Fixture 1: default rung, a legacy document with no gist ---
+        store1 = tmp / "store1"
+        init = run(["init", "--root", str(store1), "--json"])
+        check("init store1", init.returncode == 0, init.stderr)
+
+        write_page(
+            store1 / "notes" / "legacy.md",
+            "document",
+            "Legacy note",
+            "2026-10-01",
+        )
+        write_index(store1 / "notes", "Notes")
+
+        code, payload = run_json(["compile", "--root", str(store1), "--json"])
+        check("default rung exit 0", code == 0, f"exit={code} critical={payload.get('critical')}")
+        info_ids = findings_by_id(payload, "info")
+        check(
+            "legacy_document and missing_gist are info by default",
+            "legacy_document" in info_ids and "missing_gist" in info_ids,
+            f"info={info_ids}",
+        )
+        check(
+            "legacy_document/missing_gist not in warnings",
+            "legacy_document" not in findings_by_id(payload, "warnings")
+            and "missing_gist" not in findings_by_id(payload, "warnings"),
+        )
+        check(
+            "legacy_document/missing_gist not in critical",
+            "legacy_document" not in findings_by_id(payload, "critical")
+            and "missing_gist" not in findings_by_id(payload, "critical"),
+        )
+        for item in payload.get("info", []):
+            if item.get("id") in ("legacy_document", "missing_gist"):
+                check(
+                    f"{item['id']} severity is info",
+                    item.get("severity") == "info",
+                    str(item),
+                )
+
+        # --- schema memory-rung --set warn ---
+        rung_code, rung_payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store1), "--json"]
+        )
+        check("schema memory-rung --set warn ok", rung_code == 0 and rung_payload.get("ok"))
+        schema_doc = json.loads((store1 / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "SCHEMA.memory.rung == warn after --set warn",
+            schema_doc.get("memory", {}).get("rung") == "warn",
+            str(schema_doc.get("memory")),
+        )
+        legacy_meta_before = (store1 / "notes" / "legacy.md").read_text(encoding="utf-8")
+        check(
+            "schema memory-rung does not retype pages",
+            "type: document" in legacy_meta_before,
+        )
+
+        code, payload = run_json(["compile", "--root", str(store1), "--json"])
+        check("warn rung exits 1", code == 1, f"exit={code}")
+        warn_ids = findings_by_id(payload, "warnings")
+        check(
+            "legacy_document/missing_gist in warnings at warn rung",
+            "legacy_document" in warn_ids and "missing_gist" in warn_ids,
+            f"warnings={warn_ids}",
+        )
+        for item in payload.get("warnings", []):
+            if item.get("id") in ("legacy_document", "missing_gist"):
+                check(f"{item['id']} severity is warning", item.get("severity") == "warning")
+        check(
+            "info empty of legacy_document/missing_gist at warn rung",
+            "legacy_document" not in findings_by_id(payload, "info")
+            and "missing_gist" not in findings_by_id(payload, "info"),
+        )
+
+        # --- schema memory-rung --set error ---
+        code, _ = run_json(
+            ["schema", "memory-rung", "--set", "error", "--root", str(store1), "--json"]
+        )
+        check("schema memory-rung --set error ok", code == 0)
+        code, payload = run_json(["compile", "--root", str(store1), "--json"])
+        check("error rung exits 2", code == 2, f"exit={code}")
+        crit_ids = findings_by_id(payload, "critical")
+        check(
+            "legacy_document/missing_gist in critical at error rung",
+            "legacy_document" in crit_ids and "missing_gist" in crit_ids,
+            f"critical={crit_ids}",
+        )
+        for item in payload.get("critical", []):
+            if item.get("id") in ("legacy_document", "missing_gist"):
+                check(f"{item['id']} severity is critical", item.get("severity") == "critical")
+
+        # --- Fixture 2: fresh init confirms absent rung behaves as info ---
+        store2 = tmp / "store2"
+        init2 = run(["init", "--root", str(store2), "--json"])
+        check("init store2", init2.returncode == 0, init2.stderr)
+        write_page(store2 / "legacy2.md", "document", "Legacy 2", "2026-10-01")
+        code, payload = run_json(["compile", "--root", str(store2), "--json"])
+        check("fresh store absent memory key exits 0", code == 0, f"exit={code}")
+        check(
+            "fresh store info has legacy findings",
+            "legacy_document" in findings_by_id(payload, "info"),
+        )
+        schema2 = json.loads((store2 / "SCHEMA.json").read_text(encoding="utf-8"))
+        check("fresh store has no memory key", "memory" not in schema2)
+
+        # --- Fixture 3: gist parent cardinality ---
+        store3 = tmp / "store3"
+        run(["init", "--root", str(store3), "--json"])
+        write_index(store3 / "concepts", "Concepts")
+        write_page(
+            store3 / "concepts" / "parent.md",
+            "decision",
+            "Parent experience",
+            "2026-10-01",
+        )
+        write_page(
+            store3 / "concepts" / "parent2.md",
+            "decision",
+            "Second parent",
+            "2026-10-01",
+        )
+        write_page(
+            store3 / "concepts" / "good_gist.md",
+            "gist",
+            "Good gist",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store3 / "concepts" / "zero_parent_gist.md",
+            "gist",
+            "Zero parent gist",
+            "2026-10-01",
+        )
+        write_page(
+            store3 / "concepts" / "two_parent_gist.md",
+            "gist",
+            "Two parent gist",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/parent.md", "kind": "derived_from"},
+                {"path": "concepts/parent2.md", "kind": "derived_from"},
+            ],
+        )
+        write_page(
+            store3 / "concepts" / "gist_of_gist.md",
+            "gist",
+            "Gist of gist",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/good_gist.md", "kind": "derived_from"}],
+        )
+        code, payload = run_json(["compile", "--root", str(store3), "--json"])
+        check("gist fixture exits 0 at default info rung", code == 0, f"exit={code}")
+        info_paths = {
+            (i.get("id"), i.get("path")) for i in payload.get("info", [])
+        }
+        check(
+            "zero-parent gist flagged gist_parent (info)",
+            ("gist_parent", "concepts/zero_parent_gist.md") in info_paths,
+            str(info_paths),
+        )
+        check(
+            "two-parent gist flagged gist_parent (info)",
+            ("gist_parent", "concepts/two_parent_gist.md") in info_paths,
+        )
+        check(
+            "gist-of-gist flagged gist_parent (info)",
+            ("gist_parent", "concepts/gist_of_gist.md") in info_paths,
+        )
+        check(
+            "good gist not flagged gist_parent",
+            ("gist_parent", "concepts/good_gist.md") not in info_paths,
+        )
+
+        # --- Fixture 4: frame members ---
+        store4 = tmp / "store4"
+        run(["init", "--root", str(store4), "--json"])
+        write_index(store4 / "concepts", "Concepts")
+        write_page(
+            store4 / "concepts" / "parent.md",
+            "decision",
+            "Frame parent",
+            "2026-10-01",
+        )
+        write_page(
+            store4 / "concepts" / "g1.md",
+            "gist",
+            "Gist one",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store4 / "concepts" / "g2.md",
+            "gist",
+            "Gist two",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store4 / "concepts" / "thin_frame.md",
+            "frame",
+            "Thin frame",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/g1.md", "kind": "related"}],
+        )
+        write_page(
+            store4 / "concepts" / "good_frame.md",
+            "frame",
+            "Good frame",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related"},
+                {"path": "concepts/g2.md", "kind": "related"},
+            ],
+        )
+        code, payload = run_json(["compile", "--root", str(store4), "--json"])
+        check("frame fixture exits 0 at default info rung", code == 0, f"exit={code}")
+        info_paths4 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
+        check(
+            "thin frame (one gist) flagged frame_members (info, not a failure)",
+            ("frame_members", "concepts/thin_frame.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "good frame (two gists) not flagged frame_members",
+            ("frame_members", "concepts/good_frame.md") not in info_paths4,
+        )
+        check(
+            "parent page with a gist is not flagged missing_gist",
+            ("missing_gist", "concepts/parent.md") not in info_paths4,
+        )
+        check(
+            "no gists/ directory required",
+            not (store4 / "gists").exists(),
+        )
+        check(
+            "no frames/ directory required",
+            not (store4 / "frames").exists(),
+        )
+
+        # --- Fixture 5: protostar with no gist produces no missing_gist ---
+        store5 = tmp / "store5"
+        run(["init", "--root", str(store5), "--json"])
+        write_page(
+            store5 / "origin.md",
+            "decision",
+            "Origin decision",
+            "2026-10-01",
+        )
+        write_page(
+            store5 / "proto.md",
+            "protostar",
+            "Forming idea",
+            "2026-10-01",
+            relates_to=[{"path": "origin.md", "kind": "derived_from"}],
+        )
+        code, payload = run_json(["compile", "--root", str(store5), "--json"])
+        check("protostar fixture exits 0", code == 0, f"exit={code}")
+        all_ids_paths = {
+            (i.get("id"), i.get("path"))
+            for bucket in ("info", "warnings", "critical")
+            for i in payload.get(bucket, [])
+        }
+        check(
+            "protostar without a gist has no missing_gist finding",
+            ("missing_gist", "proto.md") not in all_ids_paths,
+            str(all_ids_paths),
+        )
+
+        # --- File-content assertions ---
+        skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        check(
+            "SKILL.md registry mentions memory-migrate module file",
+            "memory-migrate" in skill_text
+            and "references/paths/memory-migrate.md" in skill_text,
+        )
+        memory_migrate_path = ROOT / "references/paths/memory-migrate.md"
+        check("memory-migrate.md exists", memory_migrate_path.is_file())
+        migrate_text = (ROOT / "references/paths/migrate.md").read_text(encoding="utf-8")
+        check(
+            "migrate.md does not reuse legacy_document/missing_gist phrasing",
+            "legacy type document" not in migrate_text
+            and "missing gist" not in migrate_text,
+        )
+        mm_text = memory_migrate_path.read_text(encoding="utf-8")
+        check(
+            "memory-migrate.md says assess and inventory do not write",
+            "assess" in mm_text.lower() and "write nothing" in mm_text.lower(),
+        )
+        query_text = (ROOT / "references/paths/query.md").read_text(encoding="utf-8")
+        check(
+            "query.md mentions index.md, frame, gist, page, and atlas search",
+            all(
+                term in query_text
+                for term in ("index.md", "frame", "gist", "page", "atlas search")
+            ),
+        )
+        check(
+            "SKILL.md has no checkpoint/constellation path row",
+            "| **checkpoint**" not in skill_text
+            and "| **constellation**" not in skill_text,
+        )
+        check(
+            "no checkpoint.md / constellation.md path modules",
+            not (ROOT / "references/paths/checkpoint.md").exists()
+            and not (ROOT / "references/paths/constellation.md").exists(),
+        )
+
+        if failures:
+            print("\n" + "\n".join(failures))
+            return 1
+        print("\nAll memory-layer regressions passed")
+        return 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -39,26 +39,28 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas sear
 ## Procedure
 
 1. **Resolve root** — load path `mount` first with `atlas_id` (and `ref`) on the card. Set `--root` to what `atlas resolve <atlas_id>` prints. Never `--root` the skill tree. Omitting `--root` uses the current working directory; the CLI does not default to the mount.
-2. **Form the query** from the intent. Free text plus only justified field tokens:
+2. **Read the hot list first** — the folder `index.md` is the hot list (short-term memory); the root `index.md` is the folder map. Read it before anything else. Do not replace this with frames or gists. Unlisted pages stay searchable long-term memory; absence from an index is not absence from the store.
+3. **Abstraction walk (frame → gist → page)** — open a frame only when a listed frame fits the ask. Read one gist. Stop there when the gist answers the ask. Open the parent page only when the gist is thin, contested, or the ask needs the record itself — and record that reason on the exit receipt. Do not load every gist for one ask. A gist's parent is never a gist. A frame lists gists, not pages, and is not a stack of summaries. Do not paste the memory-migrate procedure into this path; that migration work lives in path `memory-migrate`.
+4. **Form the query** from the intent. Free text plus only justified field tokens:
    - `type:<name>` — frontmatter type, not a body mention
    - `kva:<value>` — traffic (alive, forming, terminated, …)
    - `status:<value>`
    - `work_id:<id>`
    - `path:<store-relative prefix>`
    Unknown `field:` tokens stay free text. Do not invent filters the ask does not support.
-3. **Search (first)**
+5. **Search (for what the hot list and abstraction walk did not answer)**
    ```bash
    python3 <atlas-skill>/scripts/atlas.py search "<query>" --root <root> --json
    ```
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
 
    **Engine choice.** Grep is the basic default (`recall` off). After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
-4. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
-5. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
-6. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
-7. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror.
-8. **Never** treat `staging/` as an answer source.
-9. **Answer** from claims on those pages, citing paths. If nothing relevant → honest **gap**. After the one rewrite search, stop. A grep spiral is not allowed.
+6. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
+7. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
+8. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
+9. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror.
+10. **Never** treat `staging/` as an answer source.
+11. **Answer** from claims on those pages, citing paths. If nothing relevant → honest **gap**. After the one rewrite search, stop. A grep spiral is not allowed.
 
 ## Exit receipt
 
@@ -70,6 +72,8 @@ root: …
 search_cmd: atlas search "…" --root …
 hits_used: <paths>
 pages_read: <paths>
+stopped_at: frame | gist | page
+opened_page_reason: <present only when a page is opened>
 remember: no
 compile: n/a
 ```

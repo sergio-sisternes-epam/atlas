@@ -30,6 +30,12 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
+# Memory layers (page / gist / frame) are pinned here, not read from the store.
+GIST_PARENT_TYPES = frozenset(
+    {"experience", "decision", "lesson", "recipe", "document", "page", "protostar"}
+)
+MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
+
 
 def _ignores_in(text: str) -> set[str]:
     return {m.group(1).lower() for m in IGNORE_RE.finditer(text)}
@@ -272,6 +278,156 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     return issues
 
 
+def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
+    """Resolve the memory rung (info|warn|error) plus any shape-critical issues.
+
+    No memory key, a memory object with no/empty rung, or any shape problem
+    all resolve to info (and a malformed memory block also raises a critical
+    memory_rung issue while still treating the ladder as info).
+    """
+    if not schema:
+        return "info", []
+    memory = schema.get("memory")
+    if memory is None:
+        return "info", []
+    if not isinstance(memory, dict):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": "SCHEMA.memory must be an object; treating memory rung as info",
+            }
+        ]
+    rung = str(memory.get("rung") or "").strip().lower()
+    if not rung:
+        return "info", []
+    if rung not in ("info", "warn", "error"):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": (
+                    f"SCHEMA.memory.rung must be info, warn, or error (got {rung!r}); "
+                    "treating memory rung as info"
+                ),
+            }
+        ]
+    return rung, []
+
+
+def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """Legacy-document and memory-layer (gist/frame) findings.
+
+    Pages are read once here, independent of the main compile loop, so these
+    findings do not depend on iteration order or on other checks succeeding.
+    """
+    pages: list[tuple[Path, dict]] = []
+    for path in iter_concept_md(root, staging_name):
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, _ = read_page(path, schema_version(schema) if schema else "1.0")
+        except FrontmatterError:
+            continue
+        if not meta:
+            continue
+        pages.append((path, meta))
+
+    by_rel_path = {rel(root, p): (p, m) for p, m in pages}
+
+    def _related(meta: dict, kind: str) -> list[dict]:
+        out: list[dict] = []
+        for item in meta.get("relates_to") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or item.get("role") or "").strip().lower() == kind:
+                out.append(item)
+        return out
+
+    # Index gists by the path of the parent they are derived_from.
+    gists_by_parent: dict[str, list[str]] = {}
+    for p, m in pages:
+        if str(m.get("type") or "").strip() != "gist":
+            continue
+        gp = rel(root, p)
+        for item in _related(m, "derived_from"):
+            target = str(item.get("path") or "").strip()
+            if target:
+                gists_by_parent.setdefault(target, []).append(gp)
+
+    findings: list[dict] = []
+    for p, m in pages:
+        ptype = str(m.get("type") or "").strip()
+        rp = rel(root, p)
+
+        if ptype == "document":
+            findings.append(
+                {
+                    "id": "legacy_document",
+                    "path": rp,
+                    "msg": (
+                        "type document is a legacy durable object; consider migrating "
+                        "toward page/gist via path memory-migrate. The page is not "
+                        "rewritten automatically."
+                    ),
+                }
+            )
+
+        if ptype in MISSING_GIST_TYPES and not gists_by_parent.get(rp):
+            findings.append(
+                {
+                    "id": "missing_gist",
+                    "path": rp,
+                    "msg": (
+                        "no gist is derived_from this page; a gist is not required "
+                        "while the memory rung is info."
+                    ),
+                }
+            )
+
+        if ptype == "gist":
+            parents = _related(m, "derived_from")
+            ok = False
+            if len(parents) == 1:
+                target = str(parents[0].get("path") or "").strip()
+                found = by_rel_path.get(target)
+                if found is not None:
+                    _, tmeta = found
+                    ttype = str(tmeta.get("type") or "").strip()
+                    if ttype in GIST_PARENT_TYPES:
+                        ok = True
+            if not ok:
+                findings.append(
+                    {
+                        "id": "gist_parent",
+                        "path": rp,
+                        "msg": (
+                            "a gist has exactly one parent, and that parent is not "
+                            "a gist (parent must be experience, decision, lesson, "
+                            "recipe, document, page, or protostar)."
+                        ),
+                    }
+                )
+
+        if ptype == "frame":
+            count = 0
+            for item in _related(m, "related"):
+                target = str(item.get("path") or "").strip()
+                found = by_rel_path.get(target)
+                if found is not None and str(found[1].get("type") or "").strip() == "gist":
+                    count += 1
+            if count < 2:
+                findings.append(
+                    {
+                        "id": "frame_members",
+                        "path": rp,
+                        "msg": "a frame lists at least two gists, not pages.",
+                    }
+                )
+
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -281,6 +437,7 @@ def run(
     r = store_root(root)
     critical: list[dict] = []
     warnings: list[dict] = []
+    info: list[dict] = []
     focused_pages: list[dict] = []
     want_type = type_name.strip() if type_name else None
     want_path = path_prefix.strip() if path_prefix else None
@@ -331,6 +488,21 @@ def run(
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
+
+    # Memory rung (page / gist / frame): absent means info; malformed shapes
+    # raise a critical memory_rung issue but still treat the ladder as info.
+    memory_rung, memory_shape_issues = _memory_rung(schema)
+    critical.extend(memory_shape_issues)
+    for finding in _memory_findings(r, schema, staging_name):
+        if memory_rung == "error":
+            finding["severity"] = "critical"
+            critical.append(finding)
+        elif memory_rung == "warn":
+            finding["severity"] = "warning"
+            warnings.append(finding)
+        else:
+            finding["severity"] = "info"
+            info.append(finding)
 
     # mesh consolidate (when fragments present)
     mesh_result = mesh_consolidate(r)
@@ -482,6 +654,7 @@ def run(
         "ok": len(critical) == 0,
         "critical": critical,
         "warnings": warnings,
+        "info": info,
         "staging_dir": staging_name,
         "staging_count": len(staged),
         "type": want_type,
@@ -508,6 +681,10 @@ def run(
         if warnings:
             print(f"WARNINGS ({len(warnings)}):")
             for i in warnings:
+                print(f"  [{i['id']}] {i['path']}: {i['msg']}")
+        if info:
+            print(f"INFO ({len(info)}):")
+            for i in info:
                 print(f"  [{i['id']}] {i['path']}: {i['msg']}")
         mesh_note = mesh_result.get("written") or mesh_result.get("note")
         if mesh_note:

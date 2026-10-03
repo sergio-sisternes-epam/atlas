@@ -9,6 +9,30 @@
   consumer `apm install` run unauthenticated against public github.com. Public
   consumers still need no PAT.
 
+## 0.13.0 - 2026-10-03
+
+### Added
+
+- Memory layers **page**, **gist**, and **frame**: `page` is the memory
+  episode type (type id `page`, never a second type id `memory`); `gist`
+  summarises exactly one parent page (`relates_to` kind `derived_from`);
+  `frame` names a repeated pattern across two or more gists (`relates_to`
+  kind `related`). No `gists/` or `frames/` directory is required; no gist
+  of a gist; no frame whose members are pages.
+- Legacy type `document` is kept and reported on the new memory rung as the
+  legacy durable object, not auto-retyped.
+- Compile severity `info`: optional `memory.rung` is `info` by default,
+  `warn`, or `error`. Findings `legacy_document`, `missing_gist`,
+  `gist_parent`, and `frame_members` are info and do not change the exit
+  code at the default rung. `warn` reports them as warnings (exit 1, which
+  does not fail the merge gate). `error` reports them as critical (exit 2,
+  which fails the gate). Absent rung is `info`. Existing stores are not flipped.
+- Path **memory-migrate** (`references/paths/memory-migrate.md`): assess or
+  inventory a document-era store toward memory layers, or apply a named
+  batch only when the operator asks. Assess and inventory write nothing.
+- CLI `atlas schema memory-rung --set info|warn|error`: the only writer of
+  the `memory` SCHEMA block.
+
 ## 0.12.0 - 2026-09-13
 
 ### Added

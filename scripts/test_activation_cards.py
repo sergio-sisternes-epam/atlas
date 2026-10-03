@@ -13,6 +13,7 @@ PATHS = (
     "mount",
     "init",
     "migrate",
+    "memory-migrate",
     "query",
     "remember",
     "work",
