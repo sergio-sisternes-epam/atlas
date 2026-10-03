@@ -1,6 +1,6 @@
 ---
 name: atlas/paths/remember
-description: Persist claim-bearing knowledge into an Atlas and leave compile green. Load before writing experiences, decisions, lessons, recipes, documents.
+description: Persist claim-bearing knowledge into an Atlas and leave compile green. Load before writing experiences, decisions, lessons, recipes.
 path_id: remember
 ---
 
@@ -8,7 +8,9 @@ path_id: remember
 
 ## When
 
-Capture an experience, decision, lesson, recipe, document, or other durable concept into an Atlas.
+Capture an experience, decision, lesson, recipe, or other durable concept into an
+Atlas. `document` is an existing legacy type that remains valid to read; it is not
+a recommended choice for new writes.
 
 ## Enter
 
@@ -28,7 +30,7 @@ root: <atlas store root>
 1. **Resolve root** (same as query — path `mount`). If there is no active git repository, **stop**. Do not persist.
 2. **Wrong-frame trigger** — if the user explicitly kills a comparison or thesis (“wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”), do **not** keep writing the dead matrix. Load catalog skill **discuss** (substrate contract) and path `references/paths/terminate.md`. Pass `atlas_root` = this root, `subject_node`, and `living_node`. Return to remember only for living pages terminate asked you to author. Recipe: `references/recipes/terminate-wrong-path.md`.
    - **Thoughtful current-theory** — if the pages are `lesson`, live `decision`, or `recipe`, first think a designed inventory (path, type, one-line claim, source URIs). The remember card from Enter is enough; do not emit a second card. Persist may then proceed **without** human approval. If the human has asked for review on this persist (or named it important / hold for approval), show the inventory and **stop** until they approve or cut the set. Episodic `experience` and discussion-graph types are not this step. Recipe: `references/recipes/gated-memory-building.md`.
-3. **Choose type and path** — recommended types: `experience`, `decision`, `lesson`, `recipe`, `work`, `document`, `protostar`, `page`, `gist`, `frame` (and folder conventions under SCHEMA). Recommended frontmatter: `origin` (internal|third-party|user|derived), `sensitivity` (public|internal|restricted). A protostar is a forming idea (`kva: forming`, `growth: true`) parked beside its origin; never a `residuals/` folder.
+3. **Choose type and path** — recommended types: `experience`, `decision`, `lesson`, `recipe`, `work`, `protostar`, `page`, `gist`, `frame` (and folder conventions under SCHEMA). `document` is an existing legacy type that remains valid to read; it is not a recommended choice for new writes. Recommended frontmatter: `origin` (internal|third-party|user|derived), `sensitivity` (public|internal|restricted). A protostar is a forming idea (`kva: forming`, `growth: true`) parked beside its origin; never a `residuals/` folder.
 4. **Write** a claim-bearing page (frontmatter + body). Or:
    - `atlas migrate <source> --root <root>` into staging only, then
    - `atlas promote <staging-file> --to <target> [--type …] --root <root>`, then

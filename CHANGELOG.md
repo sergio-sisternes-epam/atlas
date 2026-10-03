@@ -2,13 +2,6 @@
 
 ## Unreleased
 
-### Changed
-
-- Package `description` now matches the README lede.
-- Atlas CI no longer requires `APM_READ_TOKEN`. Marketplace registration and
-  consumer `apm install` run unauthenticated against public github.com. Public
-  consumers still need no PAT.
-
 ## 0.13.0 - 2026-10-03
 
 ### Added
@@ -32,6 +25,13 @@
   batch only when the operator asks. Assess and inventory write nothing.
 - CLI `atlas schema memory-rung --set info|warn|error`: the only writer of
   the `memory` SCHEMA block.
+
+### Changed
+
+- Package `description` now matches the README lede.
+- Atlas CI no longer requires `APM_READ_TOKEN`. Marketplace registration and
+  consumer `apm install` run unauthenticated against public github.com. Public
+  consumers still need no PAT.
 
 ## 0.12.0 - 2026-09-13
 

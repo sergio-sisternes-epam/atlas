@@ -28,7 +28,7 @@ path_module: references/paths/memory-migrate.md
 intent: assess or migrate a document-era store
 root: <resolved SCHEMA root>
 rung: info | warn | error
-mode: assess | inventory | apply
+operation: assess | inventory | apply
 ```
 
 Then **read this file**. Missing card or unloaded module means Enter is
@@ -84,8 +84,8 @@ a store, it does not change memory layers).
 skill: atlas
 path: memory-migrate
 root: …
-mode: assess | inventory | apply
 compile: exit N
+operation: assess | inventory | apply
 batch: <named batch, apply only>
 ```
 

@@ -40,7 +40,8 @@ class CiActivationContractTests(unittest.TestCase):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("| **ci** |", skill)
         self.assertIn(
-            "path: query | remember | work | landscape | schema | configure | ci", skill
+            "path: query | remember | work | landscape | schema | configure | ci | memory-migrate",
+            skill,
         )
         self.assertIn("`path: compile` is the agent-session", self.path_ci)
 

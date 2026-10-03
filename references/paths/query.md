@@ -72,11 +72,15 @@ root: …
 search_cmd: atlas search "…" --root …
 hits_used: <paths>
 pages_read: <paths>
-stopped_at: frame | gist | page
+stopped_at: frame | gist | page | search_hit | gap
 opened_page_reason: <present only when a page is opened>
 remember: no
 compile: n/a
 ```
+
+`stopped_at: search_hit` means the answer came from an ordinary search hit without
+stopping on a frame, gist, or page. `stopped_at: gap` means an honest gap — nothing
+relevant was found.
 
 Claiming “checked the Atlas” without `search_cmd` ⇒ incomplete Exit.
 

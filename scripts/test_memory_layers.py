@@ -185,6 +185,19 @@ def main() -> int:
         )
         schema2 = json.loads((store2 / "SCHEMA.json").read_text(encoding="utf-8"))
         check("fresh store has no memory key", "memory" not in schema2)
+        check(
+            "fresh store types.recommended excludes document",
+            "document" not in schema2.get("types", {}).get("recommended", []),
+            str(schema2.get("types", {}).get("recommended")),
+        )
+        check(
+            "fresh store templates.by_type still has document",
+            "document" in schema2.get("templates", {}).get("by_type", {}),
+        )
+        check(
+            "fresh store copied templates/document.md",
+            (store2 / "templates" / "document.md").is_file(),
+        )
 
         # --- Fixture 3: gist parent cardinality ---
         store3 = tmp / "store3"
@@ -348,6 +361,71 @@ def main() -> int:
             "protostar without a gist has no missing_gist finding",
             ("missing_gist", "proto.md") not in all_ids_paths,
             str(all_ids_paths),
+        )
+
+        # --- Fixture 6: relates_to targets normalized to canonical page keys ---
+        store6 = tmp / "store6"
+        run(["init", "--root", str(store6), "--json"])
+        write_index(store6 / "concepts", "Concepts")
+        write_page(
+            store6 / "concepts" / "parent.md",
+            "decision",
+            "Dotted parent",
+            "2026-10-01",
+        )
+        write_page(
+            store6 / "concepts" / "g1.md",
+            "gist",
+            "Gist one (dotted parent)",
+            "2026-10-01",
+            relates_to=[{"path": "./concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store6 / "concepts" / "g2.md",
+            "gist",
+            "Gist two (dotted parent)",
+            "2026-10-01",
+            relates_to=[{"path": "./concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store6 / "concepts" / "dotted_frame.md",
+            "frame",
+            "Dotted frame",
+            "2026-10-01",
+            relates_to=[
+                {"path": "./concepts/g1.md", "kind": "related"},
+                {"path": "./concepts/g2.md", "kind": "related"},
+            ],
+        )
+        write_page(
+            store6 / "concepts" / "outside_gist.md",
+            "gist",
+            "Gist with unresolved parent",
+            "2026-10-01",
+            relates_to=[{"path": "../outside/nope.md", "kind": "derived_from"}],
+        )
+        code, payload = run_json(["compile", "--root", str(store6), "--json"])
+        info_paths6 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
+        check(
+            "dotted-path parent with a gist is not flagged missing_gist",
+            ("missing_gist", "concepts/parent.md") not in info_paths6,
+            str(info_paths6),
+        )
+        check(
+            "gist with dotted-path parent is not flagged gist_parent",
+            ("gist_parent", "concepts/g1.md") not in info_paths6
+            and ("gist_parent", "concepts/g2.md") not in info_paths6,
+            str(info_paths6),
+        )
+        check(
+            "frame listing two dotted-path gists is not flagged frame_members",
+            ("frame_members", "concepts/dotted_frame.md") not in info_paths6,
+            str(info_paths6),
+        )
+        check(
+            "gist whose parent target resolves outside the store still flagged gist_parent",
+            ("gist_parent", "concepts/outside_gist.md") in info_paths6,
+            str(info_paths6),
         )
 
         # --- File-content assertions ---

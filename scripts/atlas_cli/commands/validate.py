@@ -344,6 +344,25 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 out.append(item)
         return out
 
+    def _canonical_local_target(target: str) -> str | None:
+        """Resolve a relates_to target to the canonical store-relative key.
+
+        Mirrors the resolution ``_check_relates_to`` uses: remote references
+        (http(s):// or atlas://) are left alone (handled elsewhere), and any
+        local target is resolved against the store root so it matches the
+        page index built from ``rel()``. Targets that resolve outside the
+        store root are not treated as local page keys.
+        """
+        if not target or target.startswith(("http://", "https://", "atlas://")):
+            return None
+        resolved_root = root.resolve()
+        cand = (root / target).resolve()
+        try:
+            cand.relative_to(resolved_root)
+        except ValueError:
+            return None
+        return str(cand.relative_to(resolved_root)).replace("\\", "/")
+
     # Index gists by the path of the parent they are derived_from.
     gists_by_parent: dict[str, list[str]] = {}
     for p, m in pages:
@@ -353,7 +372,8 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
         for item in _related(m, "derived_from"):
             target = str(item.get("path") or "").strip()
             if target:
-                gists_by_parent.setdefault(target, []).append(gp)
+                canon = _canonical_local_target(target) or target
+                gists_by_parent.setdefault(canon, []).append(gp)
 
     findings: list[dict] = []
     for p, m in pages:
@@ -390,7 +410,8 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             ok = False
             if len(parents) == 1:
                 target = str(parents[0].get("path") or "").strip()
-                found = by_rel_path.get(target)
+                canon = _canonical_local_target(target)
+                found = by_rel_path.get(canon if canon is not None else target)
                 if found is not None:
                     _, tmeta = found
                     ttype = str(tmeta.get("type") or "").strip()
@@ -413,7 +434,8 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             count = 0
             for item in _related(m, "related"):
                 target = str(item.get("path") or "").strip()
-                found = by_rel_path.get(target)
+                canon = _canonical_local_target(target)
+                found = by_rel_path.get(canon if canon is not None else target)
                 if found is not None and str(found[1].get("type") or "").strip() == "gist":
                     count += 1
             if count < 2:

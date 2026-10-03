@@ -45,7 +45,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: query | remember | work | landscape | schema | configure | ci
+path: query | remember | work | landscape | schema | configure | ci | memory-migrate
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>

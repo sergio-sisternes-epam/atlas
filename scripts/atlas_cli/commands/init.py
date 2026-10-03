@@ -51,7 +51,6 @@ DEFAULT_SCHEMA = {
             "lesson",
             "recipe",
             "work",
-            "document",
             "protostar",
             "gist",
             "frame",
