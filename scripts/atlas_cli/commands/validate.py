@@ -521,20 +521,49 @@ def run(
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
 
+    # Resolve --type/--path focus before emitting page-scoped findings so
+    # memory findings honour the same intersection as the main page loop.
+    skip_pages = False
+    if want_path:
+        focus_path, path_err = _resolve_focus_path(r, want_path)
+        if path_err:
+            critical.append({"id": "focus_path", "path": want_path, "msg": path_err})
+            focus_path = None
+            skip_pages = True
+
     # Memory rung (page / gist / frame): absent means info; malformed shapes
     # raise a critical memory_rung issue but still treat the ladder as info.
     memory_rung, memory_shape_issues = _memory_rung(schema)
     critical.extend(memory_shape_issues)
-    for finding in _memory_findings(r, schema, staging_name):
-        if memory_rung == "error":
-            finding["severity"] = "critical"
-            critical.append(finding)
-        elif memory_rung == "warn":
-            finding["severity"] = "warning"
-            warnings.append(finding)
-        else:
-            finding["severity"] = "info"
-            info.append(finding)
+    if not skip_pages:
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _memory_findings(r, schema, staging_name):
+            if focused:
+                fpath = (r / finding["path"]).resolve()
+                try:
+                    meta, _ = read_page(fpath, sv)
+                except FrontmatterError:
+                    meta = None
+                if meta:
+                    if not _in_focus(fpath, meta, want_type, focus_path):
+                        continue
+                else:
+                    if want_type:
+                        continue
+                    if focus_path is not None:
+                        try:
+                            fpath.relative_to(focus_path)
+                        except ValueError:
+                            continue
+            if memory_rung == "error":
+                finding["severity"] = "critical"
+                critical.append(finding)
+            elif memory_rung == "warn":
+                finding["severity"] = "warning"
+                warnings.append(finding)
+            else:
+                finding["severity"] = "info"
+                info.append(finding)
 
     # mesh consolidate (when fragments present)
     mesh_result = mesh_consolidate(r)
@@ -553,14 +582,6 @@ def run(
                     "msg": "staging is not empty — compile-in-place required before green",
                 }
             )
-
-    skip_pages = False
-    if want_path:
-        focus_path, path_err = _resolve_focus_path(r, want_path)
-        if path_err:
-            critical.append({"id": "focus_path", "path": want_path, "msg": path_err})
-            focus_path = None
-            skip_pages = True
 
     # concept pages
     for path in iter_concept_md(r, staging_name):

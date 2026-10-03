@@ -519,6 +519,93 @@ def main() -> int:
             str(schema7_after.get("memory")),
         )
 
+        # --- Fixture 8: focused compile must not emit out-of-scope memory findings ---
+        store8 = tmp / "store8"
+        init8 = run(["init", "--root", str(store8), "--json"])
+        check("init store8", init8.returncode == 0, init8.stderr)
+        write_page(
+            store8 / "out_of_scope" / "legacy.md",
+            "document",
+            "Out of scope legacy",
+            "2026-10-03",
+        )
+        write_index(store8 / "out_of_scope", "Out of scope")
+        write_page(
+            store8 / "in_scope" / "note.md",
+            "page",
+            "In scope page",
+            "2026-10-03",
+        )
+        write_page(
+            store8 / "in_scope" / "note-gist.md",
+            "gist",
+            "In scope gist",
+            "2026-10-03",
+            relates_to=[{"path": "in_scope/note.md", "kind": "derived_from"}],
+        )
+        write_index(store8 / "in_scope", "In scope")
+        rung8_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store8), "--json"]
+        )
+        check("store8 memory-rung warn ok", rung8_code == 0)
+
+        code, payload = run_json(["compile", "--root", str(store8), "--json"])
+        check(
+            "unfocused compile still surfaces out-of-scope memory findings",
+            code == 1
+            and "legacy_document" in findings_by_id(payload, "warnings")
+            and any(
+                i.get("id") == "legacy_document" and "out_of_scope" in (i.get("path") or "")
+                for i in payload.get("warnings", [])
+            ),
+            f"exit={code} warnings={payload.get('warnings')}",
+        )
+
+        code, payload = run_json(
+            ["compile", "--root", str(store8), "--path", "in_scope", "--json"]
+        )
+        all_findings = (
+            list(payload.get("warnings") or [])
+            + list(payload.get("info") or [])
+            + list(payload.get("critical") or [])
+        )
+        check(
+            "focused --path compile exits 0 with in-scope gist present",
+            code == 0,
+            f"exit={code} critical={payload.get('critical')} warnings={payload.get('warnings')}",
+        )
+        check(
+            "focused --path compile omits out-of-scope legacy_document findings",
+            not any(
+                i.get("id") == "legacy_document" and "out_of_scope" in (i.get("path") or "")
+                for i in all_findings
+            ),
+            f"findings={all_findings}",
+        )
+        check(
+            "focused --path compile omits out-of-scope missing_gist findings",
+            not any(
+                i.get("id") == "missing_gist" and "out_of_scope" in (i.get("path") or "")
+                for i in all_findings
+            ),
+            f"findings={all_findings}",
+        )
+
+        code, payload = run_json(
+            ["compile", "--root", str(store8), "--type", "page", "--json"]
+        )
+        all_findings = (
+            list(payload.get("warnings") or [])
+            + list(payload.get("info") or [])
+            + list(payload.get("critical") or [])
+        )
+        check(
+            "focused --type page compile exits 0 and omits document memory findings",
+            code == 0
+            and not any(i.get("id") == "legacy_document" for i in all_findings),
+            f"exit={code} findings={all_findings}",
+        )
+
         # --- File-content assertions ---
         skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         check(
