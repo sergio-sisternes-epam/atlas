@@ -22,6 +22,7 @@ FORBIDDEN_CORE = frozenset(
         "mesh",
         "sources_profile",
         "recall",
+        "memory",
     }
 )
 CONTRIB_MERGE = frozenset({"bindings", "presets"})
