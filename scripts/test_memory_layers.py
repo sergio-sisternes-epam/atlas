@@ -40,7 +40,14 @@ PROSE = (
 )
 
 
-def write_page(path: Path, type_name: str, title: str, created: str, relates_to=None) -> None:
+def write_page(
+    path: Path,
+    type_name: str,
+    title: str,
+    created: str,
+    relates_to=None,
+    body_suffix: str = "",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rel_lines = ""
     if relates_to:
@@ -57,7 +64,8 @@ def write_page(path: Path, type_name: str, title: str, created: str, relates_to=
         f"{rel_lines}"
         "---\n\n"
         "## Content\n\n"
-        f"{PROSE}\n",
+        f"{PROSE}\n"
+        f"{body_suffix}",
         encoding="utf-8",
     )
 
@@ -721,6 +729,284 @@ def main() -> int:
             "non-dry-run compile reports recall_index published",
             (payload10b.get("recall_index") or {}).get("published") is True,
             str(payload10b.get("recall_index")),
+        )
+
+        # --- Fixture 11: inline atlas-ignore comments suppress memory findings ---
+        store11 = tmp / "store11"
+        init11 = run(["init", "--root", str(store11), "--json"])
+        check("init store11", init11.returncode == 0, init11.stderr)
+        write_page(
+            store11 / "notes" / "ignored_doc.md",
+            "document",
+            "Ignored legacy doc",
+            "2026-10-03",
+            body_suffix=(
+                "<!-- atlas-ignore: legacy_document -->\n"
+                "<!-- atlas-ignore: missing_gist -->\n"
+            ),
+        )
+        write_index(store11 / "notes", "Notes")
+        write_page(
+            store11 / "notes" / "ignored_gist.md",
+            "gist",
+            "Ignored gist with bad parent",
+            "2026-10-03",
+            body_suffix="<!-- atlas-ignore: gist_parent -->\n",
+        )
+        write_page(
+            store11 / "notes" / "ignored_frame.md",
+            "frame",
+            "Ignored frame with too few members",
+            "2026-10-03",
+            body_suffix="<!-- atlas-ignore: frame_members -->\n",
+        )
+        rung11_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store11), "--json"]
+        )
+        check("store11 memory-rung warn ok", rung11_code == 0)
+
+        code, payload = run_json(["compile", "--root", str(store11), "--json"])
+        four_ids = {"missing_gist", "legacy_document", "gist_parent", "frame_members"}
+        all_found_ids = (
+            set(findings_by_id(payload, "info"))
+            | set(findings_by_id(payload, "warnings"))
+            | set(findings_by_id(payload, "critical"))
+        )
+        check(
+            "inline-ignored memory findings: exit 0 with allow_inline_ignores true",
+            code == 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "inline-ignored memory findings: none of the four ids appear",
+            not (four_ids & all_found_ids),
+            f"found={all_found_ids}",
+        )
+
+        schema11_path = store11 / "SCHEMA.json"
+        schema11 = json.loads(schema11_path.read_text(encoding="utf-8"))
+        schema11["compile"]["allow_inline_ignores"] = False
+        schema11_path.write_text(json.dumps(schema11, indent=2) + "\n", encoding="utf-8")
+
+        code, payload = run_json(["compile", "--root", str(store11), "--json"])
+        all_found_ids = (
+            set(findings_by_id(payload, "info"))
+            | set(findings_by_id(payload, "warnings"))
+            | set(findings_by_id(payload, "critical"))
+        )
+        check(
+            "allow_inline_ignores false: exit 1 (warn rung)",
+            code == 1,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "allow_inline_ignores false: all four ids reported as warnings",
+            four_ids <= set(findings_by_id(payload, "warnings")),
+            f"warnings={findings_by_id(payload, 'warnings')}",
+        )
+
+        # --- Fixture 12: inline ignores are page-scoped, not global ---
+        store12 = tmp / "store12"
+        init12 = run(["init", "--root", str(store12), "--json"])
+        check("init store12", init12.returncode == 0, init12.stderr)
+        write_page(
+            store12 / "notes" / "doc_commented.md",
+            "document",
+            "Commented legacy doc",
+            "2026-10-03",
+            body_suffix=(
+                "<!-- atlas-ignore: legacy_document -->\n"
+                "<!-- atlas-ignore: missing_gist -->\n"
+            ),
+        )
+        write_page(
+            store12 / "notes" / "doc_plain.md",
+            "document",
+            "Plain legacy doc",
+            "2026-10-03",
+        )
+        write_index(store12 / "notes", "Notes")
+        rung12_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store12), "--json"]
+        )
+        check("store12 memory-rung warn ok", rung12_code == 0)
+
+        code, payload = run_json(["compile", "--root", str(store12), "--json"])
+        warn_items = payload.get("warnings") or []
+        check(
+            "page-scoped ignore: doc_plain still reports legacy_document/missing_gist",
+            any(
+                i.get("id") == "legacy_document" and "doc_plain" in (i.get("path") or "")
+                for i in warn_items
+            )
+            and any(
+                i.get("id") == "missing_gist" and "doc_plain" in (i.get("path") or "")
+                for i in warn_items
+            ),
+            f"warnings={warn_items}",
+        )
+        check(
+            "page-scoped ignore: doc_commented omits legacy_document/missing_gist",
+            not any(
+                i.get("id") in ("legacy_document", "missing_gist")
+                and "doc_commented" in (i.get("path") or "")
+                for i in warn_items
+            ),
+            f"warnings={warn_items}",
+        )
+
+        # --- Fixture 13: info-only terminal summary line ---
+        store13 = tmp / "store13"
+        init13 = run(["init", "--root", str(store13), "--json"])
+        check("init store13", init13.returncode == 0, init13.stderr)
+        write_page(
+            store13 / "notes" / "legacy.md",
+            "document",
+            "Legacy note",
+            "2026-10-03",
+        )
+        write_index(store13 / "notes", "Notes")
+        text_result = run(["compile", "--root", str(store13)])
+        check(
+            "info-only compile exits 0",
+            text_result.returncode == 0,
+            f"exit={text_result.returncode} stderr={text_result.stderr}",
+        )
+        check(
+            "info-only compile prints INFO section",
+            "INFO (" in text_result.stdout,
+            text_result.stdout,
+        )
+        check(
+            "info-only compile prints the informational-only summary",
+            "ok — informational findings only" in text_result.stdout,
+            text_result.stdout,
+        )
+        check(
+            "info-only compile does not print the no-issues summary",
+            "ok — no issues" not in text_result.stdout,
+            text_result.stdout,
+        )
+
+        store14 = tmp / "store14"
+        init14 = run(["init", "--root", str(store14), "--json"])
+        check("init store14", init14.returncode == 0, init14.stderr)
+        write_page(
+            store14 / "notes" / "page.md",
+            "page",
+            "Clean page",
+            "2026-10-03",
+        )
+        write_page(
+            store14 / "notes" / "page-gist.md",
+            "gist",
+            "Clean page gist",
+            "2026-10-03",
+            relates_to=[{"path": "notes/page.md", "kind": "derived_from"}],
+        )
+        write_index(store14 / "notes", "Notes")
+        text_result14 = run(["compile", "--root", str(store14)])
+        check(
+            "no-issues compile exits 0",
+            text_result14.returncode == 0,
+            f"exit={text_result14.returncode} stderr={text_result14.stderr}",
+        )
+        check(
+            "no-issues compile prints the no-issues summary",
+            "ok — no issues" in text_result14.stdout,
+            text_result14.stdout,
+        )
+        check(
+            "no-issues compile does not print the informational-only summary",
+            "ok — informational findings only" not in text_result14.stdout,
+            text_result14.stdout,
+        )
+
+        # --- Fixture 15: v2 memory.layers / memory.legacy_types are constrained ---
+        schema_doc_path = ROOT / "scripts/atlas_cli/schemas/store-v2.schema.json"
+        schema_doc = json.loads(schema_doc_path.read_text(encoding="utf-8"))
+        memory_props = schema_doc["properties"]["memory"]["properties"]
+        check(
+            "store-v2 schema: memory.layers enum is frame/gist/page",
+            memory_props["layers"]["items"].get("enum") == ["frame", "gist", "page"],
+            str(memory_props["layers"]),
+        )
+        check(
+            "store-v2 schema: memory.legacy_types enum includes document",
+            memory_props["legacy_types"]["items"].get("enum") == ["document"],
+            str(memory_props["legacy_types"]),
+        )
+
+        store15 = tmp / "store15"
+        init15 = run(["init", "--root", str(store15), "--json"])
+        check("init store15", init15.returncode == 0, init15.stderr)
+        rung15_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "info", "--root", str(store15), "--json"]
+        )
+        check("store15 memory-rung info ok", rung15_code == 0)
+        apply15_code, apply15_payload = run_json(
+            ["schema", "upgrade", "--apply", "--root", str(store15), "--json"]
+        )
+        check(
+            "store15 schema upgrade --apply ok",
+            apply15_code == 0 and apply15_payload.get("ok"),
+            str(apply15_payload),
+        )
+        schema15_path = store15 / "SCHEMA.json"
+        schema15 = json.loads(schema15_path.read_text(encoding="utf-8"))
+        check(
+            "store15 upgraded to 2.0",
+            schema15.get("schema_version") == "2.0",
+            str(schema15.get("schema_version")),
+        )
+        check(
+            "store15 legacy_types includes document after upgrade",
+            "document" in (schema15.get("memory", {}).get("legacy_types") or []),
+            str(schema15.get("memory")),
+        )
+
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check(
+            "store15 default memory.layers/legacy_types: no schema_v2 critical",
+            not any(
+                i.get("id") == "schema_v2"
+                and ("layers" in (i.get("msg") or "") or "legacy_types" in (i.get("msg") or ""))
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["other"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 invalid layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 invalid layers: schema_v2 critical mentions layers",
+            any(
+                i.get("id") == "schema_v2" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["legacy_types"] = ["not-a-type"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 invalid legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 invalid legacy_types: schema_v2 critical present",
+            any(i.get("id") == "schema_v2" for i in payload.get("critical", [])),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["legacy_types"] = ["document"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check(
+            "store15 restored legacy_types: no schema_v2 critical",
+            not any(i.get("id") == "schema_v2" for i in payload.get("critical", [])),
+            f"critical={payload.get('critical')}",
         )
 
         # --- File-content assertions ---

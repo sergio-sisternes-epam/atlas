@@ -31,11 +31,11 @@
         "rung": { "type": "string", "enum": ["info", "warn", "error"] },
         "layers": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string", "enum": ["frame", "gist", "page"] }
         },
         "legacy_types": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string", "enum": ["document"] }
         }
       },
       "additionalProperties": false

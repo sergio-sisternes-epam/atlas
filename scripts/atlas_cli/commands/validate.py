@@ -554,9 +554,22 @@ def run(
     # raise a critical memory_rung issue but still treat the ladder as info.
     memory_rung, memory_shape_issues = _memory_rung(schema)
     critical.extend(memory_shape_issues)
+    allow_inline_ignores = True
+    if isinstance(schema, dict):
+        compile_cfg = schema.get("compile")
+        if isinstance(compile_cfg, dict) and "allow_inline_ignores" in compile_cfg:
+            allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
         for finding in _memory_findings(r, schema, staging_name):
+            if allow_inline_ignores:
+                fpath_ign = (r / finding["path"]).resolve()
+                try:
+                    ign_text = fpath_ign.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    ign_text = ""
+                if finding["id"] in _ignores_in(ign_text):
+                    continue
             if focused:
                 fpath = (r / finding["path"]).resolve()
                 try:
@@ -770,8 +783,10 @@ def run(
             for issue in warnings
             if issue.get("id") not in NON_BLOCKING_WARNING_IDS
         ]
-        if not critical and not warnings:
+        if not critical and not warnings and not info:
             print("ok — no issues")
+        elif not critical and not warnings:
+            print("ok — informational findings only")
         elif not critical and not blocking_warnings:
             print("ok — non-blocking external dependency warnings only")
         elif not critical:
