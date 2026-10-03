@@ -48,10 +48,11 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas sear
    - `work_id:<id>`
    - `path:<store-relative prefix>`
    Unknown `field:` tokens stay free text. Do not invent filters the ask does not support.
-5. **Search (for what the hot list and abstraction walk did not answer)**
+5. **Search (always run, even when the gist already answered)**
    ```bash
    python3 <atlas-skill>/scripts/atlas.py search "<query>" --root <root> --json
    ```
+   Run this step regardless of whether the hot list or abstraction walk already answered the ask — the exit receipt always records `search_cmd`. Stopping at the gist (step 3) decides whether the parent page is opened, not whether search runs.
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
 
    **Engine choice.** Grep is the basic default (`recall` off). After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).

@@ -606,6 +606,46 @@ def main() -> int:
             f"exit={code} findings={all_findings}",
         )
 
+        # --- Fixture 9: malformed relates_to (scalar) must not crash compile ---
+        store9 = tmp / "store9"
+        init9 = run(["init", "--root", str(store9), "--schema-version", "2.0", "--json"])
+        check("init store9", init9.returncode == 0, init9.stderr)
+        (store9 / "notes").mkdir(parents=True, exist_ok=True)
+        (store9 / "notes" / "bad-gist.md").write_text(
+            "---\n"
+            "type: gist\n"
+            "title: Bad gist\n"
+            "created: 2026-10-03\n"
+            "relates_to: 42\n"
+            "---\n\n"
+            "## Content\n\n"
+            f"{PROSE}\n",
+            encoding="utf-8",
+        )
+        write_index(store9 / "notes", "Notes")
+
+        code9, payload9 = run_json(["compile", "--root", str(store9), "--json"])
+        check(
+            "malformed relates_to compile does not crash (valid JSON)",
+            isinstance(payload9, dict),
+            f"stdout parse failed: {payload9!r}",
+        )
+        crit9_ids = findings_by_id(payload9, "critical")
+        check(
+            "malformed relates_to produces relates_to critical finding",
+            "relates_to" in crit9_ids,
+            f"critical={payload9.get('critical')}",
+        )
+        check(
+            "malformed relates_to critical message says must be a list",
+            any(
+                i.get("id") == "relates_to"
+                and "must be a list" in (i.get("msg") or "")
+                for i in payload9.get("critical", [])
+            ),
+            f"critical={payload9.get('critical')}",
+        )
+
         # --- File-content assertions ---
         skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         check(
@@ -633,6 +673,16 @@ def main() -> int:
                 term in query_text
                 for term in ("index.md", "frame", "gist", "page", "atlas search")
             ),
+        )
+        check(
+            "query.md still requires search_cmd on exit",
+            "search_cmd" in query_text
+            and "without `search_cmd`" in query_text
+            and "incomplete Exit" in query_text,
+        )
+        check(
+            "query.md still tells the reader to stop when the gist answers",
+            "Stop there when the gist answers the ask" in query_text,
         )
         check(
             "SKILL.md has no checkpoint/constellation path row",

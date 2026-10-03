@@ -337,7 +337,10 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
 
     def _related(meta: dict, kind: str) -> list[dict]:
         out: list[dict] = []
-        for item in meta.get("relates_to") or []:
+        rels = meta.get("relates_to")
+        if not isinstance(rels, list):
+            return out
+        for item in rels:
             if not isinstance(item, dict):
                 continue
             if str(item.get("kind") or item.get("role") or "").strip().lower() == kind:
