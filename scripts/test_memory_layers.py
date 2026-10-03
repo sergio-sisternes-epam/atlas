@@ -1041,6 +1041,34 @@ def main() -> int:
         )
 
         schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["legacy_types"] = []
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 empty legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 empty legacy_types: schema_v2 critical mentions legacy_types",
+            any(
+                i.get("id") == "schema_v2" and "legacy_types" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["legacy_types"] = ["document", "document"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 duplicate legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 duplicate legacy_types: schema_v2 critical mentions legacy_types",
+            any(
+                i.get("id") == "schema_v2" and "legacy_types" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["frame", "gist", "page"]
         schema15["memory"]["legacy_types"] = ["document"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
