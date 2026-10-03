@@ -24,6 +24,21 @@
     },
     "bindings": { "type": "object" },
     "presets": { "type": "object" },
-    "recall": { "$ref": "https://atlas.local/schemas/recall-v1" }
+    "recall": { "$ref": "https://atlas.local/schemas/recall-v1" },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "rung": { "type": "string", "enum": ["info", "warn", "error"] },
+        "layers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "legacy_types": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
   }
 }

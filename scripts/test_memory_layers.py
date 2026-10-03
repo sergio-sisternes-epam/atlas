@@ -309,6 +309,33 @@ def main() -> int:
                 {"path": "concepts/g2.md", "kind": "related"},
             ],
         )
+        write_page(
+            store4 / "concepts" / "duplicate_frame.md",
+            "frame",
+            "Duplicate gist frame",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related"},
+                {"path": "concepts/g1.md", "kind": "related"},
+            ],
+        )
+        write_page(
+            store4 / "concepts" / "page_member.md",
+            "page",
+            "A plain page",
+            "2026-10-01",
+        )
+        write_page(
+            store4 / "concepts" / "mixed_frame.md",
+            "frame",
+            "Mixed gist+page frame",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related"},
+                {"path": "concepts/g2.md", "kind": "related"},
+                {"path": "concepts/page_member.md", "kind": "related"},
+            ],
+        )
         code, payload = run_json(["compile", "--root", str(store4), "--json"])
         check("frame fixture exits 0 at default info rung", code == 0, f"exit={code}")
         info_paths4 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
@@ -320,6 +347,16 @@ def main() -> int:
         check(
             "good frame (two gists) not flagged frame_members",
             ("frame_members", "concepts/good_frame.md") not in info_paths4,
+        )
+        check(
+            "duplicate-gist frame (same gist twice) flagged frame_members",
+            ("frame_members", "concepts/duplicate_frame.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "mixed gist+page frame flagged frame_members",
+            ("frame_members", "concepts/mixed_frame.md") in info_paths4,
+            str(info_paths4),
         )
         check(
             "parent page with a gist is not flagged missing_gist",
@@ -426,6 +463,60 @@ def main() -> int:
             "gist whose parent target resolves outside the store still flagged gist_parent",
             ("gist_parent", "concepts/outside_gist.md") in info_paths6,
             str(info_paths6),
+        )
+
+        # --- Fixture 7: schema memory-rung then schema upgrade must not block on memory ---
+        store7 = tmp / "store7"
+        init7 = run(["init", "--root", str(store7), "--json"])
+        check("init store7", init7.returncode == 0, init7.stderr)
+        schema7_before = json.loads((store7 / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "store7 starts at SCHEMA 1.0",
+            schema7_before.get("schema_version") == "1.0",
+            str(schema7_before.get("schema_version")),
+        )
+        rung7_code, rung7_payload = run_json(
+            ["schema", "memory-rung", "--set", "info", "--root", str(store7), "--json"]
+        )
+        check(
+            "schema memory-rung --set info ok (store7)",
+            rung7_code == 0 and rung7_payload.get("ok"),
+        )
+        preview7_code, preview7_payload = run_json(
+            ["schema", "upgrade", "--root", str(store7), "--json"]
+        )
+        check(
+            "schema upgrade preview ok after memory-rung (store7)",
+            preview7_code == 0 and preview7_payload.get("ok"),
+            str(preview7_payload),
+        )
+        check(
+            "schema upgrade preview does not mention unknown root key memory",
+            not any("memory" in k for k in preview7_payload.get("unknown_keys") or [])
+            and not any(
+                "unknown root key" in (note or "") and "memory" in (note or "")
+                for note in preview7_payload.get("notes") or []
+            ),
+            str(preview7_payload),
+        )
+        apply7_code, apply7_payload = run_json(
+            ["schema", "upgrade", "--apply", "--root", str(store7), "--json"]
+        )
+        check(
+            "schema upgrade --apply ok (store7)",
+            apply7_code == 0 and apply7_payload.get("ok"),
+            str(apply7_payload),
+        )
+        schema7_after = json.loads((store7 / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "store7 schema_version is 2.0 after upgrade",
+            schema7_after.get("schema_version") == "2.0",
+            str(schema7_after.get("schema_version")),
+        )
+        check(
+            "store7 memory.rung preserved through upgrade",
+            schema7_after.get("memory", {}).get("rung") == "info",
+            str(schema7_after.get("memory")),
         )
 
         # --- File-content assertions ---

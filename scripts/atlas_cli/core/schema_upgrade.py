@@ -32,6 +32,7 @@ KNOWN_ROOT_KEYS = frozenset(
         "recall",
         "bindings",
         "presets",
+        "memory",
     }
 )
 COMPAT_ID = "atlas-compat-v1"

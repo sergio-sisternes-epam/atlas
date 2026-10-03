@@ -44,13 +44,18 @@ root: <atlas store root>
    (or `autogenesis/work/<work_id>.md` when the subject uses Autogenesis space) and ensure the work hub exists (create via **work** path if needed). Protostars also `relates_to` their origin page with `kind: derived_from`.
 7. **Gists and frames** — a gist is filed in the same folder as its one parent and `relates_to` that parent with `kind: derived_from`. Parents are `experience`, `decision`, `lesson`, `recipe`, `document`, `page`, or `protostar` — never a work hub, plan, index, another gist, or a frame. A frame is filed in the nearest common folder of its gists and `relates_to` two or more gists with `kind: related`; a frame does not rewrite the gists it lists. Do not rewrite an episodic parent page in place to match a gist or a frame — the parent stays the record.
 8. **Spine pages** — if the new page belongs to a cluster that already has a short index (work hub Outcomes, or a document titled as an evolution / “all ideas” spine), add a `relates_to` edge and a one-line claim on that spine. Do not copy the essay onto the spine.
-9. **Index after compile green** — once compile is green, insert a new gist at the top of the owning folder's `index.md` (the hot list). Path `query` reads that list; it never writes it.
-10. **Compile** — must succeed:
+9. **Compile** — must succeed before touching any index:
+   ```bash
+   python3 <atlas-skill>/scripts/atlas.py compile --root <root>
+   ```
+   Exit ≠ 0 → fix critical issues; do **not** edit `index.md` yet and do **not** claim memory stored.
+10. **Index once compile is green** — insert a new gist at the top of the owning folder's `index.md` (the hot list) — top, not bottom. Path `query` reads that list; it never writes it.
+11. **Compile again** — must succeed after the index edit:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
    Exit ≠ 0 → fix critical issues; do **not** claim memory stored.
-11. **log.md** — append one bullet only for **structural** changes (new/closed work, layout migration, schema shift). Not for every experience.
+12. **log.md** — append one bullet only for **structural** changes (new/closed work, layout migration, schema shift). Not for every experience.
 
 ## Exit
 

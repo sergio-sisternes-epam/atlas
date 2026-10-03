@@ -431,14 +431,24 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 )
 
         if ptype == "frame":
-            count = 0
+            gist_paths: set[str] = set()
+            invalid = False
             for item in _related(m, "related"):
                 target = str(item.get("path") or "").strip()
+                if not target:
+                    invalid = True
+                    continue
                 canon = _canonical_local_target(target)
-                found = by_rel_path.get(canon if canon is not None else target)
-                if found is not None and str(found[1].get("type") or "").strip() == "gist":
-                    count += 1
-            if count < 2:
+                lookup_key = canon if canon is not None else target
+                found = by_rel_path.get(lookup_key)
+                if found is None:
+                    invalid = True
+                    continue
+                if str(found[1].get("type") or "").strip() != "gist":
+                    invalid = True
+                    continue
+                gist_paths.add(lookup_key)
+            if invalid or len(gist_paths) < 2:
                 findings.append(
                     {
                         "id": "frame_members",
