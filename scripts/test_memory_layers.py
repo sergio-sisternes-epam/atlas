@@ -927,13 +927,13 @@ def main() -> int:
         schema_doc = json.loads(schema_doc_path.read_text(encoding="utf-8"))
         memory_props = schema_doc["properties"]["memory"]["properties"]
         check(
-            "store-v2 schema: memory.layers enum is frame/gist/page",
-            memory_props["layers"]["items"].get("enum") == ["frame", "gist", "page"],
+            "store-v2 schema: memory.layers is exact-array const frame/gist/page",
+            memory_props["layers"].get("const") == ["frame", "gist", "page"],
             str(memory_props["layers"]),
         )
         check(
-            "store-v2 schema: memory.legacy_types enum includes document",
-            memory_props["legacy_types"]["items"].get("enum") == ["document"],
+            "store-v2 schema: memory.legacy_types is exact-array const [document]",
+            memory_props["legacy_types"].get("const") == ["document"],
             str(memory_props["legacy_types"]),
         )
 
@@ -1000,6 +1000,47 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
+        schema15["memory"]["layers"] = []
+        schema15["memory"]["legacy_types"] = ["document"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 empty layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 empty layers: schema_v2 critical mentions layers",
+            any(
+                i.get("id") == "schema_v2" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["page"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 partial layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 partial layers: schema_v2 critical mentions layers",
+            any(
+                i.get("id") == "schema_v2" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["frame", "gist", "page", "frame"]
+        schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(store15), "--json"])
+        check("store15 duplicate layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store15 duplicate layers: schema_v2 critical mentions layers",
+            any(
+                i.get("id") == "schema_v2" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        schema15["memory"]["layers"] = ["frame", "gist", "page"]
         schema15["memory"]["legacy_types"] = ["document"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])

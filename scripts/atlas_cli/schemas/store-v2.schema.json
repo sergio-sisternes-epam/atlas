@@ -4,38 +4,90 @@
   "title": "Atlas SCHEMA.json 2.0",
   "type": "object",
   "unevaluatedProperties": false,
-  "required": ["schema_version", "atlas_id", "structure", "compile"],
+  "required": [
+    "schema_version",
+    "atlas_id",
+    "structure",
+    "compile"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "const": "2.0" },
-    "atlas_id": { "type": "string", "minLength": 1 },
-    "title": { "type": "string" },
-    "description": { "type": "string" },
-    "structure": { "type": "object" },
-    "compile": { "type": "object" },
-    "templates": { "type": "object" },
-    "types": { "type": "object" },
-    "query": { "type": "object" },
-    "relations": { "type": "object" },
-    "mesh": { "type": "object" },
-    "sources_profile": { "type": "object" },
+    "schema_version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "atlas_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "structure": {
+      "type": "object"
+    },
+    "compile": {
+      "type": "object"
+    },
+    "templates": {
+      "type": "object"
+    },
+    "types": {
+      "type": "object"
+    },
+    "query": {
+      "type": "object"
+    },
+    "relations": {
+      "type": "object"
+    },
+    "mesh": {
+      "type": "object"
+    },
+    "sources_profile": {
+      "type": "object"
+    },
     "required_root_fields": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-    "bindings": { "type": "object" },
-    "presets": { "type": "object" },
-    "recall": { "$ref": "https://atlas.local/schemas/recall-v1" },
+    "bindings": {
+      "type": "object"
+    },
+    "presets": {
+      "type": "object"
+    },
+    "recall": {
+      "$ref": "https://atlas.local/schemas/recall-v1"
+    },
     "memory": {
       "type": "object",
       "properties": {
-        "rung": { "type": "string", "enum": ["info", "warn", "error"] },
+        "rung": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ]
+        },
         "layers": {
           "type": "array",
-          "items": { "type": "string", "enum": ["frame", "gist", "page"] }
+          "const": [
+            "frame",
+            "gist",
+            "page"
+          ]
         },
         "legacy_types": {
           "type": "array",
-          "items": { "type": "string", "enum": ["document"] }
+          "const": [
+            "document"
+          ]
         }
       },
       "additionalProperties": false
