@@ -63,9 +63,27 @@ Only when the operator asks and names the batch. Refuse an unscoped or
 unattested "migrate everything" request. For that named batch only:
 
 1. Use path **remember** to retype, add a gist, or add a frame as named by
-   the operator.
-2. Compile. A red compile stops the batch — fix before moving to the next
-   page. There is no unattended bulk rewrite.
+   the operator. Remember's index-only exception applies here: a first
+   compile that exits 1 solely for `index_md_present` / missing `index.md`
+   may proceed to create or update that folder's hot list, then the second
+   compile must exit 0 before the page counts as stored.
+2. **Batch-scoped validation** — after each remember (or after the batch),
+   compile focused on the named batch path(s), not the whole store:
+   ```bash
+   python3 <atlas-skill>/scripts/atlas.py compile --root <root> --path <batch-prefix> [--type <type>]
+   ```
+   Focused `--path` / `--type` omit out-of-batch pages, so legacy
+   `document` / `missing_gist` findings elsewhere do not block an in-batch
+   finish once the store is at `warn` or `error`. A red focused compile
+   stops the batch — fix before moving to the next page. There is no
+   unattended bulk rewrite and **no** whole-store rewrite authorised here.
+3. **Optional rung-hold** — if the operator explicitly attests a temporary
+   hold (keep `memory.rung` at `warn`/`error` while finishing this named
+   batch only), apply may continue under that rung for in-batch pages
+   validated with the focused compile above. The hold does not waive
+   focused-compile failures, does not authorise rewriting pages outside
+   the batch, and does not change `SCHEMA.json` (rung changes still go
+   through path **schema** when the operator asks).
 
 ### Rung changes
 

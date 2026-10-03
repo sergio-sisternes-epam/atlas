@@ -44,13 +44,16 @@ root: <atlas store root>
    (or `autogenesis/work/<work_id>.md` when the subject uses Autogenesis space) and ensure the work hub exists (create via **work** path if needed). Protostars also `relates_to` their origin page with `kind: derived_from`.
 7. **Gists and frames** — a gist is filed in the same folder as its one parent and `relates_to` that parent with `kind: derived_from`. Parents are `experience`, `decision`, `lesson`, `recipe`, `document`, `page`, or `protostar` — never a work hub, plan, index, another gist, or a frame. A frame is filed in the nearest common folder of its gists and `relates_to` two or more gists with `kind: related`; a frame does not rewrite the gists it lists. Do not rewrite an episodic parent page in place to match a gist or a frame — the parent stays the record.
 8. **Spine pages** — if the new page belongs to a cluster that already has a short index (work hub Outcomes, or a document titled as an evolution / “all ideas” spine), add a `relates_to` edge and a one-line claim on that spine. Do not copy the essay onto the spine.
-9. **Compile** — must succeed before touching any index:
+9. **Compile** — run before touching any index:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
-   Exit ≠ 0 → fix critical issues; do **not** edit `index.md` yet and do **not** claim memory stored.
-10. **Index once compile is green** — insert a new gist at the top of the owning folder's `index.md` (the hot list) — top, not bottom. Path `recall` reads that list; it never writes it.
-11. **Compile again** — must succeed after the index edit:
+   - Exit 2 (critical) → fix; do **not** edit `index.md` yet and do **not** claim memory stored.
+   - Exit 1 solely from **index-only** findings (`index_md_present` / missing folder or root `index.md`) → proceed to step 10. That finding is why the index is created; waiting for exit 0 first deadlocks a new gist in a folder that has no `index.md` yet.
+   - Exit 1 from any other actionable warning → fix those first; do **not** edit `index.md` yet and do **not** claim memory stored.
+   - Exit 0 → proceed to step 10 when a gist needs a hot-list pin.
+10. **Index** — create the owning folder's `index.md` if it is missing, then insert the new gist at the top of that hot list (top, not bottom). Path `recall` reads that list; it never writes it.
+11. **Compile again** — must exit 0 after the index edit before claiming memory stored:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
