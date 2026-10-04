@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..core.frontmatter import FrontmatterError, read_page
+import yaml
+
+from ..core.frontmatter import FrontmatterError, read_page, split_fm, split_fm_v2
 from ..core.paths import CONTRACT_NAME, RESERVED, SCHEMA_NAME, iter_concept_md, rel, store_root
 from ..core.recall_config import schema_version
 from ..core.schema import (
@@ -22,6 +24,7 @@ from ..core.schema import (
     find_contract_path,
     staging_dir_name,
 )
+from .validate import MD_LINK, WIKILINK
 
 REFUSE_BATCH_TOKENS = frozenset({"", "migrate everything"})
 LEGACY_BATCH = "contract-file"
@@ -114,6 +117,53 @@ def _write_schema_page(path: Path, gist_paths: list[str]) -> None:
         f"{SCHEMA_PAGE_BODY}\n",
         encoding="utf-8",
     )
+
+
+def _schema_cue_exists(index_path: Path, schema_path: Path, index_text: str) -> bool:
+    index_targets = [
+        match.group(2).strip().split()[0].strip("\"'")
+        for match in MD_LINK.finditer(index_text)
+    ]
+    index_targets.extend(match.group(1).strip() for match in WIKILINK.finditer(index_text))
+    for target in index_targets:
+        if target.startswith(("http://", "https://", "atlas://", "#")):
+            continue
+        local_target = target.split("#", 1)[0].split("?", 1)[0]
+        if not local_target:
+            continue
+        candidate = (index_path.parent / local_target).resolve()
+        if candidate == schema_path.resolve():
+            return True
+    return False
+
+
+def _converted_frame_text(
+    meta: dict, body: str, gist_paths: list[str], version: str
+) -> str:
+    converted = dict(meta)
+    converted["type"] = "schema"
+    if "relates_to" not in converted:
+        relates = []
+    else:
+        relates = converted["relates_to"]
+    if not isinstance(relates, list):
+        raise ValueError("relates_to is not a list")
+    relates = list(relates)
+    for gist_path in gist_paths:
+        if not any(
+            isinstance(item, dict)
+            and item.get("path") == gist_path
+            and str(item.get("kind") or item.get("role") or "").strip().lower() == "related"
+            for item in relates
+        ):
+            relates.append({"path": gist_path, "kind": "related"})
+    converted["relates_to"] = relates
+    frontmatter = yaml.safe_dump(converted, allow_unicode=True, sort_keys=False)
+    text = f"---\n{frontmatter}---{body}"
+    round_trip, _ = split_fm_v2(text) if version == "2.0" else split_fm(text)
+    if round_trip != converted:
+        raise ValueError("frontmatter cannot be serialized without losing values")
+    return text
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -289,7 +339,8 @@ def run(
         _print(as_json, payload)
         return 2
 
-    schema_pages, schema_error = _schema_pages_to_create(r, _read_concept_pages(r, schema))
+    concept_pages = _read_concept_pages(r, schema)
+    schema_pages, schema_error = _schema_pages_to_create(r, concept_pages)
     if schema_error:
         payload = {
             "ok": False,
@@ -305,32 +356,94 @@ def run(
 
     index_updates: dict[Path, str] = {}
     replaced_frames: list[Path] = []
-    for schema_path, _ in schema_pages:
-        legacy_frame = schema_path.parent / "frame.md"
-        if legacy_frame.is_symlink():
-            payload = {
-                "ok": False,
-                "root": str(r),
-                "operation": "apply",
-                "contract_file": contract_name,
-                "lineage": lineage,
-                "error": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
-                "findings": [{
-                    "id": "schema_symlink",
-                    "path": rel(r, legacy_frame),
-                    "msg": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
-                }],
-            }
-            _print(as_json, payload)
-            return 2
-        if legacy_frame.is_file():
-            try:
-                legacy_meta, _ = read_page(legacy_frame, schema_version(schema))
-            except FrontmatterError:
-                legacy_meta = None
-            if legacy_meta and str(legacy_meta.get("type") or "").strip() == "frame":
-                replaced_frames.append(legacy_frame)
-
+    converted_frames: dict[Path, str] = {}
+    created_schema_paths = {path for path, _ in schema_pages}
+    schema_cue_pages = [
+        (path, meta)
+        for path, meta in concept_pages
+        if str(meta.get("type") or "").strip() == "schema"
+    ]
+    schema_cue_pages.extend(
+        (path, {"title": "Gist schema"})
+        for path, _ in schema_pages
+    )
+    new_schema_gists = dict(schema_pages)
+    for schema_path, schema_meta in schema_cue_pages:
+        if schema_path in created_schema_paths:
+            legacy_frame = schema_path.parent / "frame.md"
+            if legacy_frame.is_symlink():
+                payload = {
+                    "ok": False,
+                    "root": str(r),
+                    "operation": "apply",
+                    "contract_file": contract_name,
+                    "lineage": lineage,
+                    "error": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
+                    "findings": [{
+                        "id": "schema_symlink",
+                        "path": rel(r, legacy_frame),
+                        "msg": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
+                    }],
+                }
+                _print(as_json, payload)
+                return 2
+            if legacy_frame.is_file():
+                try:
+                    legacy_meta, legacy_body = read_page(legacy_frame, schema_version(schema))
+                except (FrontmatterError, OSError) as error:
+                    legacy_meta, legacy_body = None, ""
+                    frame_error = str(error)
+                else:
+                    frame_error = "frontmatter is missing or unreadable"
+                if not legacy_meta:
+                    finding = {
+                        "id": "schema_manual_migration",
+                        "path": rel(r, legacy_frame),
+                        "msg": (
+                            f"manual migration is required for {rel(r, legacy_frame)}: "
+                            f"{frame_error}"
+                        ),
+                    }
+                    payload = {
+                        "ok": False,
+                        "root": str(r),
+                        "operation": "apply",
+                        "contract_file": contract_name,
+                        "lineage": lineage,
+                        "error": finding["msg"],
+                        "findings": [finding],
+                    }
+                    _print(as_json, payload)
+                    return 2
+                if str(legacy_meta.get("type") or "").strip() == "frame":
+                    try:
+                        converted_frames[schema_path] = _converted_frame_text(
+                            legacy_meta,
+                            legacy_body,
+                            new_schema_gists[schema_path],
+                            schema_version(schema),
+                        )
+                    except (TypeError, ValueError, yaml.YAMLError) as error:
+                        finding = {
+                            "id": "schema_manual_migration",
+                            "path": rel(r, legacy_frame),
+                            "msg": (
+                                f"manual migration is required for {rel(r, legacy_frame)}: "
+                                f"frontmatter cannot be preserved ({error})"
+                            ),
+                        }
+                        payload = {
+                            "ok": False,
+                            "root": str(r),
+                            "operation": "apply",
+                            "contract_file": contract_name,
+                            "lineage": lineage,
+                            "error": finding["msg"],
+                            "findings": [finding],
+                        }
+                        _print(as_json, payload)
+                        return 2
+                    replaced_frames.append(legacy_frame)
         index_path = schema_path.parent / "index.md"
         if index_path.is_symlink():
             payload = {
@@ -349,7 +462,11 @@ def run(
             _print(as_json, payload)
             return 2
         try:
-            index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+            index_text = (
+                index_updates[index_path]
+                if index_path in index_updates
+                else index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+            )
         except OSError as error:
             payload = {
                 "ok": False,
@@ -361,8 +478,11 @@ def run(
             }
             _print(as_json, payload)
             return 2
-        cue = f"- [Gist schema](./{schema_path.name})"
-        if schema_path.name not in index_text:
+        if not _schema_cue_exists(index_path, schema_path, index_text):
+            title = schema_meta.get("title")
+            if not isinstance(title, str) or not title.strip():
+                title = "Gist schema"
+            cue = f"- [{title}](./{schema_path.name})"
             index_text = index_text.rstrip() + ("\n\n" if index_text.strip() else "") + cue + "\n"
         index_updates[index_path] = index_text
 
@@ -374,7 +494,10 @@ def run(
     if contract_path != new_path:
         contract_path.unlink()
     for schema_path, gist_paths in schema_pages:
-        _write_schema_page(schema_path, gist_paths)
+        if schema_path in converted_frames:
+            schema_path.write_text(converted_frames[schema_path], encoding="utf-8")
+        else:
+            _write_schema_page(schema_path, gist_paths)
     for index_path, index_text in index_updates.items():
         index_path.write_text(index_text, encoding="utf-8")
     for legacy_frame in replaced_frames:

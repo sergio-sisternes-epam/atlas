@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -490,6 +491,329 @@ def main() -> int:
             and not (replaced_frame_store / "notes" / "frame.md").exists()
             and (replaced_frame_store / "notes" / "schema.schema.md").is_file(),
             f"exit={code} payload={payload}",
+        )
+        replaced_meta, replaced_body = read_page(
+            replaced_frame_store / "notes" / "schema.schema.md"
+        )
+        check(
+            "memory-migrate: replacement schema keeps authored frame content",
+            replaced_meta.get("type") == "schema"
+            and "## Content" in replaced_body
+            and PROSE in replaced_body,
+            f"meta={replaced_meta} body={replaced_body!r}",
+        )
+
+        existing_schema_store = tmp / "existing-schema-cues"
+        existing_schema_store.mkdir()
+        (existing_schema_store / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "existing-schema-cues",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        existing_schema_paths = [
+            existing_schema_store / "notes" / "subject.schema.md",
+            existing_schema_store / "notes" / "second.schema.md",
+            existing_schema_store / "schema-only" / "subject.schema.md",
+        ]
+        for schema_path in existing_schema_paths:
+            write_index(schema_path.parent)
+            if schema_path.parent.name == "notes":
+                write_page(
+                    schema_path.parent / "g1.gist.md",
+                    "gist",
+                    [{"path": "notes/index.md", "kind": "derived_from"}],
+                )
+                relates = [{"path": "notes/g1.gist.md", "kind": "related"}]
+            else:
+                relates = []
+            write_page(schema_path, "schema", relates)
+            (schema_path.parent / "index.md").write_text(
+                "# Existing index\n\nNo schema links here.\n", encoding="utf-8"
+            )
+        existing_schema_hashes = {
+            path: sha(path) for path in existing_schema_paths
+        }
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(existing_schema_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "memory-migrate: existing schemas and schema-only folder receive cues",
+            code == 0
+            and all(sha(path) == existing_schema_hashes[path] for path in existing_schema_paths)
+            and all(
+                re.search(r"\[[^\]]+\]\(\./[^)]+\)", (path.parent / "index.md").read_text(encoding="utf-8"))
+                and any(
+                    (path.parent / target).resolve() == path.resolve()
+                    for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", (path.parent / "index.md").read_text(encoding="utf-8"))
+                )
+                for path in existing_schema_paths
+            ),
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(existing_schema_store), "--json"]
+        )
+        check(
+            "memory-migrate: existing schema cue repair compiles without missing-index critical",
+            "schema_missing_from_index" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        existing_schema_symlink_store = tmp / "existing-schema-index-symlink"
+        existing_schema_symlink_store.mkdir()
+        (existing_schema_symlink_store / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "existing-schema-index-symlink",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        symlink_schema_folder = existing_schema_symlink_store / "notes"
+        symlink_schema_folder.mkdir()
+        symlink_schema = symlink_schema_folder / "subject.schema.md"
+        write_page(symlink_schema, "schema")
+        symlink_target = tmp / "existing-schema-index-target.md"
+        symlink_target.write_text("# Outside index\n", encoding="utf-8")
+        (symlink_schema_folder / "index.md").symlink_to(symlink_target)
+        symlink_schema_contract = existing_schema_symlink_store / "SCHEMA.json"
+        symlink_schema_contract_hash = sha(symlink_schema_contract)
+        symlink_target_hash = sha(symlink_target)
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(existing_schema_symlink_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "memory-migrate: existing schema index symlink refuses before writes",
+            code != 0
+            and any(
+                finding.get("id") == "schema_symlink"
+                for finding in payload.get("findings", [])
+            )
+            and sha(symlink_schema_contract) == symlink_schema_contract_hash
+            and not (existing_schema_symlink_store / "CONTRACT.json").exists()
+            and (symlink_schema_folder / "index.md").is_symlink()
+            and sha(symlink_target) == symlink_target_hash,
+            f"exit={code} payload={payload}",
+        )
+
+        substring_schema_store = tmp / "schema-cue-substring"
+        substring_schema_store.mkdir()
+        (substring_schema_store / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "schema-cue-substring",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        substring_folder = substring_schema_store / "notes"
+        write_index(substring_folder)
+        write_page(
+            substring_folder / "g1.gist.md",
+            "gist",
+            [{"path": "notes/index.md", "kind": "derived_from"}],
+        )
+        substring_index = substring_folder / "index.md"
+        substring_index.write_text(
+            "# Notes\n\nThe filename schema.schema.md is mentioned here.\n"
+            "See https://example.invalid/schema.schema.md for details.\n",
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(substring_schema_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        generated_schema = substring_folder / "schema.schema.md"
+        index_after_migrate = substring_index.read_text(encoding="utf-8")
+        link_targets = re.findall(r"\[[^\]]+\]\(([^)]+)\)", index_after_migrate)
+        check(
+            "memory-migrate: filename prose and URL do not suppress a real schema cue",
+            code == 0
+            and any((substring_index.parent / target).resolve() == generated_schema.resolve() for target in link_targets),
+            f"exit={code} payload={payload} index={index_after_migrate!r}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(substring_schema_store), "--json"]
+        )
+        check(
+            "memory-migrate: repaired substring-only cue passes compile",
+            "schema_missing_from_index" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        authored_frame_store = tmp / "authored-frame-conversion"
+        authored_frame_store.mkdir()
+        (authored_frame_store / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "authored-frame-conversion",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        authored_folder = authored_frame_store / "notes"
+        write_index(authored_folder)
+        write_page(
+            authored_folder / "g1.gist.md",
+            "gist",
+            [{"path": "notes/index.md", "kind": "derived_from"}],
+        )
+        frame_path = authored_folder / "frame.md"
+        frame_body = (
+            "\n\n## Authored frame\n\n"
+            "The body has original framing and an authored Provenance sentence.\n"
+        )
+        frame_path.write_text(
+            "---\n"
+            "type: frame\n"
+            'title: "Distinct authored frame"\n'
+            'description: "A preserved description."\n'
+            "created: 2025-02-03\n"
+            "origin: third-party\n"
+            "sensitivity: restricted\n"
+            'custom_field: "preserve this field"\n'
+            "relates_to:\n"
+            "  - path: notes/prior.schema.md\n"
+            "    kind: follows\n"
+            "---"
+            f"{frame_body}",
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(authored_frame_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        converted_path = authored_folder / "schema.schema.md"
+        converted_meta, converted_body = read_page(converted_path)
+        check(
+            "memory-migrate: frame conversion retains metadata, body, and schema coverage",
+            code == 0
+            and not frame_path.exists()
+            and converted_meta.get("type") == "schema"
+            and converted_meta.get("title") == "Distinct authored frame"
+            and converted_meta.get("description") == "A preserved description."
+            and converted_meta.get("created") == "2025-02-03"
+            and converted_meta.get("origin") == "third-party"
+            and converted_meta.get("sensitivity") == "restricted"
+            and converted_meta.get("custom_field") == "preserve this field"
+            and converted_body == frame_body
+            and {"path": "notes/prior.schema.md", "kind": "follows"} in converted_meta.get("relates_to", [])
+            and {"path": "notes/g1.gist.md", "kind": "related"} in converted_meta.get("relates_to", []),
+            f"exit={code} payload={payload} meta={converted_meta} body={converted_body!r}",
+        )
+
+        unreadable_frame_store = tmp / "unreadable-frame-conversion"
+        unreadable_frame_store.mkdir()
+        unreadable_contract = unreadable_frame_store / "SCHEMA.json"
+        unreadable_contract.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "unreadable-frame-conversion",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        unreadable_folder = unreadable_frame_store / "notes"
+        write_index(unreadable_folder)
+        write_page(
+            unreadable_folder / "g1.gist.md",
+            "gist",
+            [{"path": "notes/index.md", "kind": "derived_from"}],
+        )
+        unreadable_frame = unreadable_folder / "frame.md"
+        unreadable_frame.write_text("---\ntype: frame\n", encoding="utf-8")
+        unreadable_contract_hash = sha(unreadable_contract)
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(unreadable_frame_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "memory-migrate: unreadable replacement frame requires manual migration before writes",
+            code != 0
+            and payload.get("ok") is False
+            and any(
+                finding.get("id") == "schema_manual_migration"
+                and "manual migration is required" in finding.get("msg", "")
+                for finding in payload.get("findings", [])
+            )
+            and sha(unreadable_contract) == unreadable_contract_hash
+            and not (unreadable_frame_store / "CONTRACT.json").exists()
+            and unreadable_frame.is_file(),
+            f"exit={code} payload={payload}",
+        )
+
+        remember_text = (ROOT / "references" / "paths" / "remember.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        check(
+            "remember: schema cue critical is an index-only exit-2 first-pass exception",
+            "schema_missing_from_index" in remember_text
+            and "index-only" in remember_text
+            and "including exit 2" in remember_text
+            and "waiting for exit 0 first deadlocks the required schema cue" in remember_text
+            and "if any critical finding id is not `schema_missing_from_index`" in remember_text
+            and "do **not** edit `index.md` yet" in remember_text,
+            "step 9 does not describe the exit-2 schema-cue exception and non-index critical refusal",
         )
 
         # === in-beta-refused ======================================================

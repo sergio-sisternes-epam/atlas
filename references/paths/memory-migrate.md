@@ -103,10 +103,11 @@ unattested "migrate everything" request. For that named batch only:
    subject changes, create another `<name>.schema.md`, link it same-level to
    the prior schema, and list it from `index.md`; do not rewrite sibling
    schemas. Keep `hub.md` in place as a work hub, not a memory page.
-   Remember's index-only exception applies here: a first compile that exits
-   1 solely for `index_md_present` / missing `index.md` may proceed to create
-   or update that folder's reserved directory listing and schema cue, then
-   the second compile must exit 0 before the page counts as stored.
+   Remember's index-only exception applies here: a first compile whose only
+   findings are `schema_missing_from_index` criticals and/or
+   `index_md_present` warnings may proceed to create or update the reserved
+   directory listing and schema cue even when the exit is 2; the second
+   compile must exit 0 before the page counts as stored.
 2. **Batch-scoped validation** — after each remember (or after the batch),
    compile focused on the named batch path(s), not the whole store:
    ```bash
