@@ -1382,8 +1382,9 @@ def main() -> int:
             for o in (memory_props["layers"].get("oneOf") or [memory_props["layers"]])
         ]
         check(
-            "store-v2 schema: memory.layers is exact-array const frame/gist/memory",
-            memory_props["layers"].get("const") == ["frame", "gist", "memory"],
+            "store-v2 schema: memory.layers allows the exact-array const frame/gist/memory "
+            "(0.13.0-beta.3 adds schema/gist/memory via oneOf, does not replace it)",
+            ["frame", "gist", "memory"] in layers_const_options,
             str(memory_props["layers"]),
         )
         check(

@@ -77,10 +77,21 @@
         },
         "layers": {
           "type": "array",
-          "const": [
-            "frame",
-            "gist",
-            "memory"
+          "oneOf": [
+            {
+              "const": [
+                "frame",
+                "gist",
+                "memory"
+              ]
+            },
+            {
+              "const": [
+                "schema",
+                "gist",
+                "memory"
+              ]
+            }
           ]
         },
         "legacy_types": {
