@@ -333,6 +333,62 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
     return rung, []
 
 
+_MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
+_MEMORY_LAYERS_FIXED = ["frame", "gist", "page"]
+_MEMORY_LEGACY_TYPES_FIXED = ["document"]
+
+
+def _memory_contract(schema: dict | None) -> list[dict]:
+    """Enforce the fixed memory.layers / memory.legacy_types contract on SCHEMA 1.0.
+
+    SCHEMA 2.0 stores already enforce this (and more) via validate_store_v2
+    against the store-v2 JSON Schema, so this check only runs for stores that
+    are not 2.0 (the default 1.0 contract, or any other non-2.0 value).
+    """
+    if not schema:
+        return []
+    memory = schema.get("memory")
+    if not isinstance(memory, dict):
+        return []
+    findings: list[dict] = []
+    extra_keys = sorted(set(memory.keys()) - _MEMORY_ALLOWED_KEYS)
+    for key in extra_keys:
+        findings.append(
+            {
+                "id": "memory_contract",
+                "path": "SCHEMA.json",
+                "msg": f"SCHEMA.memory has an unexpected key: {key!r}",
+            }
+        )
+    if "layers" in memory:
+        layers = memory["layers"]
+        if layers != _MEMORY_LAYERS_FIXED:
+            findings.append(
+                {
+                    "id": "memory_contract",
+                    "path": "SCHEMA.json",
+                    "msg": (
+                        "SCHEMA.memory.layers must be exactly "
+                        f"{_MEMORY_LAYERS_FIXED!r} (got {layers!r})"
+                    ),
+                }
+            )
+    if "legacy_types" in memory:
+        legacy_types = memory["legacy_types"]
+        if legacy_types != _MEMORY_LEGACY_TYPES_FIXED:
+            findings.append(
+                {
+                    "id": "memory_contract",
+                    "path": "SCHEMA.json",
+                    "msg": (
+                        "SCHEMA.memory.legacy_types must be exactly "
+                        f"{_MEMORY_LEGACY_TYPES_FIXED!r} (got {legacy_types!r})"
+                    ),
+                }
+            )
+    return findings
+
+
 def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
     """Legacy-document and memory-layer (gist/frame) findings.
 
@@ -569,6 +625,8 @@ def run(
     # raise a critical memory_rung issue but still treat the ladder as info.
     memory_rung, memory_shape_issues = _memory_rung(schema)
     critical.extend(memory_shape_issues)
+    if schema is not None and schema_version(schema) != "2.0":
+        critical.extend(_memory_contract(schema))
     allow_inline_ignores = True
     if isinstance(schema, dict):
         compile_cfg = schema.get("compile")

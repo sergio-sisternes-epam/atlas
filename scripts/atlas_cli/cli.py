@@ -312,7 +312,7 @@ def schema_upgrade_cmd(
 
 @main.group("recall")
 def recall_group() -> None:
-    """Inspect, validate, activate, or index SCHEMA 2.0 recall."""
+    """Discover (recall run), inspect, validate, activate, or index SCHEMA 2.0 recall."""
 
 
 @recall_group.command("run")

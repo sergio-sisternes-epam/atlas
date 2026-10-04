@@ -218,6 +218,29 @@ class HelpPathContractTests(unittest.TestCase):
         self.assertIn("Unqualified “help” with no Atlas context", self.help)
         self.assertIn("Unqualified help outside Atlas context is not this skill", self.skill)
 
+    def test_legacy_root_commands_are_not_registered(self) -> None:
+        # Hard cut: `search` and `query` must not exist as root commands and
+        # must not be aliased to `recall run`.
+        for legacy in ("search", "query"):
+            with self.subTest(command=legacy):
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts/atlas.py"), legacy],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(2, result.returncode, result.stderr)
+                self.assertIn(f"No such command '{legacy}'", result.stderr)
+
+    def test_recall_group_help_mentions_discovery_run(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/atlas.py"), "recall", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("Discover (recall run)", result.stdout)
+        self.assertIn("inspect, validate, activate, or index", result.stdout)
+
     def test_no_new_cli_help_verb(self) -> None:
         cli = CLI.read_text(encoding="utf-8")
         self.assertNotIn('@main.command("help")', cli)

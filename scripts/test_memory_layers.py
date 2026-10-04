@@ -1187,6 +1187,204 @@ def main() -> int:
             f"memory_rung={payload.get('memory_rung')}",
         )
 
+        # --- Fixture 17: SCHEMA 1.0 memory.layers/legacy_types contract ---
+        # SCHEMA 1.0 stores are not upgraded to v2 so they skip validate_store_v2,
+        # but the fixed memory.layers/legacy_types contract must still hold.
+        store17 = tmp / "store17"
+        init17 = run(["init", "--root", str(store17), "--json"])
+        check("init store17", init17.returncode == 0, init17.stderr)
+        schema17_path = store17 / "SCHEMA.json"
+        schema17 = json.loads(schema17_path.read_text(encoding="utf-8"))
+        check(
+            "store17 stays on SCHEMA 1.0 (no schema upgrade applied)",
+            schema17.get("schema_version") != "2.0",
+            str(schema17.get("schema_version")),
+        )
+        write_page(
+            store17 / "notes" / "alone.md",
+            "page",
+            "Alone",
+            "2026-10-03",
+        )
+        write_index(store17 / "notes", "Notes")
+
+        def write_schema17(memory_block):
+            if memory_block is None:
+                schema17.pop("memory", None)
+            else:
+                schema17["memory"] = memory_block
+            schema17_path.write_text(json.dumps(schema17, indent=2) + "\n", encoding="utf-8")
+
+        # No memory key at all: valid, no memory_contract critical.
+        write_schema17(None)
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check(
+            "store17 no memory key: no memory_contract critical",
+            "memory_contract" not in findings_by_id(payload, "critical"),
+            f"critical={payload.get('critical')}",
+        )
+
+        # memory.rung only: valid, no memory_contract critical.
+        write_schema17({"rung": "info"})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check(
+            "store17 rung-only memory block: no memory_contract critical",
+            "memory_contract" not in findings_by_id(payload, "critical"),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Exact layers + legacy_types: valid, no memory_contract critical.
+        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["document"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check(
+            "store17 exact layers/legacy_types: no memory_contract critical",
+            "memory_contract" not in findings_by_id(payload, "critical"),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Wrong layers.
+        write_schema17({"layers": ["other"], "legacy_types": ["document"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 wrong layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 wrong layers: memory_contract critical mentions layers",
+            any(
+                i.get("id") == "memory_contract" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Wrong legacy_types.
+        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["not-a-type"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 wrong legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 wrong legacy_types: memory_contract critical mentions legacy_types",
+            any(
+                i.get("id") == "memory_contract" and "legacy_types" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Empty layers.
+        write_schema17({"layers": [], "legacy_types": ["document"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 empty layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 empty layers: memory_contract critical mentions layers",
+            any(
+                i.get("id") == "memory_contract" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Partial layers.
+        write_schema17({"layers": ["page"], "legacy_types": ["document"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 partial layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 partial layers: memory_contract critical mentions layers",
+            any(
+                i.get("id") == "memory_contract" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Duplicate layers.
+        write_schema17(
+            {"layers": ["frame", "gist", "page", "frame"], "legacy_types": ["document"]}
+        )
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 duplicate layers: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 duplicate layers: memory_contract critical mentions layers",
+            any(
+                i.get("id") == "memory_contract" and "layers" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Empty legacy_types.
+        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": []})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 empty legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 empty legacy_types: memory_contract critical mentions legacy_types",
+            any(
+                i.get("id") == "memory_contract" and "legacy_types" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Duplicate legacy_types.
+        write_schema17(
+            {"layers": ["frame", "gist", "page"], "legacy_types": ["document", "document"]}
+        )
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 duplicate legacy_types: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 duplicate legacy_types: memory_contract critical mentions legacy_types",
+            any(
+                i.get("id") == "memory_contract" and "legacy_types" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Extra key while layers/legacy_types are the exact legal lists.
+        write_schema17(
+            {
+                "layers": ["frame", "gist", "page"],
+                "legacy_types": ["document"],
+                "note": "unexpected",
+            }
+        )
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 extra key: exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 extra key: memory_contract critical mentions the key",
+            any(
+                i.get("id") == "memory_contract" and "note" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Extra key while layers/legacy_types are absent.
+        write_schema17({"foo": "bar"})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check("store17 extra key (absent layers/legacy_types): exit 2", code == 2, f"exit={code}")
+        check(
+            "store17 extra key (absent layers/legacy_types): memory_contract critical mentions the key",
+            any(
+                i.get("id") == "memory_contract" and "foo" in (i.get("msg") or "")
+                for i in payload.get("critical", [])
+            ),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Restore exact layers/legacy_types: no memory_contract critical.
+        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["document"]})
+        code, payload = run_json(["compile", "--root", str(store17), "--json"])
+        check(
+            "store17 restored exact layers/legacy_types: no memory_contract critical",
+            "memory_contract" not in findings_by_id(payload, "critical"),
+            f"critical={payload.get('critical')}",
+        )
+
+        # Sanity: memory_contract never uses the schema_v2 id on SCHEMA 1.0.
+        check(
+            "store17 never emits schema_v2 critical (SCHEMA 1.0)",
+            "schema_v2" not in findings_by_id(payload, "critical"),
+            f"critical={payload.get('critical')}",
+        )
+
         # --- File-content assertions ---
         skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         check(
