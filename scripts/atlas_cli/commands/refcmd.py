@@ -821,6 +821,41 @@ def _rollback_exchange(dirfd: int, tmp: str, name: str, written_dev: int, writte
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
 
 
+def _abort_replaced_destination(
+    dirfd: int,
+    tmp: str,
+    name: str,
+    original_dev: int,
+    original_ino: int,
+    label: str,
+) -> None:
+    """Put the checked page back when the installed name is no longer our write."""
+    if _dir_inode_is(dirfd, name, original_dev, original_ino):
+        return
+    if not _dir_inode_is(dirfd, tmp, original_dev, original_ino):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+    try:
+        _exchange_names(dirfd, tmp, name)
+    except OSError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    if not _dir_inode_is(dirfd, name, original_dev, original_ino):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+
+
+def _dir_inode_is(dirfd: int, name: str, dev: int, ino: int) -> bool:
+    """True when the directory entry is still the regular file we installed."""
+    try:
+        installed = os.lstat(name, dir_fd=dirfd)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(installed.st_mode)
+        and not stat.S_ISLNK(installed.st_mode)
+        and installed.st_dev == dev
+        and installed.st_ino == ino
+    )
+
+
 def _write_all(fd: int, data: bytes) -> None:
     view = memoryview(data)
     while len(view):
@@ -909,6 +944,15 @@ def _rewrite_dir_file(
                         tmp = ""
                         raise
                     raise RefError(f"refusing to rewrite changed page {label}")
+                if not _dir_inode_is(dirfd, name, written.st_dev, written.st_ino):
+                    try:
+                        _abort_replaced_destination(
+                            dirfd, tmp, name, info.st_dev, info.st_ino, label
+                        )
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
                 held = tmp
                 try:
                     current = os.lstat(tmp, dir_fd=dirfd)
@@ -953,6 +997,8 @@ def _rewrite_dir_file(
                             raise
                         raise RefError(f"refusing to rewrite {label}") from unlink_error
                 tmp = ""
+                if not _dir_inode_is(dirfd, name, written.st_dev, written.st_ino):
+                    raise RefError(f"refusing to rewrite changed page {label}")
             finally:
                 os.close(lockfd)
         else:
@@ -1104,6 +1150,13 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             os.rename(name, tmp, src_dir_fd=dirfd, dst_dir_fd=dirfd)
             moved = os.lstat(tmp, dir_fd=dirfd)
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            try:
+                os.lstat(name, dir_fd=dirfd)
+            except FileNotFoundError:
+                pass
+            else:
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")
             os.lseek(fd, 0, os.SEEK_SET)
@@ -1440,6 +1493,13 @@ def run_prune(
                     written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
                     raise
                 written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
+            for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
+                dirfd, name = _open_store_parent(store, rel)
+                try:
+                    if not _dir_inode_is(dirfd, name, new_dev, new_ino):
+                        raise RefError(f"refusing to rewrite changed page {rel}")
+                finally:
+                    os.close(dirfd)
             for rel in drop_rels:
                 gitpath = _git_path(store, repo, rel)
                 _code, expected, _err = run_git(

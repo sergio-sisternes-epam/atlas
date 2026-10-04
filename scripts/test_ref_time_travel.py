@@ -2174,6 +2174,42 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses a descendant rev with matching blobs")
 
+            import atlas_cli.commands.refcmd as refcmd
+
+            real_exchange = refcmd._exchange_names
+            swapped = {"done": False}
+
+            def replace_destination(dirfd, src, dst):
+                real_exchange(dirfd, src, dst)
+                if not swapped["done"] and dst == "living.md":
+                    swapped["done"] = True
+                    os.unlink(dst, dir_fd=dirfd)
+                    fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
+                    os.write(fd, b"racer page\n")
+                    os.close(fd)
+
+            refcmd._exchange_names = replace_destination
+            try:
+                raced = run_prune(
+                    str(future),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                refcmd._exchange_names = real_exchange
+            if (
+                raced == 0
+                or not (future / "dead.md").is_file()
+                or (future / "living.md").read_text(encoding="utf-8") != before_living
+                or list(future.glob(".atlas-prune-*"))
+            ):
+                failures.append("replaced destination was treated as a successful rewrite")
+            else:
+                print("[PASS] prune rolls back when the rewritten name is replaced")
+
         cleanup = tmp / "cleanup-rewrite"
         cleanup_init = run(["init", "--root", str(cleanup), "--json"])
         if cleanup_init.returncode != 0:
