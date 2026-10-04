@@ -3,17 +3,20 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from release_readiness import (
+    CI_SURFACES,
     ROOT,
     SURFACES,
     current_commit,
     is_prerelease_tag,
     manifest_version,
+    read_surface,
     validate_commit,
     validate_versions,
 )
@@ -79,6 +82,78 @@ class ReleaseReadinessTests(unittest.TestCase):
             )
         finally:
             shutil.rmtree(temp, ignore_errors=True)
+
+    def test_pretag_allows_package_ci_lag_when_ci_refs_agree(self) -> None:
+        # Pre-tag (require_ci_match_package=False, the `compile` default): CI
+        # ref surfaces are allowed to lag the package version as long as they
+        # all agree with *each other*. The checked-out tree already carries
+        # this exact lag (package at a .N beta while CI refs still point at
+        # the last tagged beta), so this exercises the real surfaces rather
+        # than a synthetic fixture.
+        version, errors = validate_versions(ROOT, require_ci_match_package=False)
+        self.assertEqual(manifest_version(), version)
+        self.assertEqual([], errors)
+        ci_versions = {read_surface(surface) for surface in CI_SURFACES}
+        self.assertEqual(1, len(ci_versions), "CI ref surfaces must agree with each other")
+
+    def test_tag_rejects_lagging_ci_refs(self) -> None:
+        # `--tag` (require_ci_match_package=True, an actual release cut) must
+        # not pass while CI refs still point at an older tagged ref than the
+        # package version — this is the exact shape of the checked-out tree.
+        version, errors = validate_versions(ROOT, require_ci_match_package=True)
+        ci_versions = {read_surface(surface) for surface in CI_SURFACES}
+        if ci_versions == {version}:
+            self.skipTest("CI refs already match the package version; nothing to reject")
+        self.assertTrue(errors, "require_ci_match_package=True must reject lagging CI refs")
+        for surface in CI_SURFACES:
+            actual = read_surface(surface)
+            if actual != version:
+                self.assertTrue(
+                    any(surface.path in error and "CI ref must equal" in error for error in errors),
+                    f"expected a CI-ref-must-equal-package error for {surface.path}; got {errors}",
+                )
+
+    def test_tag_rejects_lagging_ci_refs_synthetic(self) -> None:
+        # Deterministic companion to the above: build a temp tree where the
+        # package version is newer than every CI ref (which still agree with
+        # each other) and assert `--tag` semantics (require_ci_match_package)
+        # reject it while pre-tag semantics accept it.
+        temp = Path(tempfile.mkdtemp(prefix="atlas-release-readiness-tag-"))
+        try:
+            for surface in SURFACES:
+                source = ROOT / surface.path
+                target = temp / surface.path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+
+            package_version = manifest_version(temp)
+            lagging_ci_version = "0.1.0"
+            self.assertNotEqual(package_version, lagging_ci_version)
+            for surface in CI_SURFACES:
+                path = temp / surface.path
+                content = path.read_text(encoding="utf-8")
+                for actual in re.findall(surface.pattern, content, re.MULTILINE):
+                    content = content.replace(f"v{actual}", f"v{lagging_ci_version}")
+                path.write_text(content, encoding="utf-8")
+
+            # Pre-tag: CI refs lag the package version but agree with each
+            # other, so this must still pass.
+            pretag_version, pretag_errors = validate_versions(
+                temp, require_ci_match_package=False
+            )
+            self.assertEqual(package_version, pretag_version)
+            self.assertEqual([], pretag_errors)
+
+            # `--tag`: the same lagging CI refs must now be rejected.
+            tag_version, tag_errors = validate_versions(temp, require_ci_match_package=True)
+            self.assertEqual(package_version, tag_version)
+            self.assertTrue(tag_errors)
+            self.assertTrue(
+                all("CI ref must equal the package version" in e for e in tag_errors)
+            )
+        finally:
+            shutil.rmtree(temp, ignore_errors=True)
+
 
 
 if __name__ == "__main__":

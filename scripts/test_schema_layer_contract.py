@@ -390,6 +390,82 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        # two gists, schema lists one gist twice (duplicate) -> rejected
+        d = beta3_store("folder-schema-duplicate-gist")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "g2.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(
+            d / "notes" / "s1.md",
+            "schema",
+            [{"path": "notes/g1.md", "kind": "related"}, {"path": "notes/g1.md", "kind": "related"}],
+        )
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "one-schema-per-gist-folder: schema listing one gist twice (duplicate) rejected",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # two gists, schema lists only one (omission) -> rejected
+        d = beta3_store("folder-schema-omits-gist")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "g2.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "one-schema-per-gist-folder: schema omitting a folder gist rejected",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # one gist per folder, each folder's schema lists the other folder's gist
+        # (cross-folder reference) -> rejected in both folders
+        d = beta3_store("folder-schema-other-folder-gist")
+        write_index(d / "alpha")
+        write_index(d / "beta")
+        write_page(d / "alpha" / "g1.md", "gist", [{"path": "alpha/index.md", "kind": "derived_from"}])
+        write_page(d / "beta" / "g2.md", "gist", [{"path": "beta/index.md", "kind": "derived_from"}])
+        write_page(d / "alpha" / "s1.md", "schema", [{"path": "beta/g2.md", "kind": "related"}])
+        write_page(d / "beta" / "s2.md", "schema", [{"path": "alpha/g1.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        schema_folder_paths = [
+            i.get("path") for i in payload.get("critical", []) if i.get("id") == "schema_folder"
+        ]
+        check(
+            "one-schema-per-gist-folder: schema listing another folder's gist rejected in both folders",
+            code != 0
+            and "alpha/s1.md" in schema_folder_paths
+            and "beta/s2.md" in schema_folder_paths,
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # === focused-compile-ignores-out-of-focus-schema-folder ==================
+        # A --path/--type focused compile must not fail because of an
+        # unrelated out-of-focus folder's schema_folder finding.
+        d = beta3_store("folder-focus-ignores-other-folder")
+        write_index(d / "good")
+        write_page(d / "good" / "g1.md", "gist", [{"path": "good/index.md", "kind": "derived_from"}])
+        write_page(d / "good" / "s1.md", "schema", [{"path": "good/g1.md", "kind": "related"}])
+        write_index(d / "bad")
+        write_page(d / "bad" / "g1.md", "gist", [{"path": "bad/index.md", "kind": "derived_from"}])
+        # "bad" folder has a gist but no schema page -> schema_folder finding.
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "focused-compile: unfocused compile sees the other folder's schema_folder finding",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "good", "--json"]
+        )
+        check(
+            "focused-compile --path good: ignores the unrelated bad/ schema_folder finding",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
         # === read-shipped-beta ====================================================
         shipped = tmp / "read-shipped-beta"
         shipped.mkdir(parents=True)

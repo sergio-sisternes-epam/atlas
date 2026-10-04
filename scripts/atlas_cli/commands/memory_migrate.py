@@ -168,6 +168,27 @@ def run(
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
     # atlas_release/memory.layers to the beta.3 shape. Other pages untouched.
     new_path = r / CONTRACT_NAME
+    if new_path.is_symlink():
+        # is_file() follows symlinks and is False for a broken link, which would
+        # otherwise let write_text() follow the link (even outside the root)
+        # before the stale SCHEMA.json is deleted. Refuse unconditionally.
+        payload = {
+            "ok": False,
+            "root": str(r),
+            "operation": "apply",
+            "contract_file": contract_name,
+            "lineage": lineage,
+            "error": f"{CONTRACT_NAME} is a symlink; refusing to write through it",
+            "findings": [
+                {
+                    "id": "contract_symlink",
+                    "path": CONTRACT_NAME,
+                    "msg": f"{CONTRACT_NAME} is a symlink; refusing to write through it",
+                }
+            ],
+        }
+        _print(as_json, payload)
+        return 2
     schema["atlas_release"] = BETA3_RELEASE
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
     memory["layers"] = list(BETA3_LAYERS)

@@ -69,6 +69,28 @@ def load_schema(root: Path) -> tuple[dict[str, Any] | None, str | None]:
 SHIPPED_BETA_STAMPS = (None, "0.13.0-beta")
 
 
+def _is_full_beta2_init(schema: dict) -> bool:
+    """True when ``schema`` is a full shipped-beta.2 init document.
+
+    The shipped beta.2 default had neither ``atlas_release`` nor a ``memory``
+    object (so ``memory.layers`` is absent, not ``IN_BETA_LAYERS``), but its
+    full-init shape — templates plus types.recommended including "frame" —
+    is still the beta.2 shape (memory / one gist), not the original shipped
+    beta page/frame shape. Shared by ``compute_stamp_shape`` and
+    ``classify_lineage`` so the two never disagree on this document. This
+    inference only applies when ``atlas_release`` is absent; a document
+    stamped exactly "0.13.0-beta" keeps its explicit shipped_beta path even
+    if it happens to also carry this full-init shape.
+    """
+    types = schema.get("types") if isinstance(schema.get("types"), dict) else None
+    recommended_types = types.get("recommended") if isinstance(types, dict) else None
+    return (
+        "templates" in schema
+        and isinstance(recommended_types, list)
+        and "frame" in recommended_types
+    )
+
+
 def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, str | None]:
     """Return (shape, error). shape in {'shipped_beta', 'in_beta', 'current'}.
 
@@ -76,12 +98,17 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
     must agree or compile fails closed with finding id stamp_shape:
 
     - SCHEMA.json, atlas_release absent or exactly "0.13.0-beta", layers
-      absent or frame/gist/page: shipped_beta — reads/compiles under old
-      frame rules. Any other stamp value never resolves to shipped_beta,
-      even when layers happen to match.
+      frame/gist/page (or absent and not the full beta.2 init document):
+      shipped_beta — reads/compiles under old frame rules. Any other stamp
+      value never resolves to shipped_beta, even when layers happen to
+      match; an unknown stamp (e.g. "0.13.0-beta.4") always fails closed,
+      regardless of layers.
     - SCHEMA.json, atlas_release "0.13.0-beta.2": in_beta, regardless of
-      layers. SCHEMA.json with layers frame/gist/memory and no stamp is also
-      in_beta (the shipped beta.2 layers shape).
+      layers. SCHEMA.json with layers frame/gist/memory and a known stamp
+      (absent or "0.13.0-beta.2") is also in_beta (the shipped beta.2
+      layers shape), and so is an unstamped full beta.2 init document
+      (templates plus types.recommended including "frame") with no memory
+      key at all — align with classify_lineage.
     - CONTRACT.json, atlas_release "0.13.0-beta.3", layers schema/gist/memory:
       current — the beta.3 contract shape.
     - Anything else is a stamp_shape mismatch (shape is None).
@@ -98,10 +125,27 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
             )
         if atlas_release in IN_BETA_RELEASES:
             return "in_beta", None
-        if atlas_release in SHIPPED_BETA_STAMPS and layers in (None, SHIPPED_BETA_LAYERS):
+        if atlas_release not in SHIPPED_BETA_STAMPS:
+            # Unknown/newer stamps (e.g. "0.13.0-beta.4") must fail closed
+            # rather than inferring a shape from memory.layers alone — an
+            # unknown stamp never resolves to in_beta or shipped_beta.
+            return None, (
+                f"SCHEMA.json atlas_release={atlas_release!r} is not a known stamp "
+                '(absent, "0.13.0-beta", or "0.13.0-beta.2")'
+            )
+        if layers == SHIPPED_BETA_LAYERS:
             return "shipped_beta", None
         if layers == IN_BETA_LAYERS:
             return "in_beta", None
+        if layers is None:
+            # The full-init -> in_beta inference only applies when
+            # atlas_release is absent entirely. A document stamped exactly
+            # "0.13.0-beta" with no memory key stays shipped_beta even when
+            # it also carries templates/types.recommended with "frame" —
+            # the known stamp wins over the full-init heuristic.
+            if atlas_release is None and _is_full_beta2_init(schema):
+                return "in_beta", None
+            return "shipped_beta", None
         return None, (
             f"SCHEMA.json atlas_release={atlas_release!r} memory.layers={layers!r} does not "
             f"match the shipped beta shape {SHIPPED_BETA_LAYERS!r} (stamp absent or "
@@ -290,13 +334,7 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
     if contract_name == SCHEMA_NAME and layers == SHIPPED_BETA_LAYERS:
         return "in-beta"
 
-    types = schema.get("types") if isinstance(schema.get("types"), dict) else None
-    recommended_types = types.get("recommended") if isinstance(types, dict) else None
-    full_init_shape = (
-        "templates" in schema
-        and isinstance(recommended_types, list)
-        and "frame" in recommended_types
-    )
+    full_init_shape = _is_full_beta2_init(schema)
     if contract_name == SCHEMA_NAME and full_init_shape:
         return "in-beta"
 

@@ -297,6 +297,57 @@ def _in_focus(
     return True
 
 
+def _finding_in_focus(
+    root: Path,
+    finding: dict,
+    focused: bool,
+    want_type: str | None,
+    focus_path: Path | None,
+    sv: str,
+    staging_name: str,
+) -> bool:
+    """True when a folder/page-scoped finding is within --type/--path focus.
+
+    Shared by the main page loop's handling of ``_memory_findings`` and by
+    ``_schema_folder_findings``, so a focused compile never fails because of
+    an out-of-focus folder.
+    """
+    if not focused:
+        return True
+    fpath = (root / finding["path"]).resolve()
+    directory_scoped = fpath.is_dir()
+    if directory_scoped:
+        if not _in_focus(fpath, {}, None, focus_path):
+            return False
+        if want_type:
+            # Folder findings apply to types present in their direct concept pages.
+            for page in iter_concept_md(fpath, staging_name):
+                if page.parent.resolve() != fpath or page.name in RESERVED:
+                    continue
+                try:
+                    meta, _ = read_page(page, sv)
+                except FrontmatterError:
+                    continue
+                if _in_focus(page, meta, want_type, None):
+                    return True
+            return False
+        return True
+    try:
+        meta, _ = read_page(fpath, sv)
+    except FrontmatterError:
+        meta = None
+    if meta:
+        return _in_focus(fpath, meta, want_type, focus_path)
+    if want_type:
+        return False
+    if focus_path is not None:
+        try:
+            fpath.relative_to(focus_path)
+        except ValueError:
+            return False
+    return True
+
+
 def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     issues: list[dict] = []
     try:
@@ -635,9 +686,11 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
     zero gists has none (one gist still counts). Unlike frame_members (an
     info-by-default ladder finding on shipped-beta stores), this is a hard
     compile failure: pin 4 says a second schema in a gist-bearing folder
-    "fails", not merely "is flagged". In addition, that one schema page must
-    itself relate to one or more gists via relates_to kind=related; an empty
-    or non-gist target set fails the same way.
+    "fails", not merely "is flagged". That one schema page must also list
+    each gist in its own folder exactly once via relates_to kind=related,
+    and no other targets — duplicates, omissions, and gists that belong to
+    another folder all fail the same way as an empty/non-gist target set
+    (a lone gist still only needs to be listed once).
     """
     pages: list[tuple[Path, dict]] = []
     for path in iter_concept_md(root, staging_name):
@@ -653,57 +706,69 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
 
     by_rel_path = {rel(root, p): (p, m) for p, m in pages}
 
-    gists_by_folder: dict[str, int] = {}
+    gists_by_folder: dict[str, set[str]] = {}
     schemas_by_folder: dict[str, list[str]] = {}
     for p, m in pages:
         folder = str(p.parent.resolve().relative_to(root.resolve())).replace("\\", "/")
         ptype = str(m.get("type") or "").strip()
         if ptype == "gist":
-            gists_by_folder[folder] = gists_by_folder.get(folder, 0) + 1
+            gists_by_folder.setdefault(folder, set()).add(rel(root, p))
         elif ptype == "schema":
             schemas_by_folder.setdefault(folder, []).append(rel(root, p))
 
     findings: list[dict] = []
     all_folders = set(gists_by_folder) | set(schemas_by_folder)
     for folder in sorted(all_folders):
-        gist_count = gists_by_folder.get(folder, 0)
+        expected_gists = gists_by_folder.get(folder, set())
         schema_paths = schemas_by_folder.get(folder, [])
-        expected = 1 if gist_count >= 1 else 0
+        expected = 1 if expected_gists else 0
         if len(schema_paths) != expected:
             findings.append(
                 {
                     "id": "schema_folder",
                     "path": schema_paths[0] if schema_paths else (folder or "."),
                     "msg": (
-                        f"folder {folder or '.'!r} has {gist_count} gist(s) and "
+                        f"folder {folder or '.'!r} has {len(expected_gists)} gist(s) and "
                         f"{len(schema_paths)} type=schema page(s); expected exactly "
                         f"{expected} (one gist still counts)."
                     ),
                 }
             )
             continue
-        if schema_paths:
-            schema_path = schema_paths[0]
-            schema_meta = by_rel_path[schema_path][1]
-            related = schema_meta.get("relates_to")
-            related = related if isinstance(related, list) else []
-            valid_targets = [
-                target
-                for item in related
-                if (target := _resolve_related_gist(item, root, by_rel_path)) is not None
-            ]
-            if not valid_targets:
-                findings.append(
-                    {
-                        "id": "schema_folder",
-                        "path": schema_path,
-                        "msg": (
-                            "a type=schema page must relate to one or more gists via "
-                            "relates_to kind=related; found none (empty or non-gist "
-                            "targets do not count)."
-                        ),
-                    }
-                )
+        if not schema_paths:
+            continue
+        schema_path = schema_paths[0]
+        schema_meta = by_rel_path[schema_path][1]
+        related = schema_meta.get("relates_to")
+        listed_paths: list[str] = []
+        invalid = not isinstance(related, list)
+        if invalid:
+            related = []
+        for item in related:
+            resolved = _resolve_related_gist(item, root, by_rel_path)
+            if resolved is None:
+                invalid = True
+                continue
+            listed_paths.append(resolved)
+        if (
+            not expected_gists
+            or invalid
+            or len(listed_paths) != len(set(listed_paths))
+            or set(listed_paths) != expected_gists
+            or len(listed_paths) != len(expected_gists)
+        ):
+            findings.append(
+                {
+                    "id": "schema_folder",
+                    "path": schema_path,
+                    "msg": (
+                        "a type=schema page must list each gist in its own folder "
+                        "exactly once via relates_to kind=related, and no other "
+                        "targets (no duplicates, no omissions, no gists from "
+                        "another folder)."
+                    ),
+                }
+            )
     return findings
 
 
@@ -791,7 +856,10 @@ def run(
     if schema is not None and schema_version(schema) != "2.0":
         critical.extend(_memory_contract(schema, contract_name, stamp_shape))
     if not skip_pages and stamp_shape == "current":
-        critical.extend(_schema_folder_findings(r, schema, staging_name))
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _schema_folder_findings(r, schema, staging_name):
+            if _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                critical.append(finding)
     allow_inline_ignores = True
     if isinstance(schema, dict):
         compile_cfg = schema.get("compile")
@@ -811,38 +879,8 @@ def run(
                     ign_text = ""
                 if finding["id"] in _ignores_in(ign_text):
                     continue
-            if focused and directory_scoped:
-                if not _in_focus(fpath, {}, None, focus_path):
-                    continue
-                if want_type:
-                    # Folder findings apply to types present in their direct concept pages.
-                    for page in iter_concept_md(fpath, staging_name):
-                        if page.parent.resolve() != fpath or page.name in RESERVED:
-                            continue
-                        try:
-                            meta, _ = read_page(page, sv)
-                        except FrontmatterError:
-                            continue
-                        if _in_focus(page, meta, want_type, None):
-                            break
-                    else:
-                        continue
-            elif focused:
-                try:
-                    meta, _ = read_page(fpath, sv)
-                except FrontmatterError:
-                    meta = None
-                if meta:
-                    if not _in_focus(fpath, meta, want_type, focus_path):
-                        continue
-                else:
-                    if want_type:
-                        continue
-                    if focus_path is not None:
-                        try:
-                            fpath.relative_to(focus_path)
-                        except ValueError:
-                            continue
+            if not _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                continue
             if memory_rung == "error":
                 finding["severity"] = "critical"
                 critical.append(finding)

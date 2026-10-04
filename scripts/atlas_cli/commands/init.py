@@ -99,6 +99,16 @@ def run(
     r = store_root(root)
     r.mkdir(parents=True, exist_ok=True)
     contract_path = r / CONTRACT_NAME
+    if contract_path.is_symlink():
+        # is_file() follows symlinks and is False for a broken link, which would
+        # otherwise let write_text() follow the link (even outside the root).
+        # Refuse unconditionally — --force must not bypass this.
+        msg = f"{CONTRACT_NAME} is a symlink; refusing to write through it"
+        if as_json:
+            print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
+        else:
+            print(f"atlas init — {msg}")
+        return 2
     if has_contract_file(r) and not force:
         msg = f"{CONTRACT_NAME} already exists; pass --force to overwrite"
         if as_json:

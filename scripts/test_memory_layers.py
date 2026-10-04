@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 
 sys.path.insert(0, str(ROOT / "scripts"))
-from atlas_cli.core.recall_config import default_recall_block  # noqa: E402
+from atlas_cli.core.recall_config import default_recall_block, validate_store_v2  # noqa: E402
+from atlas_cli.core.schema import classify_lineage, compute_stamp_shape  # noqa: E402
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -1813,6 +1814,195 @@ def main() -> int:
             "store17 never emits schema_v2 critical (SCHEMA 1.0)",
             "schema_v2" not in findings_by_id(payload, "critical"),
             f"critical={payload.get('critical')}",
+        )
+
+        # --- compute_stamp_shape / classify_lineage agreement (outcomes 4, 11) ---
+        unstamped_beta2_doc = {
+            "schema_version": "1.0",
+            "atlas_id": "ib2-direct",
+            "structure": {},
+            "compile": {},
+            "templates": {"directory": "templates/", "by_type": {}},
+            "types": {
+                "recommended": [
+                    "experience",
+                    "decision",
+                    "lesson",
+                    "recipe",
+                    "work",
+                    "protostar",
+                    "gist",
+                    "frame",
+                    "memory",
+                ],
+                "unconstrained": [],
+            },
+        }
+        stamp_shape, stamp_err = compute_stamp_shape("SCHEMA.json", unstamped_beta2_doc)
+        check(
+            "unstamped full beta.2 init: compute_stamp_shape is not shipped_beta",
+            stamp_shape != "shipped_beta",
+            f"stamp_shape={stamp_shape} err={stamp_err}",
+        )
+        check(
+            "unstamped full beta.2 init: compute_stamp_shape is in_beta",
+            stamp_shape == "in_beta",
+            f"stamp_shape={stamp_shape} err={stamp_err}",
+        )
+        lineage = classify_lineage("SCHEMA.json", unstamped_beta2_doc)
+        check(
+            "unstamped full beta.2 init: compute_stamp_shape agrees with classify_lineage",
+            (stamp_shape == "in_beta") == (lineage == "in-beta"),
+            f"stamp_shape={stamp_shape} lineage={lineage}",
+        )
+
+        stamped_beta_full_init_doc = {
+            "schema_version": "1.0",
+            "atlas_id": "stamped-beta-full-init",
+            "atlas_release": "0.13.0-beta",
+            "structure": {},
+            "compile": {},
+            "templates": {"directory": "templates/", "by_type": {}},
+            "types": {
+                "recommended": [
+                    "experience",
+                    "decision",
+                    "lesson",
+                    "recipe",
+                    "work",
+                    "protostar",
+                    "gist",
+                    "frame",
+                    "page",
+                ],
+                "unconstrained": [],
+            },
+        }
+        stamped_shape, stamped_err = compute_stamp_shape(
+            "SCHEMA.json", stamped_beta_full_init_doc
+        )
+        check(
+            "stamped 0.13.0-beta full-init (templates+frame, no memory key) is shipped_beta",
+            stamped_shape == "shipped_beta",
+            f"shape={stamped_shape} err={stamped_err}",
+        )
+        check(
+            "stamped 0.13.0-beta full-init is not in_beta",
+            stamped_shape != "in_beta",
+            f"shape={stamped_shape} err={stamped_err}",
+        )
+
+        unknown_stamp_doc = {
+            "schema_version": "1.0",
+            "atlas_id": "unknown-stamp",
+            "atlas_release": "0.13.0-beta.4",
+            "structure": {},
+            "compile": {},
+            "memory": {"layers": ["frame", "gist", "memory"]},
+        }
+        unknown_shape, unknown_err = compute_stamp_shape("SCHEMA.json", unknown_stamp_doc)
+        check(
+            "unknown stamp 0.13.0-beta.4 with IN_BETA_LAYERS is not in_beta",
+            unknown_shape != "in_beta",
+            f"shape={unknown_shape} err={unknown_err}",
+        )
+        check(
+            "unknown stamp 0.13.0-beta.4 with IN_BETA_LAYERS fails closed (shape is None)",
+            unknown_shape is None and bool(unknown_err),
+            f"shape={unknown_shape} err={unknown_err}",
+        )
+
+        # --- validate_store_v2 accepts every stamp_shape-accepted layers shape ---
+        for layers in (
+            ["frame", "gist", "page"],
+            ["frame", "gist", "memory"],
+            ["schema", "gist", "memory"],
+        ):
+            store_v2_doc = {
+                "schema_version": "2.0",
+                "atlas_id": "store-v2-layers",
+                "structure": {},
+                "compile": {},
+                "memory": {"layers": layers},
+            }
+            errs = validate_store_v2(store_v2_doc)
+            check(
+                f"validate_store_v2 accepts memory.layers {layers!r}",
+                errs == [],
+                f"errs={errs}",
+            )
+
+        # --- init / memory-migrate refuse a broken CONTRACT.json symlink ---
+        symlink_init_dir = tmp / "symlink-init"
+        symlink_init_dir.mkdir(parents=True)
+        outside_target = tmp / "symlink-init-outside-target.json"
+        (symlink_init_dir / "CONTRACT.json").symlink_to(outside_target)
+        init_result = run(["init", "--root", str(symlink_init_dir), "--json"])
+        check(
+            "init refuses a broken CONTRACT.json symlink",
+            init_result.returncode != 0,
+            f"exit={init_result.returncode} stdout={init_result.stdout!r}",
+        )
+        check(
+            "init does not write through the CONTRACT.json symlink",
+            not outside_target.exists(),
+        )
+        check(
+            "init leaves the CONTRACT.json symlink itself untouched",
+            (symlink_init_dir / "CONTRACT.json").is_symlink(),
+        )
+        init_force_result = run(
+            ["init", "--root", str(symlink_init_dir), "--force", "--json"]
+        )
+        check(
+            "init --force still refuses a broken CONTRACT.json symlink",
+            init_force_result.returncode != 0,
+            f"exit={init_force_result.returncode} stdout={init_force_result.stdout!r}",
+        )
+        check(
+            "init --force does not write through the CONTRACT.json symlink",
+            not outside_target.exists(),
+        )
+
+        symlink_migrate_dir = tmp / "symlink-migrate"
+        symlink_migrate_dir.mkdir(parents=True)
+        migrate_outside_target = tmp / "symlink-migrate-outside-target.json"
+        (symlink_migrate_dir / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "pre-beta-symlink",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (symlink_migrate_dir / "CONTRACT.json").symlink_to(migrate_outside_target)
+        migrate_result = run(
+            [
+                "memory-migrate",
+                "--root",
+                str(symlink_migrate_dir),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "memory-migrate apply refuses a broken CONTRACT.json symlink",
+            migrate_result.returncode != 0,
+            f"exit={migrate_result.returncode} stdout={migrate_result.stdout!r}",
+        )
+        check(
+            "memory-migrate apply does not write through the CONTRACT.json symlink",
+            not migrate_outside_target.exists(),
+        )
+        check(
+            "memory-migrate apply leaves SCHEMA.json in place (no rename on refusal)",
+            (symlink_migrate_dir / "SCHEMA.json").is_file(),
         )
 
         # --- File-content assertions ---

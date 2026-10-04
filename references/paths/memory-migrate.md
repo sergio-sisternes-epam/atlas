@@ -165,9 +165,14 @@ Eligibility (`apply`):
   example `0.12.0`). Only pre-beta stores are eligible for `apply`.
 - **in-beta** — `atlas_release` is exactly `0.13.0-beta` or
   `0.13.0-beta.2`, or `SCHEMA.json` already has `memory.layers`
-  `["frame", "gist", "page"]`. `apply` refuses (exit non-zero, finding id
-  `in_beta_not_legacy`) and writes nothing — an in-beta store already has
-  a stamp and is not a legacy target.
+  `["frame", "gist", "page"]` or `["frame", "gist", "memory"]`, or
+  `SCHEMA.json` is an unstamped full beta.2 init (the released default
+  that had neither `atlas_release` nor a `memory` object, so
+  `memory.layers` is absent, but the full-init/type shape — templates
+  plus `types.recommended` including `frame` — is beta.2's). All four of
+  these are in-beta, not pre-beta-eligible. `apply` refuses (exit
+  non-zero, finding id `in_beta_not_legacy`) and writes nothing — an
+  in-beta store already has a stamp or shape and is not a legacy target.
 - **current** — the `0.13.0-beta.3` shape (`CONTRACT.json`,
   `atlas_release` `0.13.0-beta.3`, `memory.layers`
   `["schema", "gist", "memory"]`). `apply` is a no-op write (exit 0).

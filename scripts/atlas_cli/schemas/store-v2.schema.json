@@ -82,6 +82,13 @@
               "const": [
                 "frame",
                 "gist",
+                "page"
+              ]
+            },
+            {
+              "const": [
+                "frame",
+                "gist",
                 "memory"
               ]
             },
