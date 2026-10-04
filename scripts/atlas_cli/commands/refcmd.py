@@ -1285,6 +1285,34 @@ def _managed_top(store: Path, rel: str) -> str | None:
     return None
 
 
+def _ancestor_managed(store: Path) -> str | None:
+    """Return the managed directory name when root sits inside another store."""
+    resolved = store.resolve()
+    for parent in resolved.parents:
+        if not (parent / "SCHEMA.json").is_file():
+            continue
+        schema, _err = load_schema(parent)
+        try:
+            rel = resolved.relative_to(parent.resolve()).as_posix()
+        except ValueError:
+            return None
+        top = rel.split("/", 1)[0]
+        if top in SKIP_TOP or top == staging_dir_name(schema) or top == "staging":
+            return top
+        return None
+    return None
+
+
+def _require_history_root(store: Path) -> None:
+    """History and prune answer only from a store, never from a managed directory."""
+    schema, err = load_schema(store)
+    if err or not schema:
+        raise RefError("refusing root that is not an Atlas store")
+    managed = _ancestor_managed(store)
+    if managed:
+        raise RefError(f"refusing Atlas-managed root {managed}")
+
+
 def _require_summary_page(store: Path, rel: str, path: Path) -> None:
     if _managed_top(store, rel):
         raise RefError(f"refusing Atlas-managed path {rel}")
@@ -1396,6 +1424,7 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
 def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
     try:
         store = store_root(root)
+        _require_history_root(store)
         rel = _store_rel(store, path)
         if _managed_top(store, rel):
             raise RefError(f"refusing Atlas-managed path {rel}")
@@ -1442,6 +1471,7 @@ def run_prune(
         if not drops:
             raise RefError("at least one --drop path is required")
         store = store_root(root)
+        _require_history_root(store)
         summary_rel = _store_rel(store, summary)
         summary_path = store / summary_rel
         _require_summary_page(store, summary_rel, summary_path)

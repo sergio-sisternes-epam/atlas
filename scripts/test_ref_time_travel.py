@@ -1150,6 +1150,45 @@ def main() -> int:
                 failures.append(f"show should refuse staging: {shown_run.stdout}")
             else:
                 print("[PASS] show refuses an Atlas-managed path")
+            (shown / "staging" / "SCHEMA.json").write_text(
+                (shown / "SCHEMA.json").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            rooted = run(
+                ["ref", "show", "secret.md", "--ref", "HEAD", "--root", str(shown / "staging"), "--json"]
+            )
+            if rooted.returncode == 0 or "managed" not in rooted.stdout:
+                failures.append(f"show should refuse a staging root: {rooted.stdout}")
+            else:
+                print("[PASS] show refuses a managed directory used as root")
+            schema = json.loads((shown / "SCHEMA.json").read_text(encoding="utf-8"))
+            schema.setdefault("structure", {})["staging_dir"] = "inbox"
+            (shown / "SCHEMA.json").write_text(json.dumps(schema), encoding="utf-8")
+            inbox = shown / "inbox"
+            inbox.mkdir()
+            (inbox / "secret.md").write_text(
+                page("Secret", "relates_to: []\n", "Custom staging must not answer."),
+                encoding="utf-8",
+            )
+            (inbox / "SCHEMA.json").write_text(json.dumps(schema), encoding="utf-8")
+            git(shown, ["add", "SCHEMA.json", "inbox"])
+            git(shown, ["commit", "-m", "custom staging"])
+            custom = run(
+                ["ref", "show", "secret.md", "--ref", "HEAD", "--root", str(inbox), "--json"]
+            )
+            if custom.returncode == 0 or "managed" not in custom.stdout:
+                failures.append(f"show should refuse a custom staging root: {custom.stdout}")
+            else:
+                print("[PASS] show refuses a custom staging directory used as root")
+            not_store = tmp / "not-a-store"
+            not_store.mkdir()
+            missing_store = run(
+                ["ref", "show", "secret.md", "--ref", "HEAD", "--root", str(not_store), "--json"]
+            )
+            if missing_store.returncode == 0 or "not an Atlas store" not in missing_store.stdout:
+                failures.append(f"show should refuse a non-store root: {missing_store.stdout}")
+            else:
+                print("[PASS] show refuses a root that is not an Atlas store")
 
         hub = store / "hub-only-history.md"
         hub.write_text(
