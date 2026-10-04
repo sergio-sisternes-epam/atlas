@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.0-beta.5 - 2026-10-04
+
+- `atlas init` and `memory-migrate apply --batch contract-file` now write
+  `atlas_release` `0.13.0-beta.4` for the current contract shape (not
+  `0.13.0-beta.3`, which was misleading since beta.3 had already shipped
+  without this write). Readers still accept an existing `0.13.0-beta.3`
+  stamp on `CONTRACT.json` with layers `schema`/`gist`/`memory` as current
+  — `compute_stamp_shape` and `classify_lineage` both resolve it to
+  "current", and `memory-migrate apply` on such a store is a no-op (it does
+  not rewrite the stamp to beta.4). `SCHEMA.json` still refuses to carry
+  either stamp; the current contract shape is written to `CONTRACT.json`
+  only. Package and CI pins move to v0.13.0-beta.5.
+
 ## 0.13.0-beta.4 - 2026-10-04
 
 - `memory-migrate` now recognizes existing `memory`, `gist`, or `frame` pages

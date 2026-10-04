@@ -179,15 +179,18 @@ Eligibility (`apply`):
   unstamped full beta.2 init refuse `apply` (exit non-zero, finding id
   `in_beta_not_legacy`) and write nothing. The stamped beta releases and
   full beta.2 init remain in-beta even without pages.
-- **current** — the `0.13.0-beta.3` shape (`CONTRACT.json`,
-  `atlas_release` `0.13.0-beta.3`, `memory.layers`
-  `["schema", "gist", "memory"]`). `apply` is a no-op write (exit 0).
+- **current** — the contract shape written for this cut (`CONTRACT.json`,
+  `atlas_release` `0.13.0-beta.4`, `memory.layers`
+  `["schema", "gist", "memory"]`). An existing `CONTRACT.json` stamped
+  `atlas_release` `0.13.0-beta.3` with the same `memory.layers` is also
+  accepted as current (it is the original stamp for this shape).
+  `apply` is a no-op write (exit 0) for either stamp.
 
 `apply` with no `--batch`, or batch text `"migrate everything"`, refuses
 and writes nothing — same unscoped-batch guard as the content-migration
 procedure above. On a store with an eligible pre-beta contract, passing
 `--batch contract-file` renames `SCHEMA.json` to `CONTRACT.json`, sets
-`atlas_release` to `0.13.0-beta.3` and `memory.layers` to
+`atlas_release` to `0.13.0-beta.4` and `memory.layers` to
 `["schema", "gist", "memory"]`, and does not rewrite any other page.
 Existing `frame`, `gist`, and `memory` pages are preserved byte-for-byte.
 The contract-file batch adds exactly one `type: schema` page in each folder
