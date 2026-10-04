@@ -179,19 +179,22 @@ Eligibility (`apply`):
   `in_beta_not_legacy`) and write nothing. The stamped beta releases and
   full beta.2 init remain in-beta even without pages.
 - **current** — the contract shape written for this cut (`CONTRACT.json`,
-  `atlas_release` `0.13.0-beta.4`, `memory.layers`
+  `atlas_release` `0.13.0-beta.7`, `memory.layers`
   `["schema", "gist", "memory"]`). An existing `CONTRACT.json` stamped
-  `atlas_release` `0.13.0-beta.3` with the same `memory.layers` is also
-  accepted as current (it is the original stamp for this shape).
-  `apply` is a no-op write (exit 0) for either stamp.
+  `atlas_release` `0.13.0-beta.3` or `0.13.0-beta.4` with the same
+  `memory.layers` is also accepted as current. `apply` is a no-op write
+  (exit 0) for all three stamps and never rewrites an existing current stamp.
+  Unknown stamps fail closed, including `0.13.0-beta.6`, which never wrote
+  a store stamp. `SCHEMA.json` cannot carry any current stamp.
 
 `apply` with no `--batch`, or batch text `"migrate everything"`, refuses
 and writes nothing — same unscoped-batch guard as the content-migration
 procedure above. On a store with an eligible pre-beta contract, passing
 `--batch contract-file` renames `SCHEMA.json` to `CONTRACT.json`, sets
-`atlas_release` to `0.13.0-beta.4` and `memory.layers` to
+`atlas_release` to `0.13.0-beta.7` and `memory.layers` to
 `["schema", "gist", "memory"]`, and does not rewrite existing pages.
-Existing `frame`, `gist`, and `memory` pages are preserved byte-for-byte.
+Except for the replaced unsuffixed `frame.md` described below, existing
+`frame`, `gist`, and `memory` pages are preserved byte-for-byte.
 The contract-file batch adds a `type: schema` page named
 `schema.schema.md` in each gist-bearing folder that has no schema yet, and
 cues it from that folder's index. It does not require exactly one schema;
@@ -199,8 +202,21 @@ later subject changes can add further `<name>.schema.md` pages. Folders with
 zero gists are not required to have schemas by compile. Current-shape suffixes
 are search handles only; frontmatter `type` is authoritative. If this batch
 replaces an unsuffixed `frame.md` of type `frame` with the generated schema,
-it removes that leftover frame file; unrelated frame pages are preserved. Stamps
-`0.13.0-beta` and `0.13.0-beta.2`, and the unstamped
+it preserves the original description and removes that leftover frame file
+only after writing the new schema page; unrelated frame pages are preserved.
+The conversion must round-trip the entire converted frontmatter mapping
+through the store's existing reader, including the exact description string.
+If it cannot, apply exits 2 with finding
+`frame_description_not_round_trippable`, leaves `frame.md` and `SCHEMA.json`
+unchanged, and does not write `CONTRACT.json` or any partial schema conversion.
+It writes `staging/memory-migrate-operator-steps.md` with the original
+description verbatim. Next step: make the description a plain scalar the
+reader round-trips, then re-run
+`atlas memory-migrate --operation apply --batch contract-file`.
+Migration remains operator-chosen: install, compile, and schema upgrade do
+not invoke apply.
+
+Stamps `0.13.0-beta` and `0.13.0-beta.2`, and the unstamped
 full beta.2 init, and the specified `memory.layers` shapes return
 `in_beta_not_legacy` and are not rewritten.
 

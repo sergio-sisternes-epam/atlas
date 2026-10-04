@@ -15,10 +15,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from atlas_cli.core.frontmatter import read_page
+from atlas_cli.core.schema import classify_lineage, compute_stamp_shape
 
 PROSE = (
     "This page carries enough non-link prose content to pass the "
@@ -158,6 +161,11 @@ def main() -> int:
             "one-contract-file: init writes CONTRACT.json not SCHEMA.json",
             (one / "CONTRACT.json").is_file() and not (one / "SCHEMA.json").is_file(),
         )
+        check(
+            "one-contract-file: init writes package-aligned beta.7 stamp",
+            json.loads((one / "CONTRACT.json").read_text(encoding="utf-8")).get("atlas_release")
+            == "0.13.0-beta.7",
+        )
         code, payload = run_json(["compile", "--root", str(one), "--json"])
         check(
             "one-contract-file: a single CONTRACT.json beta.3 store compiles",
@@ -201,7 +209,9 @@ def main() -> int:
         )
         check(
             "pre-beta-eligible: apply with no --batch refuses and writes nothing",
-            code != 0
+            code == 2
+            and "batch_required" in findings_by_id(payload, "findings")
+            and {path.name for path in pre_beta.iterdir()} == {"SCHEMA.json"}
             and sha(pre_beta / "SCHEMA.json") == before_hash
             and not (pre_beta / "CONTRACT.json").exists(),
             f"exit={code} payload={payload}",
@@ -220,7 +230,9 @@ def main() -> int:
         )
         check(
             "pre-beta-eligible: apply with 'migrate everything' refuses and writes nothing",
-            code != 0
+            code == 2
+            and "batch_required" in findings_by_id(payload, "findings")
+            and {path.name for path in pre_beta.iterdir()} == {"SCHEMA.json"}
             and sha(pre_beta / "SCHEMA.json") == before_hash
             and not (pre_beta / "CONTRACT.json").exists(),
             f"exit={code} payload={payload}",
@@ -244,8 +256,8 @@ def main() -> int:
         )
         migrated = json.loads((pre_beta / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "pre-beta-eligible: migrated store stamps atlas_release/memory.layers beta.4",
-            migrated.get("atlas_release") == "0.13.0-beta.4"
+            "pre-beta-eligible: migrated store stamps atlas_release/memory.layers beta.7",
+            migrated.get("atlas_release") == "0.13.0-beta.7"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -315,8 +327,8 @@ def main() -> int:
         )
         migrated = json.loads((page_shaped / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "page-shaped-store: migration writes beta.4 contract stamp and layers",
-            migrated.get("atlas_release") == "0.13.0-beta.4"
+            "page-shaped-store: migration writes beta.7 contract stamp and layers",
+            migrated.get("atlas_release") == "0.13.0-beta.7"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -749,6 +761,117 @@ def main() -> int:
             and {"path": "notes/prior.schema.md", "kind": "follows"} in converted_meta.get("relates_to", [])
             and {"path": "notes/g1.gist.md", "kind": "related"} in converted_meta.get("relates_to", []),
             f"exit={code} payload={payload} meta={converted_meta} body={converted_body!r}",
+        )
+
+        long_description = (
+            "This long plain description records the original framing without "
+            "losing any words when the schema page is created. "
+        ) * 5 + "It also preserves Unicode such as café."
+        check(
+            "description fixture: default YAML width would wrap",
+            len(yaml.safe_dump({"description": long_description}, allow_unicode=True).splitlines()) > 1,
+        )
+        for version in ("1.0", "2.0"):
+            store = tmp / f"long-frame-description-{version}"
+            store.mkdir()
+            (store / "SCHEMA.json").write_text(
+                json.dumps({
+                    "schema_version": version,
+                    "atlas_id": "long-frame-description",
+                    "structure": {},
+                    "compile": {},
+                }),
+                encoding="utf-8",
+            )
+            write_index(store / "notes")
+            write_page(store / "notes" / "g1.gist.md", "gist")
+            frame = store / "notes" / "frame.md"
+            frame.write_text(
+                "---\ntype: frame\ntitle: Original frame\n"
+                f"description: {long_description}\n---\n\n{PROSE}\n",
+                encoding="utf-8",
+            )
+            original_meta, original_body = read_page(frame, version)
+            code, payload = run_json([
+                "memory-migrate", "--root", str(store), "--operation", "apply",
+                "--batch", "contract-file", "--json",
+            ])
+            target = store / "notes" / "schema.schema.md"
+            meta, body = read_page(target, version) if target.is_file() else ({}, "")
+            expected_meta = dict(original_meta)
+            expected_meta["type"] = "schema"
+            expected_meta["relates_to"] = [{"path": "notes/g1.gist.md", "kind": "related"}]
+            check(
+                f"memory-migrate: long plain description survives exactly on SCHEMA {version}",
+                code == 0
+                and original_meta.get("description") == long_description
+                and meta == expected_meta
+                and body == original_body
+                and not frame.exists()
+                and not (store / "SCHEMA.json").exists()
+                and json.loads((store / "CONTRACT.json").read_text(encoding="utf-8"))["atlas_release"]
+                == "0.13.0-beta.7",
+                f"exit={code} payload={payload} meta={meta}",
+            )
+
+        failing_store = tmp / "unroundtrippable-frame-description"
+        failing_store.mkdir()
+        failing_contract = failing_store / "SCHEMA.json"
+        failing_contract.write_text(
+            json.dumps({
+                "schema_version": "1.0",
+                "atlas_id": "unroundtrippable-frame-description",
+                "structure": {},
+                "compile": {},
+            }),
+            encoding="utf-8",
+        )
+        # An earlier folder must not be written if a later conversion fails.
+        write_index(failing_store / "a-first")
+        write_page(failing_store / "a-first" / "g1.gist.md", "gist")
+        write_index(failing_store / "notes")
+        write_page(failing_store / "notes" / "g1.gist.md", "gist")
+        failing_frame = failing_store / "notes" / "frame.md"
+        failing_description = "Operator's description: retain this exact claim."
+        failing_frame.write_text(
+            "---\ntype: frame\ntitle: Original frame\n"
+            f"description: {failing_description}\n---\n\n{PROSE}\n",
+            encoding="utf-8",
+        )
+        original_hashes = {
+            path: sha(path) for path in failing_store.rglob("*") if path.is_file()
+        }
+        check(
+            "description fixture: original reader retains the unroundtrippable description",
+            read_page(failing_frame)[0].get("description") == failing_description,
+        )
+        code, payload = run_json([
+            "memory-migrate", "--root", str(failing_store), "--operation", "apply",
+            "--batch", "contract-file", "--json",
+        ])
+        steps = failing_store / "staging" / "memory-migrate-operator-steps.md"
+        steps_text = steps.read_text(encoding="utf-8") if steps.is_file() else ""
+        check(
+            "memory-migrate: unroundtrippable description exits 2 with required finding",
+            code == 2
+            and payload.get("ok") is False
+            and "frame_description_not_round_trippable" in findings_by_id(payload, "findings"),
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "memory-migrate: description failure stages verbatim description and next step",
+            failing_description in steps_text
+            and "make the description a plain scalar the reader round-trips, then re-run "
+            "`atlas memory-migrate --operation apply --batch contract-file`" in steps_text,
+            steps_text,
+        )
+        check(
+            "memory-migrate: description failure preserves every original byte and path",
+            all(path.is_file() and sha(path) == digest for path, digest in original_hashes.items())
+            and {path for path in failing_store.rglob("*") if path.is_file()}
+            == set(original_hashes) | {steps}
+            and not (failing_store / "CONTRACT.json").exists()
+            and not list(failing_store.rglob("*.schema.md")),
         )
 
         unreadable_frame_store = tmp / "unreadable-frame-conversion"
@@ -1378,10 +1501,10 @@ def main() -> int:
 
         # === beta3-contract-still-current ========================================
         # A hand-stamped CONTRACT.json still carrying the original
-        # "0.13.0-beta.3" stamp (not the "0.13.0-beta.4" stamp init/apply now
+        # "0.13.0-beta.3" stamp (not the "0.13.0-beta.7" stamp init/apply now
         # write) with layers schema/gist/memory must still read as "current":
         # compile succeeds, memory-migrate assess reports lineage current, and
-        # apply is a no-op that never rewrites the stamp to beta.4.
+        # apply is a no-op that never rewrites the stamp to beta.7.
         beta3_reader = tmp / "beta3-contract-still-current"
         beta3_reader.mkdir(parents=True)
         (beta3_reader / "index.md").write_text("# Store\n\n- notes\n", encoding="utf-8")
@@ -1443,9 +1566,69 @@ def main() -> int:
             f"exit={code} payload={payload}",
         )
         check(
-            "beta3-contract-still-current: apply does not rewrite the stamp to beta.4",
+            "beta3-contract-still-current: apply does not rewrite the stamp to beta.7",
             sha(beta3_reader / "CONTRACT.json") == before_beta3_hash,
         )
+        for stamp in ("0.13.0-beta.3", "0.13.0-beta.4", "0.13.0-beta.7"):
+            contract = json.loads((beta3_reader / "CONTRACT.json").read_text(encoding="utf-8"))
+            contract["atlas_release"] = stamp
+            (beta3_reader / "CONTRACT.json").write_text(json.dumps(contract), encoding="utf-8")
+            current_hashes = {
+                path: sha(path) for path in beta3_reader.rglob("*") if path.is_file()
+            }
+            shape, error = compute_stamp_shape("CONTRACT.json", contract)
+            check(
+                f"current reader: {stamp} stamp and lineage agree",
+                shape == "current" and error is None
+                and classify_lineage("CONTRACT.json", contract) == "current",
+                f"shape={shape} error={error}",
+            )
+            code, payload = run_json(["compile", "--root", str(beta3_reader), "--json", "--dry-run"])
+            check(f"current reader: {stamp} compiles", code == 0, str(payload))
+            code, payload = run_json([
+                "memory-migrate", "--root", str(beta3_reader), "--operation", "apply",
+                "--batch", "contract-file", "--json",
+            ])
+            check(
+                f"current reader: apply on {stamp} is a zero-write no-op",
+                code == 0 and payload.get("lineage") == "current"
+                and {path for path in beta3_reader.rglob("*") if path.is_file()} == set(current_hashes)
+                and all(sha(path) == digest for path, digest in current_hashes.items()),
+                str(payload),
+            )
+            shape, error = compute_stamp_shape("SCHEMA.json", contract)
+            check(
+                f"current reader: SCHEMA.json refuses {stamp}",
+                shape is None and error is not None,
+                f"shape={shape} error={error}",
+            )
+        for stamp in ("0.13.0-beta.6", "0.13.0-beta.999"):
+            contract["atlas_release"] = stamp
+            for filename in ("SCHEMA.json", "CONTRACT.json"):
+                shape, error = compute_stamp_shape(filename, contract)
+                check(
+                    f"unknown reader: {filename} refuses {stamp}",
+                    shape is None and error is not None
+                    and classify_lineage(filename, contract) != "current",
+                    f"shape={shape} error={error}",
+                )
+            (beta3_reader / "CONTRACT.json").write_text(json.dumps(contract), encoding="utf-8")
+            before_hash = sha(beta3_reader / "CONTRACT.json")
+            code, payload = run_json(["compile", "--root", str(beta3_reader), "--json", "--dry-run"])
+            check(
+                f"unknown reader: {stamp} compile fails closed",
+                code == 2 and "stamp_shape" in findings_by_id(payload, "critical"),
+                str(payload),
+            )
+            code, payload = run_json([
+                "memory-migrate", "--root", str(beta3_reader), "--operation", "apply",
+                "--batch", "contract-file", "--json",
+            ])
+            check(
+                f"unknown reader: apply refuses {stamp} without restamping",
+                code == 2 and sha(beta3_reader / "CONTRACT.json") == before_hash,
+                str(payload),
+            )
 
         # === memory-rung-preserves-lineage =======================================
         # A shipped 0.13.0-beta SCHEMA.json with no memory block must keep

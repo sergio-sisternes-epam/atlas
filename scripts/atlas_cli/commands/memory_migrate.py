@@ -33,6 +33,10 @@ SCHEMA_PAGE_BODY = (
     "This schema page groups the gists in this folder for consistent "
     "navigation and interpretation."
 )
+FRAME_DESCRIPTION_NEXT_STEP = (
+    "make the description a plain scalar the reader round-trips, then re-run "
+    "`atlas memory-migrate --operation apply --batch contract-file`"
+)
 
 
 def _read_concept_pages(root: Path, schema: dict) -> list[tuple[Path, dict]]:
@@ -158,12 +162,30 @@ def _converted_frame_text(
         ):
             relates.append({"path": gist_path, "kind": "related"})
     converted["relates_to"] = relates
-    frontmatter = yaml.safe_dump(converted, allow_unicode=True, sort_keys=False)
+    frontmatter = yaml.safe_dump(
+        converted, allow_unicode=True, sort_keys=False, width=10**9
+    )
     text = f"---\n{frontmatter}---{body}"
     round_trip, _ = split_fm_v2(text) if version == "2.0" else split_fm(text)
     if round_trip != converted:
         raise ValueError("frontmatter cannot be serialized without losing values")
     return text
+
+
+def _write_frame_operator_steps(root: Path, frame: Path, description: str) -> None:
+    staging = root / "staging"
+    steps = staging / "memory-migrate-operator-steps.md"
+    if staging.is_symlink() or steps.is_symlink():
+        raise OSError("refusing to write operator steps through a symlink")
+    staging.mkdir(parents=True, exist_ok=True)
+    steps.write_text(
+        "# Memory migration operator steps\n\n"
+        f"Frame: {rel(root, frame)}\n\n"
+        "Original description (verbatim):\n\n"
+        f"{description}\n\n"
+        f"Next step: {FRAME_DESCRIPTION_NEXT_STEP}.\n",
+        encoding="utf-8",
+    )
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -425,13 +447,19 @@ def run(
                         )
                     except (TypeError, ValueError, yaml.YAMLError) as error:
                         finding = {
-                            "id": "schema_manual_migration",
+                            "id": "frame_description_not_round_trippable",
                             "path": rel(r, legacy_frame),
                             "msg": (
                                 f"manual migration is required for {rel(r, legacy_frame)}: "
                                 f"frontmatter cannot be preserved ({error})"
                             ),
                         }
+                        try:
+                            _write_frame_operator_steps(
+                                r, legacy_frame, str(legacy_meta.get("description", ""))
+                            )
+                        except OSError as steps_error:
+                            finding["msg"] += f"; cannot write operator steps: {steps_error}"
                         payload = {
                             "ok": False,
                             "root": str(r),

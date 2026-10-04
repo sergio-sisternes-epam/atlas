@@ -237,7 +237,7 @@ def memory_migrate_cmd(
     batch: str | None,
     as_json: bool,
 ) -> None:
-    """Pre-beta -> 0.13.0-beta.4 contract-file migration (path memory-migrate)."""
+    """Pre-beta -> 0.13.0-beta.7 contract-file migration (path memory-migrate)."""
     raise SystemExit(cmd_memory_migrate.run(root, operation, batch, as_json))
 
 
