@@ -33,7 +33,7 @@
 - `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself. A later or unrelated commit with the same page bytes is not the pre-prune snapshot.
 - Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
 - A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
-- After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. A replaced page, including one that reused the installed inode number, is rolled back instead of being reported as a successful retarget.
+- After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. An in-place change of the installed file, including inode-number reuse, is rolled back instead of being reported as a successful retarget. A different file that replaced the name is left in place, and the displaced page is kept for recovery.
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
 

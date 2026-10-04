@@ -835,11 +835,19 @@ def _abort_replaced_destination(
     name: str,
     original_dev: int,
     original_ino: int,
+    written_dev: int,
+    written_ino: int,
     label: str,
 ) -> None:
-    """Put the checked page back when the installed name is no longer our write."""
+    """Restore our own inode, or leave a foreign destination untouched.
+
+    The temp name is deleted by the caller after a successful undo. Exchanging
+    a file we did not install onto that name would delete the other writer's data.
+    """
     if _dir_inode_is(dirfd, name, original_dev, original_ino):
         return
+    if not _dir_inode_is(dirfd, name, written_dev, written_ino):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
     if not _dir_inode_is(dirfd, tmp, original_dev, original_ino):
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
     try:
@@ -979,7 +987,14 @@ def _rewrite_dir_file(
                 ):
                     try:
                         _abort_replaced_destination(
-                            dirfd, tmp, name, info.st_dev, info.st_ino, label
+                            dirfd,
+                            tmp,
+                            name,
+                            info.st_dev,
+                            info.st_ino,
+                            written.st_dev,
+                            written.st_ino,
+                            label,
                         )
                     except RefError:
                         tmp = ""
@@ -1002,7 +1017,14 @@ def _rewrite_dir_file(
                 ):
                     try:
                         _abort_replaced_destination(
-                            dirfd, tmp, name, info.st_dev, info.st_ino, label
+                            dirfd,
+                            tmp,
+                            name,
+                            info.st_dev,
+                            info.st_ino,
+                            written.st_dev,
+                            written.st_ino,
+                            label,
                         )
                     except RefError:
                         tmp = ""

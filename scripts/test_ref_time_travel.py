@@ -2200,15 +2200,23 @@ def main() -> int:
                 )
             finally:
                 refcmd._exchange_names = real_exchange
+            displaced = [
+                path.read_text(encoding="utf-8")
+                for path in future.glob(".atlas-prune-*")
+                if path.is_file()
+            ]
             if (
                 raced == 0
                 or not (future / "dead.md").is_file()
-                or (future / "living.md").read_text(encoding="utf-8") != before_living
-                or list(future.glob(".atlas-prune-*"))
+                or (future / "living.md").read_text(encoding="utf-8") != "racer page\n"
+                or before_living not in displaced
             ):
-                failures.append("replaced destination was treated as a successful rewrite")
+                failures.append("concurrent replacement was deleted with the displaced page")
             else:
-                print("[PASS] prune rolls back when the rewritten name is replaced")
+                print("[PASS] prune keeps a concurrent replacement and the displaced page")
+            (future / "living.md").write_text(before_living, encoding="utf-8")
+            for path in future.glob(".atlas-prune-*"):
+                path.unlink()
 
             real_exchange = refcmd._exchange_names
             overwritten = {"done": False}
