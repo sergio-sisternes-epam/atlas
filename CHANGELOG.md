@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0-beta.8 - 2026-10-04
+
+- Four operator paths help agents use the locked four-layer model:
+  atlas-memorise, atlas-recall, atlas-forget, and atlas-optimise. They are
+  paths in this package, not separate packages and not a new memory layer.
+  The store write stamp stays 0.13.0-beta.7. Nothing here runs on install or
+  compile.
+
 ## 0.13.0-beta.7 - 2026-10-04
 
 - Package versions and the stamp written by `atlas init` and operator-chosen

@@ -1,14 +1,14 @@
 ---
 name: atlas/help/baseline
 description: Versioned bundled Atlas module catalog. Help lists from this file plus the SKILL.md path registry; no Atlas mount required.
-package_version: 0.13.0-beta.7
+package_version: 0.13.0-beta.8
 ---
 
 # Bundled help baseline
 
 This directory is the **versioned packaged baseline** for Atlas modules
 `help` and `getting-started`. It ships with this skill at
-`package_version` **0.13.0-beta.7** (see `VERSION`). Help works with **no Atlas
+`package_version` **0.13.0-beta.8** (see `VERSION`). Help works with **no Atlas
 mounted**. If this baseline answers the question, stop; do not query a store.
 
 The installed registry in `SKILL.md` is authoritative for names. This catalog
@@ -26,6 +26,10 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **memory-migrate** | Assess or migrate a document-era store toward the memory layers: `memory`/`gist` plus `frame` (shipped-beta) or `schema` (beta.3 `CONTRACT.json`). Assess and inventory write nothing. |
 | **recall** | Find / answer from an Atlas |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green |
+| **atlas-memorise** | Choose layers before a write, then follow remember |
+| **atlas-recall** | Navigate by loading path recall; do not restate the walk |
+| **atlas-forget** | Keep, vary, or abandon a memory without a new traffic value |
+| **atlas-optimise** | Operator-chosen consolidation; not on install or compile |
 | **work** | Open, update, or close `work_id` hubs |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory |
 | **schema** | Init, overlay install/new/uninstall; compile merge |
