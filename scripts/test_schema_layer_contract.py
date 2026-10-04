@@ -585,6 +585,327 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        # === memory-rung-preserves-lineage =======================================
+        # A shipped 0.13.0-beta SCHEMA.json with no memory block must keep
+        # frame/gist/page after `schema memory-rung --set` — merely setting the
+        # rung must not promote it to the beta.2 frame/gist/memory layers.
+        rung_beta = tmp / "memory-rung-preserves-shipped-beta"
+        rung_beta.mkdir(parents=True)
+        (rung_beta / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "rung-beta",
+                    "atlas_release": "0.13.0-beta",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(rung_beta), "--json"]
+        )
+        after = json.loads((rung_beta / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "memory-rung-preserves-lineage: memory-less SCHEMA.json stamped 0.13.0-beta "
+            "gets frame/gist/page after memory-rung, not frame/gist/memory",
+            code == 0 and after.get("memory", {}).get("layers") == ["frame", "gist", "page"],
+            f"exit={code} payload={payload} after={after}",
+        )
+
+        # An unstamped (no atlas_release) SCHEMA.json with no memory block and no
+        # full beta.2 init shape also resolves to shipped_beta via
+        # compute_stamp_shape, so it must also keep frame/gist/page.
+        rung_unstamped = tmp / "memory-rung-preserves-shipped-beta-unstamped"
+        rung_unstamped.mkdir(parents=True)
+        (rung_unstamped / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "rung-unstamped",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(rung_unstamped), "--json"]
+        )
+        after = json.loads((rung_unstamped / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "memory-rung-preserves-lineage: unstamped memory-less SCHEMA.json also "
+            "gets frame/gist/page, not frame/gist/memory",
+            code == 0 and after.get("memory", {}).get("layers") == ["frame", "gist", "page"],
+            f"exit={code} payload={payload} after={after}",
+        )
+
+        # A SCHEMA.json that already carries frame/gist/memory (0.13.0-beta.2
+        # shape) must keep that shape after memory-rung.
+        rung_beta2 = tmp / "memory-rung-preserves-in-beta"
+        rung_beta2.mkdir(parents=True)
+        (rung_beta2 / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "rung-beta2",
+                    "structure": {},
+                    "compile": {},
+                    "memory": {"layers": ["frame", "gist", "memory"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(rung_beta2), "--json"]
+        )
+        after = json.loads((rung_beta2 / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "memory-rung-preserves-lineage: SCHEMA.json already frame/gist/memory stays that way",
+            code == 0 and after.get("memory", {}).get("layers") == ["frame", "gist", "memory"],
+            f"exit={code} payload={payload} after={after}",
+        )
+
+        # A CONTRACT.json beta.3 store keeps schema/gist/memory after memory-rung.
+        rung_beta3 = beta3_store("memory-rung-preserves-current")
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(rung_beta3), "--json"]
+        )
+        after = json.loads((rung_beta3 / "CONTRACT.json").read_text(encoding="utf-8"))
+        check(
+            "memory-rung-preserves-lineage: CONTRACT.json beta.3 store stays schema/gist/memory",
+            code == 0 and after.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
+            f"exit={code} payload={payload} after={after}",
+        )
+
+        # A stamp_shape mismatch must fail closed: memory-rung must not write.
+        rung_mismatch = tmp / "memory-rung-fails-closed-on-stamp-mismatch"
+        rung_mismatch.mkdir(parents=True)
+        (rung_mismatch / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "rung-mismatch",
+                    "atlas_release": "0.13.0-beta.4",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        before_mismatch = sha(rung_mismatch / "SCHEMA.json")
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(rung_mismatch), "--json"]
+        )
+        check(
+            "memory-rung-preserves-lineage: unknown stamp fails closed, nothing written",
+            code != 0 and sha(rung_mismatch / "SCHEMA.json") == before_mismatch,
+            f"exit={code} payload={payload}",
+        )
+
+        # === gist-parent-accepts-page (original shipped-beta page type) =========
+        page_store = tmp / "gist-parent-accepts-page"
+        page_store.mkdir(parents=True)
+        write_index(page_store / "notes")
+        write_page(page_store / "notes" / "p1.md", "page")
+        write_page(
+            page_store / "notes" / "g1.md",
+            "gist",
+            [{"path": "notes/p1.md", "kind": "derived_from"}],
+        )
+        write_page(
+            page_store / "notes" / "f1.md",
+            "frame",
+            [{"path": "notes/g1.md", "kind": "groups"}],
+        )
+        (page_store / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "page-gist-frame",
+                    "atlas_release": "0.13.0-beta",
+                    "structure": {
+                        "free_layout": True,
+                        "staging_dir": "staging",
+                        "require_index_in_folders": True,
+                        "reserved_names": ["index.md", "log.md", "staging", "schema.d"],
+                    },
+                    "compile": {
+                        "hard_fail": True,
+                        "allow_inline_ignores": True,
+                        "min_body_chars": 40,
+                        "core_checks": [
+                            "okf_compliance",
+                            "frontmatter",
+                            "internal_links",
+                            "not_just_links",
+                            "schema_present",
+                            "no_answerable_in_staging",
+                            "index_md_present",
+                            "index_md_listing",
+                        ],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        code, payload = run_json(["compile", "--root", str(page_store), "--json"])
+        all_findings = (
+            payload.get("critical", []) + payload.get("warnings", []) + payload.get("info", [])
+        )
+        all_ids_paths = {(i.get("id"), i.get("path")) for i in all_findings}
+        check(
+            "gist-parent-accepts-page: page -> gist -> frame store does not report "
+            "gist_parent for the gist derived from the page",
+            ("gist_parent", "notes/g1.md") not in all_ids_paths,
+            f"findings={all_findings}",
+        )
+        check(
+            "gist-parent-accepts-page: the page is credited by its gist (no missing_gist)",
+            ("missing_gist", "notes/p1.md") not in all_ids_paths,
+            f"findings={all_findings}",
+        )
+
+        # === contract-symlink-rejected (central find_contract_path helper) =======
+        outside = tmp / "contract-symlink-outside-target.json"
+        outside.write_text(
+            json.dumps({"schema_version": "1.0", "atlas_id": "outside", "structure": {}, "compile": {}}),
+            encoding="utf-8",
+        )
+        outside_before = sha(outside)
+        symlink_store = tmp / "contract-symlink-store"
+        symlink_store.mkdir(parents=True)
+        (symlink_store / "CONTRACT.json").symlink_to(outside)
+        code, payload = run_json(
+            [
+                "schema",
+                "memory-rung",
+                "--set",
+                "warn",
+                "--root",
+                str(symlink_store),
+                "--json",
+            ]
+        )
+        check(
+            "contract-symlink-rejected: a mutating command refuses a CONTRACT.json symlink",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "contract-symlink-rejected: the outside symlink target is unchanged",
+            sha(outside) == outside_before,
+        )
+        check(
+            "contract-symlink-rejected: the symlink itself is left in place",
+            (symlink_store / "CONTRACT.json").is_symlink(),
+        )
+
+        # A broken symlink (target does not exist) must also be rejected, not
+        # just a symlink pointing at a real file.
+        broken_store = tmp / "contract-symlink-store-broken"
+        broken_store.mkdir(parents=True)
+        (broken_store / "CONTRACT.json").symlink_to(tmp / "does-not-exist.json")
+        code, payload = run_json(
+            [
+                "schema",
+                "memory-rung",
+                "--set",
+                "warn",
+                "--root",
+                str(broken_store),
+                "--json",
+            ]
+        )
+        check(
+            "contract-symlink-rejected: a broken CONTRACT.json symlink is also refused",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+
+        # A real (non-symlink) contract file must still load/write normally.
+        real_store = beta3_store("contract-symlink-real-file-still-works")
+        code, payload = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(real_store), "--json"]
+        )
+        check(
+            "contract-symlink-rejected: a real non-symlink CONTRACT.json still loads/writes",
+            code == 0 and payload.get("ok") is True,
+            f"exit={code} payload={payload}",
+        )
+
+        # === malformed-stamp-fails-closed (stamp compare) ========================
+        malformed = tmp / "malformed-stamp-fails-closed"
+        malformed.mkdir(parents=True)
+        (malformed / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "malformed",
+                    "atlas_release": "0.12.0oops",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        malformed_before = sha(malformed / "SCHEMA.json")
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(malformed), "--operation", "assess", "--json"]
+        )
+        check(
+            "malformed-stamp-fails-closed: 0.12.0oops is not classified pre-beta",
+            code == 0 and payload.get("lineage") != "pre-beta",
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(malformed),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "malformed-stamp-fails-closed: apply on 0.12.0oops exits non-zero and writes nothing",
+            code != 0
+            and sha(malformed / "SCHEMA.json") == malformed_before
+            and not (malformed / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+
+        # A genuine older X.Y.Z stamp (not malformed) still classifies pre-beta
+        # and still migrates only with an attested named batch.
+        genuine_old = tmp / "malformed-stamp-fails-closed-genuine-old"
+        genuine_old.mkdir(parents=True)
+        (genuine_old / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "genuine-old",
+                    "atlas_release": "0.12.0",
+                    "structure": {},
+                    "compile": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(genuine_old), "--operation", "assess", "--json"]
+        )
+        check(
+            "malformed-stamp-fails-closed: a genuine 0.12.0 stamp still classifies pre-beta",
+            code == 0 and payload.get("lineage") == "pre-beta",
+            f"exit={code} payload={payload}",
+        )
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

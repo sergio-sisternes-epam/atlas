@@ -35,10 +35,12 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
-# Memory layers (frame / gist / memory, shipped 0.13.0-beta and 0.13.0-beta.2;
-# schema / gist / memory, beta.3) are pinned here, not read from the store.
+# Memory layers (frame / gist / page, original shipped 0.13.0-beta;
+# frame / gist / memory, 0.13.0-beta.2; schema / gist / memory, beta.3) are
+# pinned here, not read from the store. "page" is the original shipped-beta
+# episode type and must count as a valid gist parent alongside "memory".
 GIST_PARENT_TYPES = frozenset(
-    {"experience", "decision", "lesson", "recipe", "document", "memory", "protostar"}
+    {"experience", "decision", "lesson", "recipe", "document", "memory", "page", "protostar"}
 )
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
@@ -615,7 +617,7 @@ def _memory_findings(
                         "msg": (
                             "a gist has exactly one parent, and that parent is not "
                             "a gist (parent must be experience, decision, lesson, "
-                            "recipe, document, memory, or protostar)."
+                            "recipe, document, memory, page, or protostar)."
                         ),
                     }
                 )

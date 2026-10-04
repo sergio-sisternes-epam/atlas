@@ -30,6 +30,15 @@ def find_contract_path(root: Path) -> tuple[Path | None, str | None]:
     """
     schema_path = root / SCHEMA_NAME
     contract_path = root / CONTRACT_NAME
+    # is_file() follows symlinks (and is False for a broken link, which would
+    # otherwise let a later write_text() follow the link, even outside the
+    # root, before anyone noticed). Reject either filename as a symlink
+    # before ever treating it as the contract file — this must happen
+    # before the is_file() checks below so a broken symlink is also caught.
+    if schema_path.is_symlink():
+        return None, f"{SCHEMA_NAME} is a symlink; refusing to use it as the contract file"
+    if contract_path.is_symlink():
+        return None, f"{CONTRACT_NAME} is a symlink; refusing to use it as the contract file"
     has_schema = schema_path.is_file()
     has_contract = contract_path.is_file()
     if has_schema and has_contract:
@@ -283,19 +292,35 @@ def validate_schema_shape(schema: dict) -> list[str]:
     return errs
 
 
-def _release_older_than_beta_line(atlas_release: Any) -> bool:
-    """True when atlas_release is absent, or a parsed X.Y.Z is < 0.13.0.
 
-    Unknown, non-numeric, or newer-looking values (including unknown beta
-    stamps such as "0.13.0-beta.4") are never treated as older; they must
-    fall through to in-beta so `apply` does not rewrite a shape it was not
-    told about.
+# Full semver: X.Y.Z optionally followed by a -prerelease and/or +build
+# suffix made of dot-separated alphanumeric/hyphen identifiers. Using
+# fullmatch (via $ anchor with no re.match prefix shortcut) means a
+# malformed value such as "0.12.0oops" — which merely starts with a valid
+# X.Y.Z prefix — never matches and so is never treated as older/pre-beta.
+_FULL_SEMVER_RE = re.compile(
+    r"^(\d+)\.(\d+)\.(\d+)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def _release_older_than_beta_line(atlas_release: Any) -> bool:
+    """True when atlas_release is absent, or a full X.Y.Z semver is < 0.13.0.
+
+    The value must match a *complete* semver (anchored start to end) before
+    its numeric parts are compared — a malformed value that merely starts
+    with a valid X.Y.Z prefix, such as "0.12.0oops", must never be treated
+    as older/pre-beta; it fails closed to "not older" so `apply` falls
+    through to in-beta rather than migrating an unknown stamp. Unknown,
+    non-numeric, or newer-looking values (including unknown beta stamps
+    such as "0.13.0-beta.4") are likewise never treated as older.
     """
     if atlas_release is None:
         return True
     if not isinstance(atlas_release, str):
         return False
-    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", atlas_release)
+    match = _FULL_SEMVER_RE.match(atlas_release)
     if not match:
         return False
     major, minor, patch = (int(part) for part in match.groups())

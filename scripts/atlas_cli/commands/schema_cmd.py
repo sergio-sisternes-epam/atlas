@@ -19,12 +19,13 @@ from ..core.overlay import (
     write_json,
     write_receipt,
 )
-from ..core.paths import CONTRACT_NAME, rel, store_root
+from ..core.paths import rel, store_root
 from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
 from ..core.schema import (
     BETA3_LAYERS,
     IN_BETA_LAYERS,
     SHIPPED_BETA_LAYERS,
+    compute_stamp_shape,
     find_contract_path,
     load_schema,
     staging_dir_name,
@@ -329,20 +330,26 @@ def run_memory_rung(
         _print(as_json, {"ok": False, "error": path_err or "missing contract file", "root": str(r)})
         return 2
     # The only writer of memory.rung edits whichever single contract file the
-    # store has; the layers/legacy_types are pinned to the shape that file
-    # already carries (0.13.0-beta frame/gist/page, 0.13.0-beta.2
-    # frame/gist/memory, or beta.3 schema/gist/memory). A SCHEMA.json store
-    # that already declares the shipped-beta frame/gist/page layers keeps
-    # that shape; every other SCHEMA.json store (no memory key yet, or
-    # already frame/gist/memory) uses the 0.13.0-beta.2 shape.
-    existing_memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
-    existing_layers = existing_memory.get("layers") if isinstance(existing_memory, dict) else None
-    if contract_path.name == CONTRACT_NAME:
-        layers = list(BETA3_LAYERS)
-    elif existing_layers == SHIPPED_BETA_LAYERS:
-        layers = list(SHIPPED_BETA_LAYERS)
-    else:
-        layers = list(IN_BETA_LAYERS)
+    # store has; the layers/legacy_types written must match the lineage the
+    # store is already on, not be re-derived from an already-present layers
+    # array. Ask compute_stamp_shape — the same classifier compile/validate
+    # use — which shape this contract is, so merely setting the rung can
+    # never silently change lineage (e.g. a shipped 0.13.0-beta SCHEMA.json
+    # with no memory block must keep frame/gist/page, not jump to
+    # frame/gist/memory). A stamp_shape mismatch fails closed: nothing is
+    # written.
+    shape, shape_err = compute_stamp_shape(contract_path.name, schema)
+    if shape_err or shape is None:
+        _print(
+            as_json,
+            {"ok": False, "error": shape_err or "stamp_shape mismatch", "root": str(r)},
+        )
+        return 2
+    layers = {
+        "shipped_beta": list(SHIPPED_BETA_LAYERS),
+        "in_beta": list(IN_BETA_LAYERS),
+        "current": list(BETA3_LAYERS),
+    }[shape]
     schema["memory"] = {
         "rung": value,
         "layers": layers,
