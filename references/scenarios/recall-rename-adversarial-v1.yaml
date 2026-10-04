@@ -1,0 +1,27 @@
+id: recall-rename-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-04-atlas-recall-rename
+adversarial: true
+expect:
+  hard_cut: true
+  search_is_not_a_command: true
+  one_recall_index: true
+smokes:
+  - id: no-search-command
+    source: "C-alias rejected; SemVer 2.0.0 item 4 https://semver.org/spec/v2.0.0.html; Hyrum https://www.hyrumslaw.com/"
+    expect: "Root CLI has no search command and no query command. Invoking either is the ordinary missing-command usage error. No alias runs the discovery tool under the old name."
+  - id: recall-run-is-the-tool
+    source: "C-click accepted; Click groups https://click.palletsprojects.com/en/stable/commands-and-groups/; cli.py recall group at c073bc3"
+    expect: "Discovery is atlas recall run with the same flags as the old search command. atlas recall with a positional query is not registered."
+  - id: recall-group-intact
+    source: "C-click; pin do not invent a second index; existing recall group"
+    expect: "atlas recall status and atlas recall index build still exist and still operate the one recall index. No second index command tree is added."
+  - id: schema-query-key-unchanged
+    source: "C-schema rejected; SCHEMA.json key query; CLI help query.search_engine"
+    expect: "SCHEMA object key query remains the engine config. The rename does not migrate or rename that key."
+  - id: recall-cmd-required
+    source: "C-walk; references/paths/query.md step 5 at c073bc3; decision 2026-10-04-recall-renames-query-path-and-search"
+    expect: "Path recall still walks frame then gist then page and usually stops at the gist. The exit is incomplete without recall_cmd even when the gist answered. stopped_at uses recall_hit, not search_hit."
+  - id: memory-layers-not-retuned
+    source: "memory-layers plan P2 P6 P8 P10; FSE 2025 warning suppressions as cited there"
+    expect: "Gists and frames stay beside pages. document stays legacy. assess and inventory stay read-only. Absent memory.rung stays info with compile exit 0 aside from other faults. CI merge gates are not retuned."

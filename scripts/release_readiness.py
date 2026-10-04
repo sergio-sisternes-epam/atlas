@@ -105,11 +105,32 @@ def validate_commit(candidate: str, root: Path = ROOT) -> list[str]:
     return []
 
 
+
+def is_prerelease_tag(tag: str) -> bool:
+    """Return True when *tag* is a SemVer prerelease (e.g. v0.13.0-beta).
+
+    Strips a leading ``v``, ignores build metadata (``+…``), and treats any
+    hyphen in the remaining core as a prerelease identifier. Stable tags such
+    as ``v0.13.0`` return False.
+    """
+    name = tag[1:] if tag.startswith(("v", "V")) else tag
+    core = name.split("+", 1)[0]
+    return "-" in core
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Release tag to compare with apm.yml")
     parser.add_argument("--commit", help="Candidate commit SHA")
+    parser.add_argument(
+        "--is-prerelease-tag",
+        metavar="TAG",
+        help="Exit 0 if TAG is a SemVer prerelease, 1 otherwise (no other checks)",
+    )
     args = parser.parse_args()
+
+    if args.is_prerelease_tag is not None:
+        return 0 if is_prerelease_tag(args.is_prerelease_tag) else 1
 
     version, errors = validate_versions()
     expected_tag = f"v{version}"

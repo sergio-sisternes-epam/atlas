@@ -18,19 +18,19 @@ RELATES_CAP = 5
 
 AGENTIC_GUIDANCE = """
 Agentic search pattern (grep mode):
-  Protocol is path query (B17 card). Engine is atlas search. Do not merge the names.
-  1. Formal lookup: Enter card path=query, load references/paths/query.md, then run this command.
+  Protocol is path recall (B17 card). Engine is atlas recall run. Do not merge the names.
+  1. Formal lookup: Enter card path=recall, load references/paths/recall.md, then run this command.
   2. Use these ranked hits as the candidate map — do not run unbounded whole-tree grep/rg/find.
   3. Select with traffic on the hit (type, kva, status, work_id). Exit states are not current guidance.
   4. Read 1–3 pages, including a spine or work hub when it ranks. Expand via frontmatter relates_to.
-  5. At most one glossary-alias rewrite search (query path step). Do not invent synonyms.
+  5. At most one glossary-alias rewrite search (recall path step). Do not invent synonyms.
   6. Never treat staging/ as an answer source. Gap if nothing relevant.
 """.strip()
 
 DISCIPLINE = {
-    "path": "query",
-    "engine": "atlas search",
-    "primary": "atlas search",
+    "path": "recall",
+    "engine": "atlas recall run",
+    "primary": "atlas recall run",
     "forbidden_primary": ["grep", "rg", "find"],
     "next": [
         "select by type/kva/status/work_id; prefer spine/work hub",
@@ -318,7 +318,7 @@ def run(
             if as_json:
                 print(json.dumps(payload, indent=2))
             else:
-                print(f"atlas search — FAIL: {payload['error']}")
+                print(f"atlas recall run — FAIL: {payload['error']}")
             return 2
         effective = merged
     if engine_override and profile:
@@ -360,9 +360,9 @@ def run(
                 print(json.dumps(payload, indent=2, default=str))
             else:
                 if not payload.get("ok"):
-                    print(f"atlas search — FAIL: {payload.get('error')}")
+                    print(f"atlas recall run — FAIL: {payload.get('error')}")
                 else:
-                    print(f"atlas search — root={r}")
+                    print(f"atlas recall run — root={r}")
                     print(f"query: {query}")
                     rec = payload.get("recall") or {}
                     print(
@@ -424,7 +424,7 @@ def run(
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"atlas search — root={r}")
+        print(f"atlas recall run — root={r}")
         print(f"query: {query}")
         print(f"engine: configured={engine} used={mode_used}")
         if include_exits:

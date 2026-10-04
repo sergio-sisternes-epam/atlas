@@ -1,0 +1,44 @@
+id: memory-layers-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-03-atlas-memory-layers
+adversarial: true
+smokes:
+  - id: stop-at-gist
+    source: "P2; Brainerd and Reyna 2002 fuzzy-trace"
+    expect: "When the gist answers the ask, the procedure does not require opening the parent page."
+  - id: open-page-when-gist-thin
+    source: "PMC4815269; NAACL 2025 findings-naacl.293 summarization hallucination"
+    expect: "When the gist is thin, contested, or the ask needs the record, the procedure opens the parent page."
+  - id: stm-not-collapsed
+    source: "approved plan 2026-09-18-index-md-semantic-memory; MemGPT arXiv:2310.08560"
+    expect: "Folder index.md remains the hot list. Unlisted pages remain searchable. Frame and gist links are not a replacement index."
+  - id: no-summary-tree
+    source: "RAPTOR arXiv:2401.18059"
+    expect: "A gist parent is a page, never a gist. A frame lists gists, never a stack of summaries."
+  - id: default-rung-info-not-failure
+    source: "P8; P10; FSE 2025 warning suppressions"
+    expect: "With no memory.rung, legacy document and missing gist are info and compile exit is 0 aside from other faults."
+  - id: warn-and-error-opt-in
+    source: "P8; Fowler strangler fig"
+    expect: "warn exits 1 and error exits 2 only when the store sets memory.rung. Existing stores are not flipped."
+  - id: assistant-does-not-bulk-write
+    source: "P11; Fowler strangler fig; permanent-hybrid risk"
+    expect: "modes assess and inventory write nothing. apply writes only a named batch after an operator ask, then compile."
+  - id: schema-not-hand-edited
+    source: "P14; Atlas hard rule 12"
+    expect: "memory-migrate does not write SCHEMA.json. Rung changes go through path schema."
+  - id: checkpoint-stays-in-discuss
+    source: "P5"
+    expect: "No Atlas path or type named checkpoint or constellation is added. Discuss still owns constellation."
+  - id: same-atlas-no-sidecar
+    source: "P4"
+    expect: "Gists and frames are ordinary pages in the store folders. No required gists or frames directory."
+  - id: document-reported-not-rewritten
+    source: "P6; P9"
+    expect: "type document is reported on the rung and is not auto-retyped."
+  - id: write-policy-intact
+    source: "P12; CLS lesson complementary-learning-systems"
+    expect: "The procedure does not rewrite an episodic page in place to match a gist or a frame."
+  - id: protostar-missing-gist-not-reported
+    source: "SCHEMA.contract.json MISSING_GIST_TYPES"
+    expect: "A protostar without a gist produces no missing_gist finding."

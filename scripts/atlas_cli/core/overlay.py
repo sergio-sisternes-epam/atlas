@@ -22,12 +22,24 @@ FORBIDDEN_CORE = frozenset(
         "mesh",
         "sources_profile",
         "recall",
+        "memory",
     }
 )
 CONTRIB_MERGE = frozenset({"bindings", "presets"})
 ALLOW_UNION = frozenset({"types"})
 RESERVED_CORE_TYPES = frozenset(
-    {"experience", "decision", "work", "document", "protostar", "lesson", "recipe"}
+    {
+        "experience",
+        "decision",
+        "work",
+        "document",
+        "protostar",
+        "lesson",
+        "recipe",
+        "page",
+        "gist",
+        "frame",
+    }
 )
 
 

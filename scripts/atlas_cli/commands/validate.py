@@ -30,6 +30,12 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
+# Memory layers (page / gist / frame) are pinned here, not read from the store.
+GIST_PARENT_TYPES = frozenset(
+    {"experience", "decision", "lesson", "recipe", "document", "page", "protostar"}
+)
+MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
+
 
 def _ignores_in(text: str) -> set[str]:
     return {m.group(1).lower() for m in IGNORE_RE.finditer(text)}
@@ -272,15 +278,288 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     return issues
 
 
+def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
+    """Resolve the memory rung (info|warn|error) plus any shape-critical issues.
+
+    No memory key, a memory object with no/empty rung, or any shape problem
+    all resolve to info (and a malformed memory block also raises a critical
+    memory_rung issue while still treating the ladder as info).
+
+    Distinguish absent/blank string from a non-string rung value: falsey
+    non-strings (0, false, [], {}) must not collapse via ``or ""`` into an
+    absent rung on SCHEMA 1.0 stores that skip the v2 JSON Schema check.
+    """
+    if not schema:
+        return "info", []
+    memory = schema.get("memory")
+    if memory is None:
+        return "info", []
+    if not isinstance(memory, dict):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": "SCHEMA.memory must be an object; treating memory rung as info",
+            }
+        ]
+    if "rung" not in memory or memory.get("rung") is None:
+        return "info", []
+    raw = memory["rung"]
+    if not isinstance(raw, str):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": (
+                    "SCHEMA.memory.rung must be a string (info, warn, or error); "
+                    f"got {type(raw).__name__} {raw!r}; treating memory rung as info"
+                ),
+            }
+        ]
+    rung = raw.strip().lower()
+    if not rung:
+        return "info", []
+    if rung not in ("info", "warn", "error"):
+        return "info", [
+            {
+                "id": "memory_rung",
+                "path": "SCHEMA.json",
+                "msg": (
+                    f"SCHEMA.memory.rung must be info, warn, or error (got {rung!r}); "
+                    "treating memory rung as info"
+                ),
+            }
+        ]
+    return rung, []
+
+
+_MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
+_MEMORY_LAYERS_FIXED = ["frame", "gist", "page"]
+_MEMORY_LEGACY_TYPES_FIXED = ["document"]
+
+
+def _memory_contract(schema: dict | None) -> list[dict]:
+    """Enforce the fixed memory.layers / memory.legacy_types contract on SCHEMA 1.0.
+
+    SCHEMA 2.0 stores already enforce this (and more) via validate_store_v2
+    against the store-v2 JSON Schema, so this check only runs for stores that
+    are not 2.0 (the default 1.0 contract, or any other non-2.0 value).
+    """
+    if not schema:
+        return []
+    memory = schema.get("memory")
+    if not isinstance(memory, dict):
+        return []
+    findings: list[dict] = []
+    extra_keys = sorted(set(memory.keys()) - _MEMORY_ALLOWED_KEYS)
+    for key in extra_keys:
+        findings.append(
+            {
+                "id": "memory_contract",
+                "path": "SCHEMA.json",
+                "msg": f"SCHEMA.memory has an unexpected key: {key!r}",
+            }
+        )
+    if "layers" in memory:
+        layers = memory["layers"]
+        if layers != _MEMORY_LAYERS_FIXED:
+            findings.append(
+                {
+                    "id": "memory_contract",
+                    "path": "SCHEMA.json",
+                    "msg": (
+                        "SCHEMA.memory.layers must be exactly "
+                        f"{_MEMORY_LAYERS_FIXED!r} (got {layers!r})"
+                    ),
+                }
+            )
+    if "legacy_types" in memory:
+        legacy_types = memory["legacy_types"]
+        if legacy_types != _MEMORY_LEGACY_TYPES_FIXED:
+            findings.append(
+                {
+                    "id": "memory_contract",
+                    "path": "SCHEMA.json",
+                    "msg": (
+                        "SCHEMA.memory.legacy_types must be exactly "
+                        f"{_MEMORY_LEGACY_TYPES_FIXED!r} (got {legacy_types!r})"
+                    ),
+                }
+            )
+    return findings
+
+
+def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """Legacy-document and memory-layer (gist/frame) findings.
+
+    Pages are read once here, independent of the main compile loop, so these
+    findings do not depend on iteration order or on other checks succeeding.
+    """
+    pages: list[tuple[Path, dict]] = []
+    for path in iter_concept_md(root, staging_name):
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, _ = read_page(path, schema_version(schema) if schema else "1.0")
+        except FrontmatterError:
+            continue
+        if not meta:
+            continue
+        pages.append((path, meta))
+
+    by_rel_path = {rel(root, p): (p, m) for p, m in pages}
+
+    def _related(meta: dict, kind: str) -> list[dict]:
+        out: list[dict] = []
+        rels = meta.get("relates_to")
+        if not isinstance(rels, list):
+            return out
+        for item in rels:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or item.get("role") or "").strip().lower() == kind:
+                out.append(item)
+        return out
+
+    def _canonical_local_target(target: str) -> str | None:
+        """Resolve a relates_to target to the canonical store-relative key.
+
+        Mirrors the resolution ``_check_relates_to`` uses: remote references
+        (http(s):// or atlas://) are left alone (handled elsewhere), and any
+        local target is resolved against the store root so it matches the
+        page index built from ``rel()``. Targets that resolve outside the
+        store root are not treated as local page keys.
+        """
+        if not target or target.startswith(("http://", "https://", "atlas://")):
+            return None
+        resolved_root = root.resolve()
+        cand = (root / target).resolve()
+        try:
+            cand.relative_to(resolved_root)
+        except ValueError:
+            return None
+        return str(cand.relative_to(resolved_root)).replace("\\", "/")
+
+    def _valid_gist_parent(m: dict) -> str | None:
+        """Return the canonical parent path for a well-formed gist, else None.
+
+        A gist only counts toward ``gist_parent`` coverage when it has
+        exactly one ``derived_from`` parent, that parent resolves to a page
+        inside the store, and the parent's type is a valid gist-parent type
+        (not itself a gist). This mirrors the ``gist_parent`` ok check below
+        so a malformed gist (zero/two+ parents, gist-of-gist, outside the
+        store, wrong type) never suppresses ``missing_gist`` for its target.
+        """
+        parents = _related(m, "derived_from")
+        if len(parents) != 1:
+            return None
+        target = str(parents[0].get("path") or "").strip()
+        if not target:
+            return None
+        canon = _canonical_local_target(target)
+        found = by_rel_path.get(canon if canon is not None else target)
+        if found is None:
+            return None
+        _, tmeta = found
+        ttype = str(tmeta.get("type") or "").strip()
+        if ttype not in GIST_PARENT_TYPES:
+            return None
+        return canon if canon is not None else target
+
+    # Index gists by the path of the parent they are derived_from — only for
+    # valid single-parent gists; a malformed gist must not suppress the
+    # target's missing_gist finding.
+    gists_by_parent: dict[str, list[str]] = {}
+    for p, m in pages:
+        if str(m.get("type") or "").strip() != "gist":
+            continue
+        gp = rel(root, p)
+        canon = _valid_gist_parent(m)
+        if canon is not None:
+            gists_by_parent.setdefault(canon, []).append(gp)
+
+    findings: list[dict] = []
+    for p, m in pages:
+        ptype = str(m.get("type") or "").strip()
+        rp = rel(root, p)
+
+        if ptype == "document":
+            findings.append(
+                {
+                    "id": "legacy_document",
+                    "path": rp,
+                    "msg": (
+                        "type document is a legacy durable object; consider migrating "
+                        "toward page/gist via path memory-migrate. The page is not "
+                        "rewritten automatically."
+                    ),
+                }
+            )
+
+        if ptype in MISSING_GIST_TYPES and not gists_by_parent.get(rp):
+            findings.append(
+                {
+                    "id": "missing_gist",
+                    "path": rp,
+                    "msg": "no gist is derived_from this page.",
+                }
+            )
+
+        if ptype == "gist":
+            if _valid_gist_parent(m) is None:
+                findings.append(
+                    {
+                        "id": "gist_parent",
+                        "path": rp,
+                        "msg": (
+                            "a gist has exactly one parent, and that parent is not "
+                            "a gist (parent must be experience, decision, lesson, "
+                            "recipe, document, page, or protostar)."
+                        ),
+                    }
+                )
+
+        if ptype == "frame":
+            gist_paths: set[str] = set()
+            invalid = False
+            for item in _related(m, "related"):
+                target = str(item.get("path") or "").strip()
+                if not target:
+                    invalid = True
+                    continue
+                canon = _canonical_local_target(target)
+                lookup_key = canon if canon is not None else target
+                found = by_rel_path.get(lookup_key)
+                if found is None:
+                    invalid = True
+                    continue
+                if str(found[1].get("type") or "").strip() != "gist":
+                    invalid = True
+                    continue
+                gist_paths.add(lookup_key)
+            if invalid or len(gist_paths) < 2:
+                findings.append(
+                    {
+                        "id": "frame_members",
+                        "path": rp,
+                        "msg": "a frame lists at least two gists, not pages.",
+                    }
+                )
+
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
     type_name: str | None = None,
     path_prefix: str | None = None,
+    dry_run: bool = False,
 ) -> int:
     r = store_root(root)
     critical: list[dict] = []
     warnings: list[dict] = []
+    info: list[dict] = []
     focused_pages: list[dict] = []
     want_type = type_name.strip() if type_name else None
     want_path = path_prefix.strip() if path_prefix else None
@@ -332,8 +611,67 @@ def run(
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
 
+    # Resolve --type/--path focus before emitting page-scoped findings so
+    # memory findings honour the same intersection as the main page loop.
+    skip_pages = False
+    if want_path:
+        focus_path, path_err = _resolve_focus_path(r, want_path)
+        if path_err:
+            critical.append({"id": "focus_path", "path": want_path, "msg": path_err})
+            focus_path = None
+            skip_pages = True
+
+    # Memory rung (page / gist / frame): absent means info; malformed shapes
+    # raise a critical memory_rung issue but still treat the ladder as info.
+    memory_rung, memory_shape_issues = _memory_rung(schema)
+    critical.extend(memory_shape_issues)
+    if schema is not None and schema_version(schema) != "2.0":
+        critical.extend(_memory_contract(schema))
+    allow_inline_ignores = True
+    if isinstance(schema, dict):
+        compile_cfg = schema.get("compile")
+        if isinstance(compile_cfg, dict) and "allow_inline_ignores" in compile_cfg:
+            allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
+    if not skip_pages:
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _memory_findings(r, schema, staging_name):
+            if allow_inline_ignores:
+                fpath_ign = (r / finding["path"]).resolve()
+                try:
+                    ign_text = fpath_ign.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    ign_text = ""
+                if finding["id"] in _ignores_in(ign_text):
+                    continue
+            if focused:
+                fpath = (r / finding["path"]).resolve()
+                try:
+                    meta, _ = read_page(fpath, sv)
+                except FrontmatterError:
+                    meta = None
+                if meta:
+                    if not _in_focus(fpath, meta, want_type, focus_path):
+                        continue
+                else:
+                    if want_type:
+                        continue
+                    if focus_path is not None:
+                        try:
+                            fpath.relative_to(focus_path)
+                        except ValueError:
+                            continue
+            if memory_rung == "error":
+                finding["severity"] = "critical"
+                critical.append(finding)
+            elif memory_rung == "warn":
+                finding["severity"] = "warning"
+                warnings.append(finding)
+            else:
+                finding["severity"] = "info"
+                info.append(finding)
+
     # mesh consolidate (when fragments present)
-    mesh_result = mesh_consolidate(r)
+    mesh_result = mesh_consolidate(r, write=not dry_run)
     critical.extend(mesh_result.get("critical") or [])
     warnings.extend(mesh_result.get("warnings") or [])
     warnings.extend(_unknown_atlas_uri_warnings(r))
@@ -349,14 +687,6 @@ def run(
                     "msg": "staging is not empty — compile-in-place required before green",
                 }
             )
-
-    skip_pages = False
-    if want_path:
-        focus_path, path_err = _resolve_focus_path(r, want_path)
-        if path_err:
-            critical.append({"id": "focus_path", "path": want_path, "msg": path_err})
-            focus_path = None
-            skip_pages = True
 
     # concept pages
     for path in iter_concept_md(r, staging_name):
@@ -466,22 +796,26 @@ def run(
 
     index_info = None
     if not focused and not critical and recall_enabled(schema):
-        try:
-            index_info = publish_generation(r, schema, focused=False)
-        except (IndexError_, Exception) as e:
-            critical.append(
-                {
-                    "id": "recall_index",
-                    "path": ".atlas-index/recall",
-                    "msg": f"failed to publish recall generation: {e}",
-                }
-            )
+        if dry_run:
+            index_info = {"published": False, "reason": "dry_run"}
+        else:
+            try:
+                index_info = publish_generation(r, schema, focused=False)
+            except (IndexError_, Exception) as e:
+                critical.append(
+                    {
+                        "id": "recall_index",
+                        "path": ".atlas-index/recall",
+                        "msg": f"failed to publish recall generation: {e}",
+                    }
+                )
 
     result = {
         "root": str(r),
         "ok": len(critical) == 0,
         "critical": critical,
         "warnings": warnings,
+        "info": info,
         "staging_dir": staging_name,
         "staging_count": len(staged),
         "type": want_type,
@@ -495,6 +829,8 @@ def run(
             "note": mesh_result.get("note"),
         },
         "recall_index": index_info,
+        "dry_run": dry_run,
+        "memory_rung": memory_rung,
     }
 
     if as_json:
@@ -509,6 +845,10 @@ def run(
             print(f"WARNINGS ({len(warnings)}):")
             for i in warnings:
                 print(f"  [{i['id']}] {i['path']}: {i['msg']}")
+        if info:
+            print(f"INFO ({len(info)}):")
+            for i in info:
+                print(f"  [{i['id']}] {i['path']}: {i['msg']}")
         mesh_note = mesh_result.get("written") or mesh_result.get("note")
         if mesh_note:
             print(f"mesh: {mesh_note}")
@@ -517,8 +857,10 @@ def run(
             for issue in warnings
             if issue.get("id") not in NON_BLOCKING_WARNING_IDS
         ]
-        if not critical and not warnings:
+        if not critical and not warnings and not info:
             print("ok — no issues")
+        elif not critical and not warnings:
+            print("ok — informational findings only")
         elif not critical and not blocking_warnings:
             print("ok — non-blocking external dependency warnings only")
         elif not critical:

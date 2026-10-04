@@ -5,11 +5,11 @@ packages:
   - atlas
 smokes:
   - id: no-unbounded-grep-primary
-    source: "Query discipline"
-    expect: "paths/query and SKILL hard rules forbid unbounded tree grep as primary; atlas search is the entrypoint"
+    source: "Recall discipline"
+    expect: "paths/recall and SKILL hard rules forbid unbounded tree grep as primary; atlas recall run is the entrypoint"
   - id: no-answer-from-staging
     source: "Structure pin"
-    expect: "query path and CLI treat staging as non-answer; compile fails if staging non-empty"
+    expect: "recall path and CLI treat staging as non-answer; compile fails if staging non-empty"
   - id: remember-requires-compile-green
     source: "Remember discipline"
     expect: "paths/remember requires atlas compile exit 0 before claiming memory stored"
@@ -18,7 +18,7 @@ smokes:
     expect: "New experience under a work_id includes relates_to work hub with kind implements"
   - id: activation-card-when-on
     source: "B17 / card pattern"
-    expect: "activation_card on; store-changing or formal query Run emits Enter card with path_module inside a fenced text block"
+    expect: "activation_card on; store-changing or formal recall Run emits Enter card with path_module inside a fenced text block"
   - id: path-modules-present
     source: "Implement acceptance"
-    expect: "references/paths/query.md, remember.md, work.md exist and are linked from SKILL path registry"
+    expect: "references/paths/recall.md, remember.md, work.md exist and are linked from SKILL path registry"

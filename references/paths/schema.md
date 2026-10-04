@@ -46,6 +46,7 @@ Other paths may call `atlas compile` as a tool. They must not hand-edit `SCHEMA.
 | Remove a contribution | `schema uninstall <id>` |
 | Check merge / clashes only | `compile` |
 | SCHEMA 1.0 → 2.0 envelope (does not enable recall) | `schema upgrade` then path `configure` |
+| Opt a store's memory severity in or out (the operator asked) | `schema memory-rung --set info\|warn\|error` |
 
 Never skip compile after a write.
 
@@ -62,7 +63,7 @@ Never skip compile after a write.
 
 ### 0. Resolve root
 
-Same as query. Always pass `--root`. Omitting `--root` uses cwd, not the skill mount.
+Same as recall. Always pass `--root`. Omitting `--root` uses cwd, not the skill mount.
 
 ### 1. Birth a store
 
@@ -132,6 +133,23 @@ Exit 2 → fix via **schema** verbs, not a text edit. Then compile again. Do not
 ### 6. log.md
 
 Append one bullet only when schema layout changed (init, first overlay, uninstall). Not for every type tweak.
+
+### 7. Memory rung (opt-in only)
+
+```bash
+# --set accepts exactly one of: info, warn, error
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <root>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <root>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <root>
+```
+
+This is the **only** writer of `SCHEMA.memory`. It sets `rung` (plus the fixed
+`layers` and `legacy_types` lists) and does not retype any page. Do not
+hand-edit `SCHEMA.json` to change the rung. Path `memory-migrate` must not call
+this command unless the operator explicitly asked to opt the rung from `info`
+toward `warn` or `error`; its `assess` and `inventory` modes never change the
+rung. Absent `memory.rung` means `info` — existing stores stay unaffected
+until an operator opts in.
 
 ## Overlay file to author (outside the store)
 

@@ -27,7 +27,7 @@ Optional extra names are additive only.
 
 ## Procedure
 
-1. **Resolve root** (same as query).
+1. **Resolve root** (same as recall).
 2. **Query living + dead frame first**
    - vision, comparison-correct, competitors, partners/, glossary, microsoft-as-realization
    - `atlas-project/landscape/` protostars

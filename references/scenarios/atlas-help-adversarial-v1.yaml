@@ -35,3 +35,6 @@ smokes:
   - id: no-visualise-path
     source: "runtime scope excludes visualise"
     expect: "No references/paths/visualise.md and no path registry row for visualise."
+  - id: no-operational-query-module
+    source: "recall rename hard cut; SCHEMA object key query remains engine config"
+    expect: "Packaged baseline rejects query as an operational path or module. SCHEMA object key query stays allowed as engine config."
