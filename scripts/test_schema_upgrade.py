@@ -35,18 +35,18 @@ def main() -> int:
     store = tmp / "store"
     r = run(["init", "--root", str(store), "--json"])
     check("init-1.0", r.returncode == 0)
-    schema = json.loads((store / "SCHEMA.json").read_text())
+    schema = json.loads((store / "CONTRACT.json").read_text())
     check("init-default-1.0", schema.get("schema_version") == "1.0" and "recall" not in schema)
 
     schema["relations"] = {"authoritative": "frontmatter"}
-    (store / "SCHEMA.json").write_text(json.dumps(schema, indent=2) + "\n")
+    (store / "CONTRACT.json").write_text(json.dumps(schema, indent=2) + "\n")
     preview = run(["schema", "upgrade", "--root", str(store), "--json"])
     payload = json.loads(preview.stdout) if preview.stdout.strip().startswith("{") else {}
     check("upgrade-preview", payload.get("ok") is True and payload.get("to") == "2.0", preview.stdout[:200])
 
     applied = run(["schema", "upgrade", "--apply", "--root", str(store), "--json"])
     payload = json.loads(applied.stdout) if applied.stdout.strip().startswith("{") else {}
-    schema = json.loads((store / "SCHEMA.json").read_text())
+    schema = json.loads((store / "CONTRACT.json").read_text())
     check(
         "upgrade-apply",
         applied.returncode == 0 and schema.get("schema_version") == "2.0",
@@ -80,7 +80,7 @@ def main() -> int:
 
     v2 = tmp / "v2"
     r = run(["init", "--root", str(v2), "--schema-version", "2.0", "--json"])
-    schema = json.loads((v2 / "SCHEMA.json").read_text())
+    schema = json.loads((v2 / "CONTRACT.json").read_text())
     check("init-2.0-disabled", r.returncode == 0 and schema.get("recall", {}).get("enabled") is False)
 
     print("Failed:" if failed else "ok", ", ".join(failed))

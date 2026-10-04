@@ -410,7 +410,25 @@ def _expand_flow_relates(text: str, drop: set[str] | None = None, *, force: bool
         blob = "\n".join(value_lines).strip()
         if not _balanced_flow(blob):
             raise RefError("unclosed relates_to value")
-        parsed = _parse_relation_value(blob)
+        try:
+            value = load_yaml_value(blob)
+        except FrontmatterError as e:
+            raise RefError(f"cannot parse relates_to: {e}") from e
+        if not isinstance(value, list):
+            named = _scalar_drop_path(value, drop or set())
+            if named:
+                raise RefError(f"unsupported relates_to scalar still names {named}")
+            out.extend(raw_lines)
+            continue
+        for item in value:
+            named = _scalar_drop_path(item, drop or set())
+            if named and not isinstance(item, dict):
+                raise RefError(f"unsupported relates_to scalar still names {named}")
+        try:
+            parsed = _parse_relation_value(blob)
+        except RefError:
+            out.extend(raw_lines)
+            continue
         names_drop = drop is not None and any(_norm_path(item.get("path", "")) in drop for item in parsed)
         if not force and not names_drop:
             out.extend(raw_lines)
@@ -728,6 +746,19 @@ def _read_identity(root: Path, rel: str) -> tuple[bytes, int, int, int]:
         os.close(dirfd)
 
 
+def _scalar_drop_path(value: object, drop: set[str]) -> str | None:
+    """Return a drop path named by a value the list rewriter cannot edit."""
+    if isinstance(value, str):
+        path = _norm_path(value.strip())
+        return path if path in drop else None
+    if isinstance(value, dict):
+        if str(value.get("ref") or "").strip():
+            return None
+        path = _norm_path(str(value.get("path") or "").strip())
+        return path if path in drop else None
+    return None
+
+
 def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
     try:
         meta, _body = parse_page(text, version)
@@ -735,9 +766,14 @@ def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
         raise RefError(f"cannot parse page frontmatter: {e}") from e
     rels = meta.get("relates_to")
     if not isinstance(rels, list):
-        return None
+        return _scalar_drop_path(rels, drop)
     for item in rels:
-        if not isinstance(item, dict) or str(item.get("ref") or "").strip():
+        if not isinstance(item, dict):
+            named = _scalar_drop_path(item, drop)
+            if named:
+                return named
+            continue
+        if str(item.get("ref") or "").strip():
             continue
         path = _norm_path(str(item.get("path") or "").strip())
         if path in drop:
@@ -1289,7 +1325,7 @@ def _ancestor_managed(store: Path) -> str | None:
     """Return the managed directory name when root sits inside another store."""
     resolved = store.resolve()
     for parent in resolved.parents:
-        if not (parent / "SCHEMA.json").is_file():
+        if not (parent / "SCHEMA.json").is_file() and not (parent / "CONTRACT.json").is_file():
             continue
         schema, _err = load_schema(parent)
         try:
@@ -1441,6 +1477,8 @@ def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
         payload = _show_bytes(repo, sha, gitpath)
     except RefError as e:
         return _fail(as_json, str(e))
+    except OSError as e:
+        return _fail(as_json, f"refusing to read history: {e.strerror or e}")
     if as_json:
         print(
             json.dumps(
@@ -1614,10 +1652,14 @@ def run_prune(
                 for rel, data, mode in removed:
                     _rewrite_store(store, rel, data, must_exist=False, mode=mode)
             except Exception as restore_exc:
-                raise restore_exc from exc
+                if isinstance(restore_exc, RefError):
+                    raise restore_exc from exc
+                raise RefError(f"refusing to update page: {restore_exc}") from exc
             raise
     except RefError as e:
         return _fail(as_json, str(e))
+    except OSError as e:
+        return _fail(as_json, f"refusing to update page: {e.strerror or e}")
     if as_json:
         print(
             json.dumps(

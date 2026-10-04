@@ -24,7 +24,18 @@ jobs:
       - name: Require Atlas root
         env:
           ROOT: ${{ env.ATLAS_ROOT }}
-        run: test -f "$ROOT/SCHEMA.json"
+        run: |
+          count=0
+          if [ -f "$ROOT/SCHEMA.json" ]; then
+            count=$((count + 1))
+          fi
+          if [ -f "$ROOT/CONTRACT.json" ]; then
+            count=$((count + 1))
+          fi
+          if [ "$count" -ne 1 ]; then
+            echo "Atlas root must contain exactly one of SCHEMA.json or CONTRACT.json (found $count)" >&2
+            exit 2
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

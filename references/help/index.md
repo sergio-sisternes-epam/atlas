@@ -1,14 +1,14 @@
 ---
 name: atlas/help/baseline
 description: Versioned bundled Atlas module catalog. Help lists from this file plus the SKILL.md path registry; no Atlas mount required.
-package_version: 0.13.0-beta.2
+package_version: 0.13.0-beta.3
 ---
 
 # Bundled help baseline
 
 This directory is the **versioned packaged baseline** for Atlas modules
 `help` and `getting-started`. It ships with this skill at
-`package_version` **0.13.0-beta.2** (see `VERSION`). Help works with **no Atlas
+`package_version` **0.13.0-beta.3** (see `VERSION`). Help works with **no Atlas
 mounted**. If this baseline answers the question, stop; do not query a store.
 
 The installed registry in `SKILL.md` is authoritative for names. This catalog
@@ -23,14 +23,14 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **mount** | Mount-if-missing and resolve `--root` |
 | **init** | New Atlas; shared (`atlas` branch) or dedicated existing remote; never creates the repo |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated |
-| **memory-migrate** | Assess or migrate a document-era store toward memory, gist, and frame. Assess and inventory write nothing. |
+| **memory-migrate** | Assess or migrate a document-era store toward the memory layers: `memory`/`gist` plus `frame` (shipped-beta) or `schema` (beta.3 `CONTRACT.json`). Assess and inventory write nothing. |
 | **recall** | Find / answer from an Atlas |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green |
 | **work** | Open, update, or close `work_id` hubs |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory |
 | **schema** | Init, overlay install/new/uninstall; compile merge |
 | **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection |
-| **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount |
+| **ci** | Assess, install, or repair CI for an Atlas mount (reads `SCHEMA.json` or `CONTRACT.json`; new `atlas init` writes `CONTRACT.json`) |
 | **history** | Read one store path at a git rev; a relates_to.ref edge is not a tip hop |
 | **version-hint** | Add one living-page relates_to.ref hint; grain stays deferred |
 | **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary |

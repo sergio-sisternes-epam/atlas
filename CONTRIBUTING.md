@@ -96,9 +96,17 @@ for new capability or a compatibility-breaking package or CLI contract.
 
 1. Update the release version in `apm.yml`, `SKILL.md`,
    `scripts/atlas_cli/__init__.py`, the reusable workflow default, and both
-   workflow examples under `references/ci/`.
-2. Run the validation commands above. `scripts/release_readiness.py` blocks
-   when any version surface disagrees.
+   workflow examples under `references/ci/`. During pre-tag development the
+   CI ref surfaces (the reusable workflow default and the two
+   `references/ci/` examples) may intentionally lag the package version —
+   for example staying pinned to the last tagged release while the package
+   advances through beta increments — as long as they agree with each
+   other. Bring every CI ref up to the package version before tagging.
+2. Run the validation commands above. `scripts/release_readiness.py` (no
+   `--tag`) blocks when any package surface disagrees, or when the CI ref
+   surfaces disagree with each other. `scripts/release_readiness.py --tag
+   vX.Y.Z` additionally requires every CI ref to equal the package version;
+   it must never pass while a workflow still points at an older ref.
 3. Merge through the normal review process.
 4. Run **Atlas CI** manually against the exact `main` commit intended for the
    release. Its final **Release readiness decision** job must report the

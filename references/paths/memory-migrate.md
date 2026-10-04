@@ -139,7 +139,50 @@ unattested "migrate everything" request. For that named batch only:
 Changing `memory.rung` goes through path **schema**
 (`atlas schema memory-rung --set info|warn|error`), and only when the
 operator asked to opt the rung in from `info` toward `warn` or `error`.
-This path does not write `SCHEMA.json` itself.
+This path does not write `SCHEMA.json` itself. Path **schema** is the only
+writer of `memory.rung`; it edits whichever single contract file the store
+has (`SCHEMA.json` or `CONTRACT.json`), never both.
+
+### Contract-file migration (CLI, pre-beta only)
+
+Distinct from the assess/inventory/apply procedure above (which moves
+*content* toward page/gist/frame), `atlas memory-migrate` is a CLI command
+that only ever rewrites the store's root contract file:
+
+```bash
+python3 <atlas-skill>/scripts/atlas.py memory-migrate \
+  --root <root> --operation assess|inventory|apply [--batch <token>] --json
+```
+
+`assess` and `inventory` write nothing here either — the JSON output
+includes a `lineage` field (`pre-beta`, `in-beta`, or `current`) and
+nothing else changes on disk.
+
+Eligibility (`apply`):
+
+- **pre-beta** — contract file is `SCHEMA.json`, there is no `memory`
+  object, and `atlas_release` is absent or older than `0.13.0-beta` (for
+  example `0.12.0`). Only pre-beta stores are eligible for `apply`.
+- **in-beta** — `atlas_release` is exactly `0.13.0-beta` or
+  `0.13.0-beta.2`, or `SCHEMA.json` already has `memory.layers`
+  `["frame", "gist", "page"]` or `["frame", "gist", "memory"]`, or
+  `SCHEMA.json` is an unstamped full beta.2 init (the released default
+  that had neither `atlas_release` nor a `memory` object, so
+  `memory.layers` is absent, but the full-init/type shape — templates
+  plus `types.recommended` including `frame` — is beta.2's). All four of
+  these are in-beta, not pre-beta-eligible. `apply` refuses (exit
+  non-zero, finding id `in_beta_not_legacy`) and writes nothing — an
+  in-beta store already has a stamp or shape and is not a legacy target.
+- **current** — the `0.13.0-beta.3` shape (`CONTRACT.json`,
+  `atlas_release` `0.13.0-beta.3`, `memory.layers`
+  `["schema", "gist", "memory"]`). `apply` is a no-op write (exit 0).
+
+`apply` with no `--batch`, or batch text `"migrate everything"`, refuses
+and writes nothing — same unscoped-batch guard as the content-migration
+procedure above. On a pre-beta store, passing `--batch contract-file`
+renames `SCHEMA.json` to `CONTRACT.json`, sets `atlas_release` to
+`0.13.0-beta.3` and `memory.layers` to
+`["schema", "gist", "memory"]`, and does not rewrite any other page.
 
 ### Out of scope
 

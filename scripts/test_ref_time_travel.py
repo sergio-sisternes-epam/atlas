@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from atlas_cli.commands import refcmd  # noqa: E402
 from atlas_cli.commands.refcmd import (  # noqa: E402
     RefError,
     _open_store_parent,
@@ -31,7 +32,7 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
 from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: E402
 from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
-from atlas_cli.commands.validate import _bad_relation_ref  # noqa: E402
+from atlas_cli.commands.validate import _bad_relation_ref, _relation_path_escapes  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
 
 
@@ -59,6 +60,14 @@ def git(repo: Path, args: list[str]) -> None:
     proc = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, env=env)
     if proc.returncode != 0:
         raise RuntimeError(f"git {args}: {proc.stderr}")
+
+
+def contract_file(root: Path) -> Path:
+    for name in ("CONTRACT.json", "SCHEMA.json"):
+        path = root / name
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"no contract file in {root}")
 
 
 def page(title: str, relates: str, body: str) -> str:
@@ -791,7 +800,7 @@ def main() -> int:
                     "--summary",
                     "summary.md",
                     "--drop",
-                    "SCHEMA.json",
+                    contract_file(linked).name,
                     "--ref",
                     "HEAD",
                     "--kind",
@@ -801,7 +810,7 @@ def main() -> int:
                     "--json",
                 ]
             )
-            if not_page.returncode == 0 or not (linked / "SCHEMA.json").is_file() or "eligible" not in not_page.stdout:
+            if not_page.returncode == 0 or not contract_file(linked).is_file() or "eligible" not in not_page.stdout:
                 failures.append(f"non-page drop should be refused: {not_page.stdout}")
             else:
                 print("[PASS] prune refuses a non-page drop")
@@ -1150,8 +1159,9 @@ def main() -> int:
                 failures.append(f"show should refuse staging: {shown_run.stdout}")
             else:
                 print("[PASS] show refuses an Atlas-managed path")
-            (shown / "staging" / "SCHEMA.json").write_text(
-                (shown / "SCHEMA.json").read_text(encoding="utf-8"),
+            shown_contract = contract_file(shown)
+            (shown / "staging" / shown_contract.name).write_text(
+                shown_contract.read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
             rooted = run(
@@ -1161,17 +1171,17 @@ def main() -> int:
                 failures.append(f"show should refuse a staging root: {rooted.stdout}")
             else:
                 print("[PASS] show refuses a managed directory used as root")
-            schema = json.loads((shown / "SCHEMA.json").read_text(encoding="utf-8"))
+            schema = json.loads(shown_contract.read_text(encoding="utf-8"))
             schema.setdefault("structure", {})["staging_dir"] = "inbox"
-            (shown / "SCHEMA.json").write_text(json.dumps(schema), encoding="utf-8")
+            shown_contract.write_text(json.dumps(schema), encoding="utf-8")
             inbox = shown / "inbox"
             inbox.mkdir()
             (inbox / "secret.md").write_text(
                 page("Secret", "relates_to: []\n", "Custom staging must not answer."),
                 encoding="utf-8",
             )
-            (inbox / "SCHEMA.json").write_text(json.dumps(schema), encoding="utf-8")
-            git(shown, ["add", "SCHEMA.json", "inbox"])
+            (inbox / shown_contract.name).write_text(json.dumps(schema), encoding="utf-8")
+            git(shown, ["add", shown_contract.name, "inbox"])
             git(shown, ["commit", "-m", "custom staging"])
             custom = run(
                 ["ref", "show", "secret.md", "--ref", "HEAD", "--root", str(inbox), "--json"]
@@ -1740,7 +1750,7 @@ def main() -> int:
             (broken / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
             git(broken, ["add", "."])
             git(broken, ["commit", "-m", "pages"])
-            schema_path = broken / "SCHEMA.json"
+            schema_path = contract_file(broken)
             schema_doc = json.loads(schema_path.read_text(encoding="utf-8"))
             schema_doc.pop("atlas_id", None)
             schema_path.write_text(json.dumps(schema_doc), encoding="utf-8")
@@ -1761,7 +1771,7 @@ def main() -> int:
                     "--json",
                 ]
             )
-            if broken_run.returncode == 0 or "SCHEMA" not in broken_run.stdout or not (broken / "dead.md").is_file():
+            if broken_run.returncode == 0 or not (broken / "dead.md").is_file():
                 failures.append(f"invalid schema should block prune: {broken_run.stdout}")
             else:
                 print("[PASS] prune refuses a schema compile would reject")
@@ -1777,7 +1787,7 @@ def main() -> int:
             (extra / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
             git(extra, ["add", "."])
             git(extra, ["commit", "-m", "pages"])
-            extra_path = extra / "SCHEMA.json"
+            extra_path = contract_file(extra)
             extra_doc = json.loads(extra_path.read_text(encoding="utf-8"))
             extra_doc["not_a_field"] = True
             extra_path.write_text(json.dumps(extra_doc), encoding="utf-8")
@@ -2464,6 +2474,119 @@ def main() -> int:
                 failures.append("completed exchange was not rolled back with the prune")
             else:
                 print("[PASS] failed undo of a completed exchange is rolled back with the prune")
+
+        scalar = tmp / "scalar-drop"
+        scalar_init = run(["init", "--root", str(scalar), "--json"])
+        if scalar_init.returncode != 0:
+            failures.append(f"scalar store init failed: {scalar_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(scalar, ["init", "-b", "main"])
+            (scalar / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (scalar / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (scalar / "living.md").write_text(page("Living", "relates_to: dead.md\n", prose), encoding="utf-8")
+            git(scalar, ["add", "."])
+            git(scalar, ["commit", "-m", "scalar edge"])
+            before_living = (scalar / "living.md").read_text(encoding="utf-8")
+            scalar_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(scalar),
+                    "--json",
+                ]
+            )
+            if (
+                scalar_run.returncode == 0
+                or "Traceback" in scalar_run.stderr
+                or not (scalar / "dead.md").is_file()
+                or (scalar / "living.md").read_text(encoding="utf-8") != before_living
+                or "unsupported relates_to" not in scalar_run.stdout
+            ):
+                failures.append(f"scalar relates_to naming a drop should refuse: {scalar_run.stdout} {scalar_run.stderr}")
+            else:
+                print("[PASS] prune refuses a scalar relates_to that names a drop")
+
+        oser = tmp / "rewrite-oserror"
+        oser_init = run(["init", "--root", str(oser), "--json"])
+        if oser_init.returncode != 0:
+            failures.append(f"oserror store init failed: {oser_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(oser, ["init", "-b", "main"])
+            (oser / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (oser / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (oser / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n  - path: dead.md\n    kind: derived_from\n",
+                    prose,
+                ),
+                encoding="utf-8",
+            )
+            git(oser, ["add", "."])
+            git(oser, ["commit", "-m", "edge"])
+            real_rewrite = refcmd._rewrite_store
+
+            def failing_rewrite(*_args, **_kwargs):
+                raise OSError(5, "Input/output error")
+
+            refcmd._rewrite_store = failing_rewrite
+            try:
+                recorded = run_prune(
+                    str(oser),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                refcmd._rewrite_store = real_rewrite
+            if recorded == 0 or not (oser / "dead.md").is_file() or not (oser / "living.md").is_file():
+                failures.append("OSError during rewrite should refuse without deleting the drop")
+            else:
+                print("[PASS] prune turns a rewrite OSError into a non-zero JSON result")
+
+        if not _relation_path_escapes(tmp, "bad\0name.md"):
+            failures.append("embedded null in a relation path should be treated as escaping")
+        else:
+            print("[PASS] null-byte relation path is treated as escaping")
+
+        null_store = tmp / "null-path"
+        null_init = run(["init", "--root", str(null_store), "--json"])
+        if null_init.returncode != 0:
+            failures.append(f"null-path store init failed: {null_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (null_store / "bad.md").write_text(
+                page("Bad", 'relates_to:\n  - path: "bad\\x00name.md"\n    kind: related\n', prose),
+                encoding="utf-8",
+            )
+            compiled = run(["compile", "--root", str(null_store), "--json"])
+            combined = compiled.stdout + compiled.stderr
+            if "Traceback" in combined or compiled.returncode == 0:
+                failures.append(f"null-byte relation path should fail compile as JSON: {combined}")
+            else:
+                try:
+                    payload = json.loads(compiled.stdout)
+                except json.JSONDecodeError:
+                    failures.append(f"compile --json was not JSON: {combined}")
+                else:
+                    critical = payload.get("critical") or []
+                    if not any(item.get("id") == "relates_to" for item in critical):
+                        failures.append(f"null-byte path should be a relates_to finding: {critical}")
+                    else:
+                        print("[PASS] compile --json reports a null-byte relation path")
 
         if failures:
             print("\n" + "\n".join(failures))

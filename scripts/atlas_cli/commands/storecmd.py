@@ -38,7 +38,8 @@ from ..core.meshfile import (
     strategy_errors,
     upsert,
 )
-from ..core.schema import SCHEMA_NAME
+from ..core.paths import has_contract_file
+from ..core.schema import contract_filename
 from . import init as cmd_init
 from . import mount as cmd_mount
 
@@ -180,10 +181,10 @@ def _init_shared(
         return _fail(err or "could not attach atlas branch in mount", as_json)
 
     created_schema = False
-    if not (dest / SCHEMA_NAME).is_file():
+    if not has_contract_file(dest):
         if status == "reused":
             return _fail(
-                f"branch {SHARED_BRANCH} exists but is not an Atlas root (missing {SCHEMA_NAME})",
+                f"branch {SHARED_BRANCH} exists but is not an Atlas root (missing SCHEMA.json or CONTRACT.json)",
                 as_json,
             )
         rc, err = _silent_init(dest, schema_version)
@@ -264,7 +265,7 @@ def _init_dedicated(
         return rc
     dest = cmd_mount.default_mount(parent, parsed.atlas_id)
     created_schema = False
-    if not (dest / SCHEMA_NAME).is_file():
+    if not has_contract_file(dest):
         rc, err = _silent_init(dest, schema_version)
         if rc != 0:
             return _fail(err or "atlas init failed", as_json)
@@ -313,7 +314,7 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
         src_path = _store_path(parent, source)
     except MeshFileError as e:
         return _fail(str(e), as_json)
-    if not (src_path / ".git").exists() and not (src_path / SCHEMA_NAME).is_file():
+    if not (src_path / ".git").exists() and not has_contract_file(src_path):
         return _fail(f"source mount missing: {src_path}", as_json)
 
     code, status, err = ensure_shared_branch(parent, SHARED_BRANCH)
@@ -410,7 +411,7 @@ def _rehost_to_dedicated(
         src_path = _store_path(parent, source)
     except MeshFileError as e:
         return _fail(str(e), as_json)
-    if not (src_path / ".git").exists() and not (src_path / SCHEMA_NAME).is_file():
+    if not (src_path / ".git").exists() and not has_contract_file(src_path):
         return _fail(f"source mount missing: {src_path}", as_json)
     auth = _auth_for(dest_id, ssh)
     token = cmd_mount._explicit_git_token(auth)
@@ -500,9 +501,10 @@ def _silent_init(dest: Path, schema_version: str) -> tuple[int, str]:
 
 
 def _stamp_atlas_id(root: Path, atlas_id: str) -> None:
-    path = root / SCHEMA_NAME
-    if not path.is_file():
+    name = contract_filename(root)
+    if not name:
         return
+    path = root / name
     data = json.loads(path.read_text(encoding="utf-8"))
     data["atlas_id"] = atlas_id
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

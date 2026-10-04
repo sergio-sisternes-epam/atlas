@@ -9,7 +9,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from release_readiness import manifest_version
+from release_readiness import manifest_version, read_surface, CI_SURFACES
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,7 @@ class CiActivationContractTests(unittest.TestCase):
         cls.ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
         cls.release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         cls.version = manifest_version()
+        cls.ci_ref_version = read_surface(CI_SURFACES[0])
 
     def test_path_and_router_are_distinct_from_compile_path(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -80,7 +81,14 @@ class CiActivationContractTests(unittest.TestCase):
 
     def test_missing_schema_fails_closed(self) -> None:
         for workflow in (self.copy, self.reusable):
-            self.assertIn('test -f "$ROOT/SCHEMA.json"', workflow)
+            self.assertIn('if [ -f "$ROOT/SCHEMA.json" ]; then', workflow)
+            self.assertIn('if [ -f "$ROOT/CONTRACT.json" ]; then', workflow)
+            self.assertIn('if [ "$count" -ne 1 ]; then', workflow)
+            self.assertIn(
+                "Atlas root must contain exactly one of SCHEMA.json or CONTRACT.json",
+                workflow,
+            )
+            self.assertIn("exit 2", workflow)
 
     def test_cli_is_acquired_outside_workspace(self) -> None:
         for workflow in (self.copy, self.reusable):
@@ -164,7 +172,7 @@ class CiActivationContractTests(unittest.TestCase):
         self.assertNotIn("  push:", self.reusable)
         self.assertIn("  pull_request:", self.caller)
         self.assertIn("  push:", self.caller)
-        self.assertIn(f"@v{self.version}", self.caller)
+        self.assertIn(f"@v{self.ci_ref_version}", self.caller)
 
     def test_ci_exercises_repository_release_gates(self) -> None:
         self.assertIn("workflow_dispatch:", self.ci_workflow)

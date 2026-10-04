@@ -19,9 +19,17 @@ from ..core.overlay import (
     write_json,
     write_receipt,
 )
-from ..core.paths import SCHEMA_NAME, rel, store_root
+from ..core.paths import rel, store_root
 from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
-from ..core.schema import load_schema, staging_dir_name
+from ..core.schema import (
+    BETA3_LAYERS,
+    IN_BETA_LAYERS,
+    SHIPPED_BETA_LAYERS,
+    compute_stamp_shape,
+    find_contract_path,
+    load_schema,
+    staging_dir_name,
+)
 from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
 
 
@@ -315,22 +323,46 @@ def run_memory_rung(
         return 2
     schema, err = load_schema(r)
     if err or schema is None:
-        _print(as_json, {"ok": False, "error": err or "missing SCHEMA.json", "root": str(r)})
+        _print(as_json, {"ok": False, "error": err or "missing contract file", "root": str(r)})
         return 2
+    contract_path, path_err = find_contract_path(r)
+    if path_err or contract_path is None:
+        _print(as_json, {"ok": False, "error": path_err or "missing contract file", "root": str(r)})
+        return 2
+    # The only writer of memory.rung edits whichever single contract file the
+    # store has; the layers/legacy_types written must match the lineage the
+    # store is already on, not be re-derived from an already-present layers
+    # array. Ask compute_stamp_shape — the same classifier compile/validate
+    # use — which shape this contract is, so merely setting the rung can
+    # never silently change lineage (e.g. a shipped 0.13.0-beta SCHEMA.json
+    # with no memory block must keep frame/gist/page, not jump to
+    # frame/gist/memory). A stamp_shape mismatch fails closed: nothing is
+    # written.
+    shape, shape_err = compute_stamp_shape(contract_path.name, schema)
+    if shape_err or shape is None:
+        _print(
+            as_json,
+            {"ok": False, "error": shape_err or "stamp_shape mismatch", "root": str(r)},
+        )
+        return 2
+    layers = {
+        "shipped_beta": list(SHIPPED_BETA_LAYERS),
+        "in_beta": list(IN_BETA_LAYERS),
+        "current": list(BETA3_LAYERS),
+    }[shape]
     schema["memory"] = {
         "rung": value,
-        "layers": ["frame", "gist", "memory"],
+        "layers": layers,
         "legacy_types": ["document"],
     }
-    schema_path = r / SCHEMA_NAME
-    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
     _print(
         as_json,
         {
             "ok": True,
             "root": str(r),
             "rung": value,
-            "notes": [f"wrote SCHEMA.json memory.rung={value}"],
+            "notes": [f"wrote {contract_path.name} memory.rung={value}"],
         },
     )
     return 0

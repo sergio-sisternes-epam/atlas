@@ -137,6 +137,8 @@ def bootstrap_empty_repository(repo: Path, branch: str) -> tuple[int, str]:
 
 SHARED_BRANCH = "atlas"
 SCHEMA_BLOB = "SCHEMA.json"
+CONTRACT_BLOB = "CONTRACT.json"
+CONTRACT_BLOBS = (SCHEMA_BLOB, CONTRACT_BLOB)
 
 
 _HTTP_URL = re.compile(r"https?://[^\s'\"<>]+")
@@ -177,8 +179,13 @@ def ref_exists(repo: Path, branch: str) -> bool:
 
 
 def tree_has_schema(repo: Path, treeish: str) -> bool:
-    code, _, _ = run_git(["cat-file", "-e", f"{treeish}:{SCHEMA_BLOB}"], cwd=repo)
-    return code == 0
+    """True when the tree carries exactly one of SCHEMA.json / CONTRACT.json."""
+    found = sum(
+        1
+        for blob in CONTRACT_BLOBS
+        if run_git(["cat-file", "-e", f"{treeish}:{blob}"], cwd=repo)[0] == 0
+    )
+    return found == 1
 
 
 def create_orphan_empty_branch(repo: Path, branch: str) -> tuple[int, str]:
@@ -244,7 +251,7 @@ def ensure_shared_branch(
         return (
             2,
             "",
-            f"branch {branch} exists but is not an Atlas root (missing {SCHEMA_BLOB})",
+            f"branch {branch} exists but is not an Atlas root (missing {SCHEMA_BLOB} or {CONTRACT_BLOB})",
         )
     code, err = create_orphan_empty_branch(repo, branch)
     if code != 0:

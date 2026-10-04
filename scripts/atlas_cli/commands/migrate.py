@@ -19,7 +19,7 @@ def run(
     r = store_root(root)
     schema, schema_err = load_schema(r)
     if schema_err:
-        print(f"CRITICAL: {schema_err} — refuse migrate without SCHEMA.json")
+        print(f"CRITICAL: {schema_err} — refuse migrate without a contract file")
         return 2
 
     staging_name = into or staging_dir_name(schema)

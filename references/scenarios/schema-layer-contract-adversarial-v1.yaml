@@ -1,0 +1,17 @@
+id: schema-layer-contract-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-04-schema-layer-contract
+adversarial: true
+smokes:
+  - id: in-beta-not-legacy
+    source: "pin 5; atlas_release 0.13.0-beta or 0.13.0-beta.2 on SCHEMA.json"
+    expect: "memory-migrate apply refuses an in-beta store (finding id in_beta_not_legacy), exits non-zero, and leaves its bytes unchanged; only a pre-beta store is eligible for apply."
+  - id: one-schema-per-gist-folder
+    source: "pin 4; schema is the renamed frame on the beta.3 (CONTRACT.json) shape only"
+    expect: "A folder with one or more gists has exactly one type=schema page (one gist still counts); a folder with zero gists has none; a second schema in a gist-bearing folder fails compile closed."
+  - id: both-contract-filenames
+    source: "pin 2; readers accept exactly one contract filename"
+    expect: "A store with both SCHEMA.json and CONTRACT.json present fails compile closed with finding id schema_present, the same as neither file being present."
+  - id: memory-type-is-not-beta3
+    source: "pin 1; pin 3; memory.layers schema/gist/memory only on CONTRACT.json atlas_release 0.13.0-beta.3"
+    expect: "A store whose contract filename, atlas_release, and memory.layers do not together match shipped_beta, in_beta, or the beta.3 current shape fails compile closed with finding id stamp_shape; a type named memory only has beta.3 meaning on that exact shape."
