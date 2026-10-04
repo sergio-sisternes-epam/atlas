@@ -448,6 +448,58 @@ def main() -> int:
             str(payload),
         )
 
+        frame_path = store4a / "concepts" / "frame.md"
+        valid_frame = frame_path.read_text(encoding="utf-8")
+        valid_relations = (
+            "relates_to:\n"
+            "  - path: concepts/only-gist.md\n"
+            "    kind: related\n"
+        )
+        invalid_relations = (
+            (
+                "extra non-related target",
+                valid_relations
+                + "  - path: concepts/parent.md\n    kind: derived_from\n",
+            ),
+            ("non-dict entry", valid_relations + "  - invalid\n"),
+            ("empty path", valid_relations + "  - path: ''\n    kind: related\n"),
+            (
+                "duplicate gist",
+                valid_relations + "  - path: concepts/only-gist.md\n    kind: related\n",
+            ),
+            ("missing relates_to", ""),
+            ("non-list relates_to", "relates_to: invalid\n"),
+        )
+        for case, relations in invalid_relations:
+            frame_path.write_text(
+                valid_frame.replace(valid_relations, relations), encoding="utf-8"
+            )
+            _, payload = run_json(["compile", "--root", str(store4a), "--json"])
+            check(
+                f"frame with {case} is flagged frame_members",
+                any(
+                    i.get("id") == "frame_members"
+                    and i.get("path") == "concepts/frame.md"
+                    for i in payload.get("info", [])
+                    + payload.get("warnings", [])
+                    + payload.get("critical", [])
+                ),
+                str(payload),
+            )
+        frame_path.write_text(valid_frame, encoding="utf-8")
+        _, payload = run_json(["compile", "--root", str(store4a), "--json"])
+        check(
+            "same frame without extra entries has no member finding",
+            not any(
+                i.get("id") == "frame_members"
+                and i.get("path") == "concepts/frame.md"
+                for i in payload.get("info", [])
+                + payload.get("warnings", [])
+                + payload.get("critical", [])
+            ),
+            str(payload),
+        )
+
         # --- Fixture 4b: gists without a frame are a memory-rung finding ---
         store4b = tmp / "store4b"
         run(["init", "--root", str(store4b), "--json"])

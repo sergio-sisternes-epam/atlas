@@ -545,10 +545,19 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             )
 
         for frame_path, frame_meta in frames:
-            related = _related(frame_meta, "related")
+            related = frame_meta.get("relates_to")
             listed_paths: list[str] = []
-            invalid = False
+            invalid = not isinstance(related, list)
+            if invalid:
+                related = []
             for item in related:
+                if (
+                    not isinstance(item, dict)
+                    or str(item.get("kind") or item.get("role") or "").strip().lower()
+                    != "related"
+                ):
+                    invalid = True
+                    continue
                 target = str(item.get("path") or "").strip()
                 if not target:
                     invalid = True
