@@ -299,6 +299,28 @@ def _in_focus(
     return True
 
 
+def _folder_in_scope(folder: Path, focus_path: Path) -> bool:
+    """True when ``folder`` is the schema_folder scope for ``focus_path``.
+
+    Two independent ways a folder stays in scope:
+    - ``folder`` is ``focus_path`` itself or lies under it (``folder.relative_to
+      (focus_path)`` succeeds): ``--path notes`` keeps folder ``notes`` and
+      folders under ``notes`` in scope, and does not include an unrelated
+      sibling folder; or
+    - ``focus_path``'s parent is ``folder`` (``focus_path.parent == folder``):
+      ``--path notes/g1.md`` keeps folder ``notes`` in scope because the
+      file's parent is ``notes``. This is a direct-membership check only, so
+      ``--path notes/sub/g1.md`` does NOT keep ancestor folder ``notes`` in
+      scope (its parent is ``notes/sub``, not ``notes``).
+    """
+    try:
+        folder.relative_to(focus_path)
+        return True
+    except ValueError:
+        pass
+    return focus_path.parent == folder
+
+
 def _finding_in_focus(
     root: Path,
     finding: dict,
@@ -318,6 +340,27 @@ def _finding_in_focus(
         return True
     fpath = (root / finding["path"]).resolve()
     directory_scoped = fpath.is_dir()
+    if finding.get("id") == "schema_folder":
+        # schema_folder findings are reported either on the gist-bearing
+        # folder itself (missing/extra schema) or on a sibling type=schema
+        # page in that folder (membership errors). Either way, a focused
+        # compile on a page that is a member of that same folder (e.g. a
+        # gist the schema must list) keeps the folder invariant in scope.
+        folder = fpath if directory_scoped else fpath.parent
+        if focus_path is not None and not _folder_in_scope(folder, focus_path):
+            return False
+        if want_type:
+            for page in iter_concept_md(folder, staging_name):
+                if page.parent.resolve() != folder or page.name in RESERVED:
+                    continue
+                try:
+                    meta, _ = read_page(page, sv)
+                except FrontmatterError:
+                    continue
+                if _in_focus(page, meta, want_type, None):
+                    return True
+            return False
+        return True
     if directory_scoped:
         if not _in_focus(fpath, {}, None, focus_path):
             return False

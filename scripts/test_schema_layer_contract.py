@@ -466,6 +466,123 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        # === focused-compile-keeps-own-folder-schema-folder-in-scope =============
+        # A --path focus on a gist that IS a member of a gist-bearing folder
+        # must keep that folder's schema_folder invariant in scope, whether
+        # the finding is reported on the folder itself (missing schema) or on
+        # a sibling schema page in the same folder (membership errors). An
+        # unrelated folder must still stay out of scope.
+
+        # missing-schema finding reported on the folder path itself.
+        d = beta3_store("folder-focus-own-folder-missing-schema")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_index(d / "other")
+        write_page(d / "other" / "g1.md", "gist", [{"path": "other/index.md", "kind": "derived_from"}])
+        write_page(d / "other" / "s1.md", "schema", [{"path": "other/g1.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "focused-compile own-folder: unfocused compile sees notes/ missing-schema finding",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "notes/g1.md", "--json"]
+        )
+        check(
+            "focused-compile --path notes/g1.md: keeps notes/ missing-schema finding in scope",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "other/g1.md", "--json"]
+        )
+        check(
+            "focused-compile --path other/g1.md: unrelated notes/ finding stays out of scope",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # membership error reported on a sibling schema page in the same folder.
+        d = beta3_store("folder-focus-own-folder-membership-error")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "g2.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        # schema omits g2 (membership error) -> finding reported on notes/s1.md.
+        write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
+        write_index(d / "other")
+        write_page(d / "other" / "g1.md", "gist", [{"path": "other/index.md", "kind": "derived_from"}])
+        write_page(d / "other" / "s1.md", "schema", [{"path": "other/g1.md", "kind": "related"}])
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "notes/g2.md", "--json"]
+        )
+        check(
+            "focused-compile --path notes/g2.md: sibling schema's membership error stays in scope",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "other/g1.md", "--json"]
+        )
+        check(
+            "focused-compile --path other/g1.md: unrelated notes/ membership error stays out of scope",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # one gist listed once by its schema still compiles clean under file focus.
+        d = beta3_store("folder-focus-one-gist-one-schema-clean")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "notes/g1.md", "--json"]
+        )
+        check(
+            "focused-compile --path notes/g1.md: one gist listed once by its schema compiles clean",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # a focused descendant page is a member of its own folder only, not of
+        # any ancestor folder: notes/ has a gist and no schema (schema_folder
+        # on notes), but notes/sub/g1.md's own folder (notes/sub) has a valid
+        # schema. Focusing notes/sub/g1.md must not pull in the ancestor
+        # notes/ finding.
+        d = beta3_store("folder-focus-ancestor-not-member")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        # "notes" folder has a gist but no schema page -> schema_folder finding on "notes".
+        write_index(d / "notes" / "sub")
+        write_page(
+            d / "notes" / "sub" / "g1.md", "gist", [{"path": "notes/sub/index.md", "kind": "derived_from"}]
+        )
+        write_page(
+            d / "notes" / "sub" / "s1.md", "schema", [{"path": "notes/sub/g1.md", "kind": "related"}]
+        )
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "focused-compile ancestor-not-member: unfocused compile sees notes/ missing-schema finding",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "notes/sub/g1.md", "--json"]
+        )
+        check(
+            "focused-compile --path notes/sub/g1.md: ancestor notes/ finding stays out of scope",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["compile", "--root", str(d), "--path", "notes", "--json"]
+        )
+        check(
+            "focused-compile --path notes: still includes the notes/ missing-schema finding itself",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
         # === read-shipped-beta ====================================================
         shipped = tmp / "read-shipped-beta"
         shipped.mkdir(parents=True)
