@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""0.13.0-beta.3 schema layer contract regressions. Run: python3 scripts/test_schema_layer_contract.py
+"""Current-shape schema layer contract regressions.
 
-Covers: one-contract-file, pre-beta-eligible, in-beta-refused,
-one-schema-per-gist-folder, read-shipped-beta, stamp-shape-disagree.
+Run: python3 scripts/test_schema_layer_contract.py
 """
 
 from __future__ import annotations
@@ -50,24 +49,36 @@ def findings_by_id(payload: dict, bucket: str) -> list[str]:
     return [i.get("id") for i in payload.get(bucket, [])]
 
 
-def write_page(path: Path, type_name: str, relates_to=None) -> None:
+def write_page(
+    path: Path,
+    type_name: str,
+    relates_to=None,
+    description: str | None = None,
+    body: str = PROSE,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rel_lines = ""
     if relates_to:
         rel_lines = "relates_to:\n" + "".join(
             f"  - path: {item['path']}\n    kind: {item['kind']}\n" for item in relates_to
         )
+    desc_line = f"description: {json.dumps(description)}\n" if description is not None else ""
     path.write_text(
         "---\n"
         f"type: {type_name}\n"
         "title: t\n"
         "created: 2026-10-04\n"
+        f"{desc_line}"
         f"{rel_lines}"
         "---\n\n"
         "## Content\n\n"
-        f"{PROSE}\n",
+        f"{body}\n",
         encoding="utf-8",
     )
+    if type_name == "schema" and (path.parent / "index.md").is_file():
+        index_path = path.parent / "index.md"
+        with index_path.open("a", encoding="utf-8") as index_file:
+            index_file.write(f"\n- [{path.stem}]({path.name})\n")
 
 
 def write_index(folder: Path) -> None:
@@ -241,7 +252,11 @@ def main() -> int:
         # === unstamped-page-shaped-store =========================================
         page_shaped = tmp / "unstamped-page-shaped-store"
         preexisting_pages = write_page_shaped_store(page_shaped)
-        original_page_hashes = {path.relative_to(page_shaped): sha(path) for path in preexisting_pages}
+        original_page_hashes = {
+            path.relative_to(page_shaped): sha(path)
+            for path in preexisting_pages
+            if path.name not in ("index.md", "log.md")
+        }
         page_shaped_contract = page_shaped / "SCHEMA.json"
         original_contract_hash = sha(page_shaped_contract)
         code, payload = run_json(
@@ -256,7 +271,14 @@ def main() -> int:
             "page-shaped-store: assess writes nothing",
             sha(page_shaped_contract) == original_contract_hash
             and not (page_shaped / "CONTRACT.json").exists()
-            and not list(page_shaped.rglob("schema.md")),
+            and not list(page_shaped.rglob("*.schema.md")),
+        )
+        code, payload = run_json(["compile", "--root", str(page_shaped), "--json"])
+        check(
+            "SCHEMA.json store does not require current-shape schema pages",
+            "schema_folder" not in findings_by_id(payload, "critical")
+            and "schema_missing_from_index" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
         )
         code, payload = run_json(
             ["memory-migrate", "--root", str(page_shaped), "--operation", "apply", "--json"]
@@ -266,7 +288,7 @@ def main() -> int:
             code != 0
             and sha(page_shaped_contract) == original_contract_hash
             and not (page_shaped / "CONTRACT.json").exists()
-            and not list(page_shaped.rglob("schema.md")),
+            and not list(page_shaped.rglob("*.schema.md")),
             f"exit={code} payload={payload}",
         )
         code, payload = run_json(
@@ -313,7 +335,7 @@ def main() -> int:
                     found.append(path)
             created_schema_pages[folder] = found
         check(
-            "page-shaped-store: schema page count is one per gist folder and zero otherwise",
+            "page-shaped-store: migration adds a schema page for each gist folder",
             len(created_schema_pages["one"]) == 1
             and len(created_schema_pages["two"]) == 1
             and len(created_schema_pages["none"]) == 0,
@@ -330,6 +352,14 @@ def main() -> int:
         check(
             "page-shaped-store: new schema pages list exactly their own gists once",
             relationships_match,
+        )
+        check(
+            "page-shaped-store: every new schema is cued from its folder index",
+            all(
+                created_schema_pages[folder][0].name in
+                (page_shaped / folder / "index.md").read_text(encoding="utf-8")
+                for folder in ("one", "two")
+            ),
         )
         code, payload = run_json(["compile", "--root", str(page_shaped), "--json"])
         check(
@@ -372,7 +402,7 @@ def main() -> int:
                 for relative, digest in stamped_hashes.items()
             )
             and not (stamped_page_shaped / "CONTRACT.json").exists()
-            and not list(stamped_page_shaped.rglob("schema.md")),
+            and not list(stamped_page_shaped.rglob("*.schema.md")),
         )
 
         for path_case in ("broken-symlink", "existing-file"):
@@ -392,7 +422,7 @@ def main() -> int:
             )
             write_index(store / "one")
             write_page(store / "one" / "g1.md", "gist")
-            schema_target = store / "one" / "schema.md"
+            schema_target = store / "one" / "schema.schema.md"
             if path_case == "broken-symlink":
                 schema_target.symlink_to(store / "missing-schema-target.md")
             else:
@@ -427,6 +457,40 @@ def main() -> int:
                 ),
                 f"exit={code} payload={payload}",
             )
+
+        replaced_frame_store = tmp / "replaced-unsuffixed-frame"
+        replaced_frame_store.mkdir()
+        (replaced_frame_store / "SCHEMA.json").write_text(
+            json.dumps({
+                "schema_version": "1.0",
+                "atlas_id": "replaced-frame",
+                "structure": {},
+                "compile": {},
+            }),
+            encoding="utf-8",
+        )
+        write_index(replaced_frame_store / "notes")
+        write_page(replaced_frame_store / "notes" / "g1.md", "gist")
+        write_page(replaced_frame_store / "notes" / "frame.md", "frame")
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(replaced_frame_store),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "memory-migrate: generated schema replaces leftover unsuffixed frame page",
+            code == 0
+            and not (replaced_frame_store / "notes" / "frame.md").exists()
+            and (replaced_frame_store / "notes" / "schema.schema.md").is_file(),
+            f"exit={code} payload={payload}",
+        )
 
         # === in-beta-refused ======================================================
         for stamp in ("0.13.0-beta", "0.13.0-beta.2"):
@@ -538,7 +602,7 @@ def main() -> int:
             and not (unstamped / "CONTRACT.json").exists(),
         )
 
-        # === one-schema-per-gist-folder (beta.3 / current shape only) ============
+        # === current-shape schema coverage ======================================
         def beta3_store(name: str) -> Path:
             d = tmp / name
             r = run(["init", "--root", str(d), "--json"])
@@ -553,7 +617,7 @@ def main() -> int:
         write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: one gist + one schema accepted",
+            "schema coverage: one gist + one schema accepted",
             code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
@@ -570,23 +634,23 @@ def main() -> int:
         )
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: two gists + one schema accepted",
+            "schema coverage: two gists + one schema accepted",
             code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # zero gists, one schema -> rejected
+        # A schema-only folder is allowed by compile.
         d = beta3_store("folder-zero-gist-schema")
         write_index(d / "notes")
         write_page(d / "notes" / "s1.md", "schema")
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: zero gists + a schema rejected",
-            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            "schema-folder: zero gists + a schema accepted",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # two schemas, one gist -> rejected
+        # Multiple schemas in a folder are allowed when the gist is covered.
         d = beta3_store("folder-two-schema")
         write_index(d / "notes")
         write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
@@ -594,8 +658,8 @@ def main() -> int:
         write_page(d / "notes" / "s2.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: two schemas in a gist-bearing folder rejected",
-            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            "schema-folder: two schemas in a gist-bearing folder accepted",
+            code == 0 and "schema_folder" not in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 
@@ -605,12 +669,12 @@ def main() -> int:
         write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: one gist, no schema rejected",
+            "schema coverage: one gist, no schema rejected",
             code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # two gists, schema lists one gist twice (duplicate) -> rejected
+        # Duplicate listing is harmless as long as every gist is covered.
         d = beta3_store("folder-schema-duplicate-gist")
         write_index(d / "notes")
         write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
@@ -622,7 +686,7 @@ def main() -> int:
         )
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: schema listing one gist twice (duplicate) rejected",
+            "schema-folder: uncovered gist still fails despite duplicate listing",
             code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
@@ -635,7 +699,7 @@ def main() -> int:
         write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
         code, payload = run_json(["compile", "--root", str(d), "--json"])
         check(
-            "one-schema-per-gist-folder: schema omitting a folder gist rejected",
+            "schema coverage: schema omitting a folder gist rejected",
             code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
@@ -654,10 +718,70 @@ def main() -> int:
             i.get("path") for i in payload.get("critical", []) if i.get("id") == "schema_folder"
         ]
         check(
-            "one-schema-per-gist-folder: schema listing another folder's gist rejected in both folders",
+            "schema coverage: cross-folder links do not cover local gists",
             code != 0
-            and "alpha/s1.md" in schema_folder_paths
-            and "beta/s2.md" in schema_folder_paths,
+            and "alpha/g1.md" in schema_folder_paths
+            and "beta/g2.md" in schema_folder_paths,
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # Every schema needs a local index cue; text elsewhere is not a cue.
+        d = beta3_store("schema-missing-index-cue")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.gist.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "subject.schema.md", "schema", [{"path": "notes/g1.gist.md", "kind": "related"}])
+        (d / "notes" / "index.md").write_text("# Notes\n\n- items\n", encoding="utf-8")
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "schema_missing_from_index: uncued schema fails",
+            code != 0 and "schema_missing_from_index" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # A schema-only folder is allowed, but distinct schemas can own separate
+        # gists in one folder and both must be cued from its index.
+        d = beta3_store("folder-two-schemas-two-gists")
+        write_index(d / "notes")
+        write_page(d / "notes" / "g1.gist.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "g2.gist.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
+        write_page(d / "notes" / "s1.schema.md", "schema", [{"path": "notes/g1.gist.md", "kind": "related"}])
+        write_page(d / "notes" / "s2.schema.md", "schema", [{"path": "notes/g2.gist.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "schema-folder: two schemas each cover their own gist and are indexed",
+            code == 0
+            and "schema_folder" not in findings_by_id(payload, "critical")
+            and "schema_missing_from_index" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # A non-empty gist description must remain as an exact substring in
+        # the body or description of each memory parent.
+        d = beta3_store("stale-upper-page")
+        write_index(d / "notes")
+        write_page(d / "notes" / "memory.memory.md", "memory", body="The underlying claim was changed.")
+        write_page(
+            d / "notes" / "g1.gist.md",
+            "gist",
+            [{"path": "notes/memory.memory.md", "kind": "derived_from"}],
+            description="The old exact claim",
+        )
+        write_page(d / "notes" / "s.schema.md", "schema", [{"path": "notes/g1.gist.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "stale_upper_page: changed memory claim fails exact description check",
+            code != 0 and "stale_upper_page" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        (d / "notes" / "memory.memory.md").write_text(
+            "---\ntype: memory\ntitle: t\ncreated: 2026-10-04\n---\n\n"
+            "The old exact claim remains present in this memory body.\n",
+            encoding="utf-8",
+        )
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "stale_upper_page: exact claim in memory body passes",
+            code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 
@@ -686,14 +810,12 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # === focused-compile-keeps-own-folder-schema-folder-in-scope =============
+        # === focused-compile-keeps-own-folder-gist-coverage-in-scope ============
         # A --path focus on a gist that IS a member of a gist-bearing folder
-        # must keep that folder's schema_folder invariant in scope, whether
-        # the finding is reported on the folder itself (missing schema) or on
-        # a sibling schema page in the same folder (membership errors). An
+        # must keep that folder's schema_folder invariant in scope. An
         # unrelated folder must still stay out of scope.
 
-        # missing-schema finding reported on the folder path itself.
+        # Missing-schema finding is reported on the uncovered gist.
         d = beta3_store("folder-focus-own-folder-missing-schema")
         write_index(d / "notes")
         write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
@@ -715,6 +837,14 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
         code, payload = run_json(
+            ["compile", "--root", str(d), "--type", "schema", "--json"]
+        )
+        check(
+            "focused-compile --type schema: includes uncovered-gist schema requirement",
+            code != 0 and "schema_folder" in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
             ["compile", "--root", str(d), "--path", "other/g1.md", "--json"]
         )
         check(
@@ -723,12 +853,12 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # membership error reported on a sibling schema page in the same folder.
+        # An uncovered gist in notes/ stays in scope; the separate folder is excluded.
         d = beta3_store("folder-focus-own-folder-membership-error")
         write_index(d / "notes")
         write_page(d / "notes" / "g1.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
         write_page(d / "notes" / "g2.md", "gist", [{"path": "notes/index.md", "kind": "derived_from"}])
-        # schema omits g2 (membership error) -> finding reported on notes/s1.md.
+        # schema omits g2 -> finding reported on notes/g2.md.
         write_page(d / "notes" / "s1.md", "schema", [{"path": "notes/g1.md", "kind": "related"}])
         write_index(d / "other")
         write_page(d / "other" / "g1.md", "gist", [{"path": "other/index.md", "kind": "derived_from"}])

@@ -3,8 +3,8 @@
 This is distinct from `atlas migrate` (content into staging) and from the
 document-era-to-memory-layers content migration described in
 references/paths/memory-migrate.md. This command rewrites the root contract file (SCHEMA.json -> CONTRACT.json)
-and adds missing schema pages for gist-bearing folders; it never
-rewrites existing pages.
+and adds missing schema pages for gist-bearing folders; existing pages are
+not rewritten. New current-shape pages use suffixes as search handles.
 """
 
 from __future__ import annotations
@@ -63,21 +63,12 @@ def _schema_pages_to_create(
     additions: list[tuple[Path, list[str]]] = []
     for folder in sorted(set(gists_by_folder) | set(schemas_by_folder)):
         existing_schemas = schemas_by_folder.get(folder, [])
-        if len(existing_schemas) > 1:
-            return [], {
-                "id": "schema_folder",
-                "path": folder or ".",
-                "msg": (
-                    f"folder {folder or '.'!r} already has {len(existing_schemas)} "
-                    "type=schema pages; refusing to make the schema_folder invariant worse"
-                ),
-            }
         gist_paths = sorted(gists_by_folder.get(folder, []))
         if not gist_paths or existing_schemas:
             continue
 
         directory = root if folder == "." else root.joinpath(*folder.split("/"))
-        target = directory / "schema.md"
+        target = directory / "schema.schema.md"
         current = root
         has_symlink_component = current.is_symlink()
         for part in (() if folder == "." else folder.split("/")):
@@ -94,6 +85,13 @@ def _schema_pages_to_create(
                 "id": "schema_path_exists",
                 "path": rel(root, target),
                 "msg": f"{rel(root, target)} already exists; refusing to overwrite it",
+            }
+        index_path = directory / "index.md"
+        if index_path.is_symlink():
+            return [], {
+                "id": "schema_symlink",
+                "path": rel(root, index_path),
+                "msg": f"{rel(root, index_path)} is a symlink; refusing to write through it",
             }
         additions.append((target, gist_paths))
     return additions, None
@@ -267,7 +265,7 @@ def run(
 
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
     # atlas_release/memory.layers to the current shape. Existing pages stay
-    # untouched; missing folder schema pages are added below.
+    # untouched; missing folder schema pages and their index cues are added.
     new_path = r / CONTRACT_NAME
     if new_path.is_symlink():
         # is_file() follows symlinks and is False for a broken link, which would
@@ -305,6 +303,69 @@ def run(
         _print(as_json, payload)
         return 2
 
+    index_updates: dict[Path, str] = {}
+    replaced_frames: list[Path] = []
+    for schema_path, _ in schema_pages:
+        legacy_frame = schema_path.parent / "frame.md"
+        if legacy_frame.is_symlink():
+            payload = {
+                "ok": False,
+                "root": str(r),
+                "operation": "apply",
+                "contract_file": contract_name,
+                "lineage": lineage,
+                "error": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
+                "findings": [{
+                    "id": "schema_symlink",
+                    "path": rel(r, legacy_frame),
+                    "msg": f"{rel(r, legacy_frame)} is a symlink; refusing to replace it",
+                }],
+            }
+            _print(as_json, payload)
+            return 2
+        if legacy_frame.is_file():
+            try:
+                legacy_meta, _ = read_page(legacy_frame, schema_version(schema))
+            except FrontmatterError:
+                legacy_meta = None
+            if legacy_meta and str(legacy_meta.get("type") or "").strip() == "frame":
+                replaced_frames.append(legacy_frame)
+
+        index_path = schema_path.parent / "index.md"
+        if index_path.is_symlink():
+            payload = {
+                "ok": False,
+                "root": str(r),
+                "operation": "apply",
+                "contract_file": contract_name,
+                "lineage": lineage,
+                "error": f"{rel(r, index_path)} is a symlink; refusing to write through it",
+                "findings": [{
+                    "id": "schema_symlink",
+                    "path": rel(r, index_path),
+                    "msg": f"{rel(r, index_path)} is a symlink; refusing to write through it",
+                }],
+            }
+            _print(as_json, payload)
+            return 2
+        try:
+            index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+        except OSError as error:
+            payload = {
+                "ok": False,
+                "root": str(r),
+                "operation": "apply",
+                "contract_file": contract_name,
+                "lineage": lineage,
+                "error": f"cannot read {rel(r, index_path)}: {error}",
+            }
+            _print(as_json, payload)
+            return 2
+        cue = f"- [Gist schema](./{schema_path.name})"
+        if schema_path.name not in index_text:
+            index_text = index_text.rstrip() + ("\n\n" if index_text.strip() else "") + cue + "\n"
+        index_updates[index_path] = index_text
+
     schema["atlas_release"] = CURRENT_RELEASE
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
     memory["layers"] = list(BETA3_LAYERS)
@@ -314,6 +375,10 @@ def run(
         contract_path.unlink()
     for schema_path, gist_paths in schema_pages:
         _write_schema_page(schema_path, gist_paths)
+    for index_path, index_text in index_updates.items():
+        index_path.write_text(index_text, encoding="utf-8")
+    for legacy_frame in replaced_frames:
+        legacy_frame.unlink()
     payload = {
         "ok": True,
         "root": str(r),
@@ -324,6 +389,8 @@ def run(
         "notes": [
             f"renamed {SCHEMA_NAME} -> {CONTRACT_NAME}; set atlas_release={CURRENT_RELEASE}",
             *[f"created schema page {rel(r, path)}" for path, _ in schema_pages],
+            *[f"cued schema page in {rel(r, path)}" for path in index_updates],
+            *[f"removed replaced frame page {rel(r, path)}" for path in replaced_frames],
         ],
     }
     _print(as_json, payload)

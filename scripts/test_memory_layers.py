@@ -2040,8 +2040,11 @@ def main() -> int:
             and "incomplete Exit" in recall_text,
         )
         check(
-            "recall.md still tells the reader to stop when the gist answers",
-            "Stop at the gist when it answers the ask" in recall_text,
+            "recall.md specifies early-stop index/schema/gist/memory disclosure",
+            "Progressive disclosure (index → schema → gist → memory)" in recall_text
+            and "If it answers, stop" in recall_text
+            and "hub.md" in recall_text
+            and "not a memory level" in recall_text,
         )
         check(
             "SKILL.md has no checkpoint/constellation path row",

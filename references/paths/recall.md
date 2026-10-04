@@ -1,6 +1,6 @@
 ---
 name: atlas/paths/recall
-description: Use this path when an agent needs an answer from an Atlas store: recall a frame, then a gist, then a memory page, and usually stop at the gist. Trigger on recall, find in the atlas, what does the store say, look up a decision or work hub, even when the user says query or search. Do not use it to write pages, compile, configure the recall index, or migrate memory layers. Invocation: FORCED when the Atlas router selects retrieval. Boundary: one path, one receipt field, no second index.
+description: Use this path when an agent needs an answer from an Atlas store: cue a schema from index.md, then progressively open schema, gist, and memory pages, stopping as soon as the answer is present. Trigger on recall, find in the atlas, what does the store say, look up a decision or work hub, even when the user says query or search. Do not use it to write pages, compile, configure the recall index, or migrate memory layers. Invocation: FORCED when the Atlas router selects retrieval. Boundary: one path, one receipt field, no second index.
 path_id: recall
 ---
 
@@ -39,8 +39,8 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
 ## Procedure
 
 1. **Resolve root** — load path `mount` first with `atlas_id` (and `ref`) on the card. Set `--root` to what `atlas resolve <atlas_id>` prints. Never `--root` the skill tree. Omitting `--root` uses the current working directory; the CLI does not default to the mount.
-2. **Read the hot list first** — the folder `index.md` is the hot list (short-term memory); the root `index.md` is the folder map. Read it before anything else. Do not replace this with frames or gists. Unlisted pages stay searchable long-term memory; absence from an index is not absence from the store.
-3. **Abstraction walk (frame → gist → memory)** — if a matching frame exists, open it and then read a relevant gist; when there is truly no frame, recall may start at the gist. Stop at the gist when it answers the ask. Open its parent memory page only when the gist is thin, contested, or the ask needs the record itself — and record that reason on the exit receipt. Do not load every gist for one ask. A gist's parent is never a gist or frame. A frame lists exactly the gists in its own folder, never memory pages or other types. Do not paste the memory-migrate procedure into this path; that migration work lives in path `memory-migrate`. This naming is the shipped `SCHEMA.json` shape (0.13.0-beta and 0.13.0-beta.2); on the 0.13.0-beta.3 write model (`CONTRACT.json`) the same walk is `schema → gist → memory` (`schema` is the renamed `frame`).
+2. **Cue from the index** — `index.md` is the OKF reserved directory listing and hot schema-cue list, not laboratory short-term memory (Cowan STM) and not a table of contents. Read its schema cues before opening a schema. It does not copy memory claims or pin every gist; pages not cued there remain searchable. Index and `hub.md` filenames stay unsuffixed, and a work hub is not a memory level.
+3. **Progressive disclosure (index → schema → gist → memory)** — open the schema cued for the question. If it answers, stop: do not open a gist or memory page. Otherwise open only a relevant gist; if it answers, stop without opening its parent memory. Descend to a memory page only when the gist does not answer or the ask needs the record itself. Do not load every gist for one ask. On shipped `SCHEMA.json` stores, the first memory-layer page is named `frame`; on the current `CONTRACT.json` shape it is `schema`. On either shape, stop at the level in hand when it answers and do not open a lower level after a hit.
 4. **Form the query** from the intent. Free text plus only justified field tokens:
    - `type:<name>` — frontmatter type, not a body mention
    - `kva:<value>` — traffic (alive, forming, terminated, …)
@@ -79,12 +79,11 @@ remember: no
 compile: n/a
 ```
 
-`stopped_at: recall_hit` means the answer came from an ordinary search hit without
-stopping on a frame, schema, gist, or memory page. `stopped_at: gap` means an honest
-gap — nothing relevant was found. `stopped_at: frame` is the shipped `SCHEMA.json`
-walk (0.13.0-beta and 0.13.0-beta.2); `stopped_at: schema` is the 0.13.0-beta.3
-`CONTRACT.json` walk (`schema` is the renamed `frame`). Record whichever the store's
-contract shape actually uses, never both.
+`stopped_at: recall_hit` means the answer came from ordinary search rather than
+the progressive memory walk. `stopped_at: gap` means an honest gap — nothing
+relevant was found. `stopped_at: frame` is the shipped `SCHEMA.json` name;
+`stopped_at: schema` is the current `CONTRACT.json` name. A hub is never a stop
+level in this walk.
 
 Claiming “checked the Atlas” without `recall_cmd` ⇒ incomplete Exit.
 
