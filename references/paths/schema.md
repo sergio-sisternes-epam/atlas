@@ -137,7 +137,10 @@ Append one bullet only when schema layout changed (init, first overlay, uninstal
 ### 7. Memory rung (opt-in only)
 
 ```bash
-python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info|warn|error --root <root>
+# --set accepts exactly one of: info, warn, error
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <root>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <root>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <root>
 ```
 
 This is the **only** writer of `SCHEMA.memory`. It sets `rung` (plus the fixed

@@ -54,16 +54,21 @@ benign depends on the schema:
 
 - **SCHEMA 1.0** (no `validate_store_v2`): an absent `memory` key, a
   missing or null `rung`, or a blank/whitespace string `rung` all mean
-  effective rung `info`, with no `memory_rung` critical finding, so this
-  dry-run assess exits 0 when nothing else is critical.
+  effective rung `info`, with no `memory_rung` critical finding. That
+  rung shape contributes no failure of its own, but it does **not**
+  guarantee exit 0 — other actionable warnings (for example a missing
+  `index.md` / `index_md_present`) still make assess exit 1, and other
+  critical findings still make it exit 2. The overall compile exit
+  policy still applies.
 - **SCHEMA 2.0** (`validate_store_v2`, `rung` typed as a string enum
   `info` | `warn` | `error`): the default `info` rung is only reached by
-  *omitting* the `rung` key, or by omitting `memory` entirely — that
-  still exits 0 with `memory_rung` reporting `info`. A **present** `rung`
-  that is null or a blank/whitespace string fails the schema's own
-  validation (`schema_v2`, not just `memory_rung`) and exits 2. Do not
-  tell a SCHEMA 2.0 operator that a present null or blank rung is benign;
-  tell them to remove the key instead.
+  *omitting* the `rung` key, or by omitting `memory` entirely. Even then,
+  this does not by itself guarantee exit 0 if other warnings or criticals
+  are present. A **present** `rung` that is null or a blank/whitespace
+  string fails the schema's own validation (`schema_v2`, not just
+  `memory_rung`) and exits 2. Do not tell a SCHEMA 2.0 operator that a
+  present null or blank rung is benign; tell them to remove the key
+  instead.
 
 A malformed `rung` — a non-string value such as `0`, `false`, `[]`, or
 `{}`, or a string that is not `info`, `warn`, or `error` — does **not**
