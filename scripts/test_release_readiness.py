@@ -12,6 +12,7 @@ from release_readiness import (
     ROOT,
     SURFACES,
     current_commit,
+    is_prerelease_tag,
     manifest_version,
     validate_commit,
     validate_versions,
@@ -39,6 +40,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         version, errors = validate_versions()
         self.assertEqual(manifest_version(), version)
         self.assertEqual([], errors)
+
+
+    def test_prerelease_tag_detects_beta_and_stable(self) -> None:
+        self.assertTrue(is_prerelease_tag("v0.13.0-beta"))
+        self.assertTrue(is_prerelease_tag("v1.2.3-rc.1"))
+        self.assertTrue(is_prerelease_tag("v0.1.0-alpha.2"))
+        self.assertTrue(is_prerelease_tag("0.13.0-beta"))
+        self.assertFalse(is_prerelease_tag("v0.13.0"))
+        self.assertFalse(is_prerelease_tag("v1.0.0"))
+        # Build metadata alone is not a prerelease
+        self.assertFalse(is_prerelease_tag("v1.0.0+build.1"))
+        self.assertTrue(is_prerelease_tag("v1.0.0-beta+build.1"))
 
     def test_mismatched_surface_blocks_readiness(self) -> None:
         expected = manifest_version()
