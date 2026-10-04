@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta
+version: 0.13.0-beta.2
 activation_card: on
 ---
 
@@ -206,7 +206,8 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 | Topic | Rule |
 |-------|------|
 | Structure | Free layout; mandatory `SCHEMA.json`; short-lived `staging/`; `index.md` / `log.md` per OKF |
-| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `page`, `gist`, `frame` (recommended, not closed) |
+| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `memory`, `gist`, `frame` (recommended, not closed) |
+| Memory layers | `memory.layers` is exactly `frame`, `gist`, `memory`. A folder with one or more gists has exactly one same-folder frame listing those gists once each; zero gists means no frame. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind, ref?}]` - kinds: follows, records, supersedes, implements, derived_from, related. Absent `ref` is tip. Present `ref` is a git rev and is not compiled. Not mount `ref`. |
 | Composition | Optional mesh; consolidated in compile |

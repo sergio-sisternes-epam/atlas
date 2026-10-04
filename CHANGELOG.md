@@ -7,12 +7,13 @@
 - Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
 - `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
 - Runtime modules **history**, **version-hint**, and **prune**. Recall, remember, and terminate hand off to those cards. Claim A grain stays deferred.
-- Memory layers **page**, **gist**, and **frame**: `page` is the memory
-  episode type (type id `page`, never a second type id `memory`); `gist`
-  summarises exactly one parent page (`relates_to` kind `derived_from`);
-  `frame` names a repeated pattern across two or more gists (`relates_to`
-  kind `related`). No `gists/` or `frames/` directory is required; no gist
-  of a gist; no frame whose members are pages.
+- Memory layers **frame**, **gist**, and **memory**: `memory` is the memory
+  episode type; `gist` summarises exactly one parent memory page
+  (`relates_to` kind `derived_from`); each folder with one or more gists has
+  exactly one frame grouping those gists (`relates_to` kind `related`). A
+  lone gist still gets a frame; zero gists means no frame. No `gists/` or
+  `frames/` directory is required; no gist of a gist; frame members are
+  gists only.
 - Legacy type `document` is kept and reported on the new memory rung as the
   legacy durable object, not auto-retyped.
 - Compile severity `info`: optional `memory.rung` is `info` by default,
@@ -45,6 +46,13 @@
 
 - Path `query` and root CLI commands `search` and `query` (hard cut, no
   alias): use path `recall` and `atlas recall run` instead.
+
+## 0.13.0-beta.2 - 2026-10-04
+
+Sergio corrected the shipped memory model on 2026-10-04: the memory episode
+type id is `memory`, not `page`, and every folder with at least one gist
+requires exactly one frame grouping those gists. A lone gist still gets a
+frame; a folder with zero gists has no frame.
 
 ## 0.12.0 - 2026-09-13
 

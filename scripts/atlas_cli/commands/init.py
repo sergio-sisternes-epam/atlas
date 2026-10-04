@@ -54,7 +54,7 @@ DEFAULT_SCHEMA = {
             "protostar",
             "gist",
             "frame",
-            "page",
+            "memory",
         ],
         "unconstrained": [],
     },
@@ -70,7 +70,7 @@ FM_ONLY = {
     "protostar": ["type", "title", "created"],
     "lesson": ["type", "title", "created"],
     "recipe": ["type", "title", "created"],
-    "page": ["type", "title", "created"],
+    "memory": ["type", "title", "created"],
     "gist": ["type", "title", "created"],
     "frame": ["type", "title", "created"],
 }
