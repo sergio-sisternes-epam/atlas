@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.core.frontmatter import read_page
 
 PROSE = (
     "This page carries enough non-link prose content to pass the "
@@ -75,6 +77,34 @@ def write_index(folder: Path) -> None:
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_page_shaped_store(store: Path, stamp: str | None = None) -> list[Path]:
+    store.mkdir(parents=True, exist_ok=True)
+    schema = {
+        "schema_version": "1.0",
+        "atlas_id": "page-shaped",
+        "structure": {},
+        "compile": {},
+    }
+    if stamp is not None:
+        schema["atlas_release"] = stamp
+    (store / "SCHEMA.json").write_text(json.dumps(schema), encoding="utf-8")
+
+    write_index(store)
+    write_page(store / "memory.md", "memory")
+    write_page(store / "frame.md", "frame")
+    for folder, gist_names in (("one", ("g1.md",)), ("two", ("g1.md", "g2.md"))):
+        write_index(store / folder)
+        for name in gist_names:
+            write_page(
+                store / folder / name,
+                "gist",
+                [{"path": f"{folder}/index.md", "kind": "derived_from"}],
+            )
+    write_index(store / "none")
+    write_page(store / "none" / "decision.md", "decision")
+    return sorted(path for path in store.rglob("*.md") if path.is_file())
 
 
 def main() -> int:
@@ -207,6 +237,196 @@ def main() -> int:
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
+
+        # === unstamped-page-shaped-store =========================================
+        page_shaped = tmp / "unstamped-page-shaped-store"
+        preexisting_pages = write_page_shaped_store(page_shaped)
+        original_page_hashes = {path.relative_to(page_shaped): sha(path) for path in preexisting_pages}
+        page_shaped_contract = page_shaped / "SCHEMA.json"
+        original_contract_hash = sha(page_shaped_contract)
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(page_shaped), "--operation", "assess", "--json"]
+        )
+        check(
+            "page-shaped-store: assess reports in-beta lineage",
+            code == 0 and payload.get("lineage") == "in-beta",
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "page-shaped-store: assess writes nothing",
+            sha(page_shaped_contract) == original_contract_hash
+            and not (page_shaped / "CONTRACT.json").exists()
+            and not list(page_shaped.rglob("schema.md")),
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(page_shaped), "--operation", "apply", "--json"]
+        )
+        check(
+            "page-shaped-store: apply without batch refuses without writing",
+            code != 0
+            and sha(page_shaped_contract) == original_contract_hash
+            and not (page_shaped / "CONTRACT.json").exists()
+            and not list(page_shaped.rglob("schema.md")),
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(page_shaped),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "page-shaped-store: contract-file apply succeeds and renames contract",
+            code == 0
+            and payload.get("ok") is True
+            and payload.get("contract_file") == "CONTRACT.json"
+            and (page_shaped / "CONTRACT.json").is_file()
+            and not (page_shaped / "SCHEMA.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+        migrated = json.loads((page_shaped / "CONTRACT.json").read_text(encoding="utf-8"))
+        check(
+            "page-shaped-store: migration writes beta.3 contract stamp and layers",
+            migrated.get("atlas_release") == "0.13.0-beta.3"
+            and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
+            str(migrated),
+        )
+        check(
+            "page-shaped-store: all pre-existing page bytes are unchanged",
+            all(sha(page_shaped / relative) == digest for relative, digest in original_page_hashes.items()),
+            str(original_page_hashes),
+        )
+        created_schema_pages: dict[str, list[Path]] = {}
+        for folder in ("one", "two", "none"):
+            found: list[Path] = []
+            for path in sorted((page_shaped / folder).glob("*.md")):
+                if path.name in ("index.md", "log.md"):
+                    continue
+                meta, _ = read_page(path)
+                if meta.get("type") == "schema":
+                    found.append(path)
+            created_schema_pages[folder] = found
+        check(
+            "page-shaped-store: schema page count is one per gist folder and zero otherwise",
+            len(created_schema_pages["one"]) == 1
+            and len(created_schema_pages["two"]) == 1
+            and len(created_schema_pages["none"]) == 0,
+            str({folder: [str(p) for p in paths] for folder, paths in created_schema_pages.items()}),
+        )
+        relationships_match = True
+        for folder, gist_names in (("one", ("g1.md",)), ("two", ("g1.md", "g2.md"))):
+            schema_meta, _ = read_page(created_schema_pages[folder][0])
+            expected = [
+                {"path": f"{folder}/{name}", "kind": "related"}
+                for name in sorted(gist_names)
+            ]
+            relationships_match = relationships_match and schema_meta.get("relates_to") == expected
+        check(
+            "page-shaped-store: new schema pages list exactly their own gists once",
+            relationships_match,
+        )
+        code, payload = run_json(["compile", "--root", str(page_shaped), "--json"])
+        check(
+            "page-shaped-store: migrated beta.3 store has no schema_folder critical",
+            "schema_folder" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # The released beta stamp takes precedence over otherwise memory-like
+        # pages; apply must refuse it without touching any store file.
+        stamped_page_shaped = tmp / "stamped-page-shaped-store"
+        stamped_pages = write_page_shaped_store(stamped_page_shaped, "0.13.0-beta")
+        stamped_hashes = {
+            path.relative_to(stamped_page_shaped): sha(path)
+            for path in [stamped_page_shaped / "SCHEMA.json", *stamped_pages]
+        }
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(stamped_page_shaped),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "page-shaped-store: beta stamp still refuses with in_beta_not_legacy",
+            code != 0
+            and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])],
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "page-shaped-store: beta stamp refusal leaves all bytes and paths unchanged",
+            all(
+                (stamped_page_shaped / relative).is_file()
+                and sha(stamped_page_shaped / relative) == digest
+                for relative, digest in stamped_hashes.items()
+            )
+            and not (stamped_page_shaped / "CONTRACT.json").exists()
+            and not list(stamped_page_shaped.rglob("schema.md")),
+        )
+
+        for path_case in ("broken-symlink", "existing-file"):
+            store = tmp / f"schema-page-target-{path_case}"
+            store.mkdir()
+            contract_path = store / "SCHEMA.json"
+            contract_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "atlas_id": path_case,
+                        "structure": {},
+                        "compile": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            write_index(store / "one")
+            write_page(store / "one" / "g1.md", "gist")
+            schema_target = store / "one" / "schema.md"
+            if path_case == "broken-symlink":
+                schema_target.symlink_to(store / "missing-schema-target.md")
+            else:
+                schema_target.write_text("existing file must be preserved\n", encoding="utf-8")
+            target_hash = None if path_case == "broken-symlink" else sha(schema_target)
+            contract_hash = sha(contract_path)
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(store),
+                    "--operation",
+                    "apply",
+                    "--batch",
+                    "contract-file",
+                    "--json",
+                ]
+            )
+            check(
+                f"schema-page-target-{path_case}: migration refuses before writing",
+                code != 0
+                and sha(contract_path) == contract_hash
+                and not (store / "CONTRACT.json").exists()
+                and (
+                    schema_target.is_symlink()
+                    if path_case == "broken-symlink"
+                    else schema_target.is_file()
+                )
+                and (
+                    target_hash is None
+                    or sha(schema_target) == target_hash
+                ),
+                f"exit={code} payload={payload}",
+            )
 
         # === in-beta-refused ======================================================
         for stamp in ("0.13.0-beta", "0.13.0-beta.2"):

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0-beta.4 - 2026-10-04
+
+- `memory-migrate` now recognizes existing `memory`, `gist`, or `frame` pages
+  when reporting lineage for an unstamped pre-beta contract. The named
+  `contract-file` batch still performs the beta.3 contract transition without
+  rewriting existing pages, and creates one `schema` page in each folder
+  containing gists so the migrated store satisfies the beta.3 schema-folder
+  invariant.
+
 ## Unreleased
 
 ### Added
