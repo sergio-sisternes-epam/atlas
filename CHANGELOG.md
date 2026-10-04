@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-## 0.13.0-beta - 2026-10-03
-
 ### Added
 
 - Memory layers **page**, **gist**, and **frame**: `page` is the memory
