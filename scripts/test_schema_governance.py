@@ -44,12 +44,12 @@ def main() -> int:
 
         # init-core-only
         r = run(["init", "--root", str(store), "--json"])
-        schema_file = store / "SCHEMA.json"
+        schema_file = store / "CONTRACT.json"
         if r.returncode != 0 or not schema_file.is_file():
             check(
                 "init-core-only",
                 False,
-                f"exit={r.returncode} missing SCHEMA.json stderr={r.stderr[:200]}",
+                f"exit={r.returncode} missing CONTRACT.json stderr={r.stderr[:200]}",
             )
             return 1
         schema = json.loads(schema_file.read_text())
@@ -116,15 +116,19 @@ def main() -> int:
         (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
 
         # absent-host-memory-overlay-clash-fails (memory is FORBIDDEN_CORE / operator opt-in only)
-        schema = json.loads((store / "SCHEMA.json").read_text(encoding="utf-8"))
+        contract_file = store / "CONTRACT.json"
+        if not contract_file.is_file():
+            contract_file = store / "SCHEMA.json"
+        schema = json.loads(contract_file.read_text(encoding="utf-8"))
+        original_memory = schema.get("memory")
         schema.pop("memory", None)
-        (store / "SCHEMA.json").write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        contract_file.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
         ov["memory"] = {"rung": "warn"}
         (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
         r = run(["compile", "--root", str(store), "--json"])
         payload = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
         crit_ids = [i.get("id") for i in payload.get("critical") or []]
-        host_after = json.loads((store / "SCHEMA.json").read_text(encoding="utf-8"))
+        host_after = json.loads(contract_file.read_text(encoding="utf-8"))
         check(
             "absent-host-memory-overlay-clash-fails",
             r.returncode == 2 and "overlay_core_clash" in crit_ids and "memory" not in host_after,
@@ -132,6 +136,9 @@ def main() -> int:
         )
         del ov["memory"]
         (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
+        if original_memory is not None:
+            schema["memory"] = original_memory
+            contract_file.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
 
         # overlay must not mutate core type
         ov["templates"] = {

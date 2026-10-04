@@ -376,7 +376,7 @@ def main() -> int:
             mesh = json.loads(mesh_path.read_text(encoding="utf-8"))
         row = (mesh.get("stores") or [{}])[0]
         atlas_files = ""
-        if (dest / "SCHEMA.json").is_file():
+        if (dest / "CONTRACT.json").is_file():
             atlas_files = git_output(["ls-tree", "--name-only", "atlas"], dest)
         check(
             "shared-init-default-writes-strategy",
@@ -384,8 +384,8 @@ def main() -> int:
             and payload.get("strategy") == "shared"
             and row.get("strategy") == "shared"
             and row.get("ref") == "atlas"
-            and (dest / "SCHEMA.json").is_file()
-            and "SCHEMA.json" in atlas_files
+            and (dest / "CONTRACT.json").is_file()
+            and "CONTRACT.json" in atlas_files
             and ".keep" not in atlas_files,
             parse_error
             or f"exit={result.returncode} payload={payload} stderr={result.stderr!r} mesh={mesh}",

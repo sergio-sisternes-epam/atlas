@@ -14,6 +14,8 @@ from ..core.recall_config import recall_enabled, schema_version, validate_store_
 from ..core.recall_index import IndexError_, publish_generation
 from ..core.schema import (
     by_type_map,
+    compute_stamp_shape,
+    contract_filename,
     load_contract,
     load_schema,
     min_body_chars,
@@ -22,6 +24,9 @@ from ..core.schema import (
     staging_dir_name,
     validate_against_contract,
     validate_schema_shape,
+    BETA3_LAYERS,
+    IN_BETA_LAYERS,
+    SHIPPED_BETA_LAYERS,
 )
 
 # Inline ignore: <!-- atlas-ignore: rule_id -->
@@ -30,11 +35,59 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
-# Memory layers (frame / gist / memory) are pinned here, not read from the store.
+# Memory layers (frame / gist / page, original shipped 0.13.0-beta;
+# frame / gist / memory, 0.13.0-beta.2; schema / gist / memory, beta.3) are
+# pinned here, not read from the store. "page" is the original shipped-beta
+# episode type and must count as a valid gist parent alongside "memory".
 GIST_PARENT_TYPES = frozenset(
-    {"experience", "decision", "lesson", "recipe", "document", "memory", "protostar"}
+    {"experience", "decision", "lesson", "recipe", "document", "memory", "page", "protostar"}
 )
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
+
+
+def _canonical_local_target(root: Path, target: str) -> str | None:
+    """Resolve a relates_to target to the canonical store-relative key.
+
+    Mirrors the resolution ``_check_relates_to`` uses: remote references
+    (http(s):// or atlas://) are left alone (handled elsewhere), and any
+    local target is resolved against the store root so it matches a page
+    index built from ``rel()``. Targets that resolve outside the store root
+    are not treated as local page keys.
+    """
+    if not target or target.startswith(("http://", "https://", "atlas://")):
+        return None
+    resolved_root = root.resolve()
+    cand = (root / target).resolve()
+    try:
+        cand.relative_to(resolved_root)
+    except ValueError:
+        return None
+    return str(cand.relative_to(resolved_root)).replace("\\", "/")
+
+
+def _resolve_related_gist(
+    item: dict, root: Path, by_rel_path: dict, kind: str = "related"
+) -> str | None:
+    """Resolve one relates_to entry to a local gist page's canonical key, or None.
+
+    Shared by frame-folder validation (shipped-beta SCHEMA.json shapes) and
+    schema-folder validation (the beta.3 CONTRACT.json shape): an entry only
+    resolves when it has ``kind`` (default ``related``), a non-empty path,
+    and that path resolves to a local page whose type is ``gist``.
+    """
+    if not isinstance(item, dict):
+        return None
+    if str(item.get("kind") or item.get("role") or "").strip().lower() != kind:
+        return None
+    target = str(item.get("path") or "").strip()
+    if not target:
+        return None
+    canon = _canonical_local_target(root, target)
+    lookup_key = canon if canon is not None else target
+    found = by_rel_path.get(lookup_key)
+    if found is None or str(found[1].get("type") or "").strip() != "gist":
+        return None
+    return lookup_key
 
 
 def _ignores_in(text: str) -> set[str]:
@@ -246,6 +299,100 @@ def _in_focus(
     return True
 
 
+def _folder_in_scope(folder: Path, focus_path: Path) -> bool:
+    """True when ``folder`` is the schema_folder scope for ``focus_path``.
+
+    Two independent ways a folder stays in scope:
+    - ``folder`` is ``focus_path`` itself or lies under it (``folder.relative_to
+      (focus_path)`` succeeds): ``--path notes`` keeps folder ``notes`` and
+      folders under ``notes`` in scope, and does not include an unrelated
+      sibling folder; or
+    - ``focus_path``'s parent is ``folder`` (``focus_path.parent == folder``):
+      ``--path notes/g1.md`` keeps folder ``notes`` in scope because the
+      file's parent is ``notes``. This is a direct-membership check only, so
+      ``--path notes/sub/g1.md`` does NOT keep ancestor folder ``notes`` in
+      scope (its parent is ``notes/sub``, not ``notes``).
+    """
+    try:
+        folder.relative_to(focus_path)
+        return True
+    except ValueError:
+        pass
+    return focus_path.parent == folder
+
+
+def _finding_in_focus(
+    root: Path,
+    finding: dict,
+    focused: bool,
+    want_type: str | None,
+    focus_path: Path | None,
+    sv: str,
+    staging_name: str,
+) -> bool:
+    """True when a folder/page-scoped finding is within --type/--path focus.
+
+    Shared by the main page loop's handling of ``_memory_findings`` and by
+    ``_schema_folder_findings``, so a focused compile never fails because of
+    an out-of-focus folder.
+    """
+    if not focused:
+        return True
+    fpath = (root / finding["path"]).resolve()
+    directory_scoped = fpath.is_dir()
+    if finding.get("id") == "schema_folder":
+        # schema_folder findings are reported either on the gist-bearing
+        # folder itself (missing/extra schema) or on a sibling type=schema
+        # page in that folder (membership errors). Either way, a focused
+        # compile on a page that is a member of that same folder (e.g. a
+        # gist the schema must list) keeps the folder invariant in scope.
+        folder = fpath if directory_scoped else fpath.parent
+        if focus_path is not None and not _folder_in_scope(folder, focus_path):
+            return False
+        if want_type:
+            for page in iter_concept_md(folder, staging_name):
+                if page.parent.resolve() != folder or page.name in RESERVED:
+                    continue
+                try:
+                    meta, _ = read_page(page, sv)
+                except FrontmatterError:
+                    continue
+                if _in_focus(page, meta, want_type, None):
+                    return True
+            return False
+        return True
+    if directory_scoped:
+        if not _in_focus(fpath, {}, None, focus_path):
+            return False
+        if want_type:
+            # Folder findings apply to types present in their direct concept pages.
+            for page in iter_concept_md(fpath, staging_name):
+                if page.parent.resolve() != fpath or page.name in RESERVED:
+                    continue
+                try:
+                    meta, _ = read_page(page, sv)
+                except FrontmatterError:
+                    continue
+                if _in_focus(page, meta, want_type, None):
+                    return True
+            return False
+        return True
+    try:
+        meta, _ = read_page(fpath, sv)
+    except FrontmatterError:
+        meta = None
+    if meta:
+        return _in_focus(fpath, meta, want_type, focus_path)
+    if want_type:
+        return False
+    if focus_path is not None:
+        try:
+            fpath.relative_to(focus_path)
+        except ValueError:
+            return False
+    return True
+
+
 def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     issues: list[dict] = []
     try:
@@ -278,7 +425,7 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     return issues
 
 
-def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
+def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tuple[str, list[dict]]:
     """Resolve the memory rung (info|warn|error) plus any shape-critical issues.
 
     No memory key, a memory object with no/empty rung, or any shape problem
@@ -298,7 +445,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": "SCHEMA.memory must be an object; treating memory rung as info",
             }
         ]
@@ -309,7 +456,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": (
                     "SCHEMA.memory.rung must be a string (info, warn, or error); "
                     f"got {type(raw).__name__} {raw!r}; treating memory rung as info"
@@ -323,7 +470,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": (
                     f"SCHEMA.memory.rung must be info, warn, or error (got {rung!r}); "
                     "treating memory rung as info"
@@ -334,16 +481,24 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
 
 
 _MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
-_MEMORY_LAYERS_FIXED = ["frame", "gist", "memory"]
+_MEMORY_LAYERS_FIXED = IN_BETA_LAYERS
 _MEMORY_LEGACY_TYPES_FIXED = ["document"]
 
 
-def _memory_contract(schema: dict | None) -> list[dict]:
-    """Enforce the fixed memory.layers / memory.legacy_types contract on SCHEMA 1.0.
+def _memory_contract(schema: dict | None, contract_name: str = "SCHEMA.json", shape: str | None = None) -> list[dict]:
+    """Enforce the memory.layers / memory.legacy_types contract for a given shape.
 
     SCHEMA 2.0 stores already enforce this (and more) via validate_store_v2
     against the store-v2 JSON Schema, so this check only runs for stores that
     are not 2.0 (the default 1.0 contract, or any other non-2.0 value).
+
+    in_beta stores may have differing types/layers by design (pin 3), so
+    layers enforcement is skipped there. Every other shape (shipped_beta,
+    current, and a stamp_shape mismatch that still carries a memory.layers
+    key) keeps the pre-existing strict layers check for its contract
+    filename, so a malformed SCHEMA.json/CONTRACT.json still raises
+    memory_contract in addition to (not instead of) the separate
+    stamp_shape finding.
     """
     if not schema:
         return []
@@ -356,20 +511,23 @@ def _memory_contract(schema: dict | None) -> list[dict]:
         findings.append(
             {
                 "id": "memory_contract",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": f"SCHEMA.memory has an unexpected key: {key!r}",
             }
         )
-    if "layers" in memory:
+    expected_layers = None if shape == "in_beta" else (
+        BETA3_LAYERS if contract_name == "CONTRACT.json" else SHIPPED_BETA_LAYERS
+    )
+    if expected_layers is not None and "layers" in memory:
         layers = memory["layers"]
-        if layers != _MEMORY_LAYERS_FIXED:
+        if layers != expected_layers:
             findings.append(
                 {
                     "id": "memory_contract",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": (
                         "SCHEMA.memory.layers must be exactly "
-                        f"{_MEMORY_LAYERS_FIXED!r} (got {layers!r})"
+                        f"{expected_layers!r} (got {layers!r})"
                     ),
                 }
             )
@@ -379,7 +537,7 @@ def _memory_contract(schema: dict | None) -> list[dict]:
             findings.append(
                 {
                     "id": "memory_contract",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": (
                         "SCHEMA.memory.legacy_types must be exactly "
                         f"{_MEMORY_LEGACY_TYPES_FIXED!r} (got {legacy_types!r})"
@@ -389,11 +547,18 @@ def _memory_contract(schema: dict | None) -> list[dict]:
     return findings
 
 
-def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+def _memory_findings(
+    root: Path, schema: dict | None, staging_name: str, run_frame_rules: bool = True
+) -> list[dict]:
     """Legacy-document and memory-layer (memory/gist/frame) findings.
 
     Markdown files are read once here, independent of the main compile loop, so these
     findings do not depend on iteration order or on other checks succeeding.
+
+    ``run_frame_rules`` gates the frame-folder model (frame_members): it must
+    only run for shipped SCHEMA.json shapes. The beta.3 CONTRACT.json shape
+    uses the schema-folder model instead (``_schema_folder_findings``); the
+    two models must never both run on the same store.
     """
     pages: list[tuple[Path, dict]] = []
     for path in iter_concept_md(root, staging_name):
@@ -421,25 +586,6 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 out.append(item)
         return out
 
-    def _canonical_local_target(target: str) -> str | None:
-        """Resolve a relates_to target to the canonical store-relative key.
-
-        Mirrors the resolution ``_check_relates_to`` uses: remote references
-        (http(s):// or atlas://) are left alone (handled elsewhere), and any
-        local target is resolved against the store root so it matches the
-        page index built from ``rel()``. Targets that resolve outside the
-        store root are not treated as local page keys.
-        """
-        if not target or target.startswith(("http://", "https://", "atlas://")):
-            return None
-        resolved_root = root.resolve()
-        cand = (root / target).resolve()
-        try:
-            cand.relative_to(resolved_root)
-        except ValueError:
-            return None
-        return str(cand.relative_to(resolved_root)).replace("\\", "/")
-
     def _valid_gist_parent(m: dict) -> str | None:
         """Return the canonical parent path for a well-formed gist, else None.
 
@@ -456,7 +602,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
         target = str(parents[0].get("path") or "").strip()
         if not target:
             return None
-        canon = _canonical_local_target(target)
+        canon = _canonical_local_target(root, target)
         found = by_rel_path.get(canon if canon is not None else target)
         if found is None:
             return None
@@ -514,20 +660,21 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                         "msg": (
                             "a gist has exactly one parent, and that parent is not "
                             "a gist (parent must be experience, decision, lesson, "
-                            "recipe, document, memory, or protostar)."
+                            "recipe, document, memory, page, or protostar)."
                         ),
                     }
                 )
 
     gists_by_folder: dict[str, set[str]] = {}
     frames_by_folder: dict[str, list[tuple[str, dict]]] = {}
-    for p, m in pages:
-        folder = rel(root, p.parent)
-        page_path = rel(root, p)
-        if str(m.get("type") or "").strip() == "gist":
-            gists_by_folder.setdefault(folder, set()).add(page_path)
-        elif str(m.get("type") or "").strip() == "frame":
-            frames_by_folder.setdefault(folder, []).append((page_path, m))
+    if run_frame_rules:
+        for p, m in pages:
+            folder = rel(root, p.parent)
+            page_path = rel(root, p)
+            if str(m.get("type") or "").strip() == "gist":
+                gists_by_folder.setdefault(folder, set()).add(page_path)
+            elif str(m.get("type") or "").strip() == "frame":
+                frames_by_folder.setdefault(folder, []).append((page_path, m))
 
     for folder in sorted(set(gists_by_folder) | set(frames_by_folder)):
         expected_gists = gists_by_folder.get(folder, set())
@@ -551,24 +698,11 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             if invalid:
                 related = []
             for item in related:
-                if (
-                    not isinstance(item, dict)
-                    or str(item.get("kind") or item.get("role") or "").strip().lower()
-                    != "related"
-                ):
+                resolved = _resolve_related_gist(item, root, by_rel_path)
+                if resolved is None:
                     invalid = True
                     continue
-                target = str(item.get("path") or "").strip()
-                if not target:
-                    invalid = True
-                    continue
-                canon = _canonical_local_target(target)
-                lookup_key = canon if canon is not None else target
-                found = by_rel_path.get(lookup_key)
-                if found is None or str(found[1].get("type") or "").strip() != "gist":
-                    invalid = True
-                    continue
-                listed_paths.append(lookup_key)
+                listed_paths.append(resolved)
             if (
                 not expected_gists
                 or invalid
@@ -590,6 +724,99 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
     return findings
 
 
+def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """On the beta.3 (current) shape only, schema is the renamed frame.
+
+    A folder with >=1 gist has exactly one type=schema page; a folder with
+    zero gists has none (one gist still counts). Unlike frame_members (an
+    info-by-default ladder finding on shipped-beta stores), this is a hard
+    compile failure: pin 4 says a second schema in a gist-bearing folder
+    "fails", not merely "is flagged". That one schema page must also list
+    each gist in its own folder exactly once via relates_to kind=related,
+    and no other targets — duplicates, omissions, and gists that belong to
+    another folder all fail the same way as an empty/non-gist target set
+    (a lone gist still only needs to be listed once).
+    """
+    pages: list[tuple[Path, dict]] = []
+    for path in iter_concept_md(root, staging_name):
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, _ = read_page(path, schema_version(schema) if schema else "1.0")
+        except FrontmatterError:
+            continue
+        if not meta:
+            continue
+        pages.append((path, meta))
+
+    by_rel_path = {rel(root, p): (p, m) for p, m in pages}
+
+    gists_by_folder: dict[str, set[str]] = {}
+    schemas_by_folder: dict[str, list[str]] = {}
+    for p, m in pages:
+        folder = str(p.parent.resolve().relative_to(root.resolve())).replace("\\", "/")
+        ptype = str(m.get("type") or "").strip()
+        if ptype == "gist":
+            gists_by_folder.setdefault(folder, set()).add(rel(root, p))
+        elif ptype == "schema":
+            schemas_by_folder.setdefault(folder, []).append(rel(root, p))
+
+    findings: list[dict] = []
+    all_folders = set(gists_by_folder) | set(schemas_by_folder)
+    for folder in sorted(all_folders):
+        expected_gists = gists_by_folder.get(folder, set())
+        schema_paths = schemas_by_folder.get(folder, [])
+        expected = 1 if expected_gists else 0
+        if len(schema_paths) != expected:
+            findings.append(
+                {
+                    "id": "schema_folder",
+                    "path": schema_paths[0] if schema_paths else (folder or "."),
+                    "msg": (
+                        f"folder {folder or '.'!r} has {len(expected_gists)} gist(s) and "
+                        f"{len(schema_paths)} type=schema page(s); expected exactly "
+                        f"{expected} (one gist still counts)."
+                    ),
+                }
+            )
+            continue
+        if not schema_paths:
+            continue
+        schema_path = schema_paths[0]
+        schema_meta = by_rel_path[schema_path][1]
+        related = schema_meta.get("relates_to")
+        listed_paths: list[str] = []
+        invalid = not isinstance(related, list)
+        if invalid:
+            related = []
+        for item in related:
+            resolved = _resolve_related_gist(item, root, by_rel_path)
+            if resolved is None:
+                invalid = True
+                continue
+            listed_paths.append(resolved)
+        if (
+            not expected_gists
+            or invalid
+            or len(listed_paths) != len(set(listed_paths))
+            or set(listed_paths) != expected_gists
+            or len(listed_paths) != len(expected_gists)
+        ):
+            findings.append(
+                {
+                    "id": "schema_folder",
+                    "path": schema_path,
+                    "msg": (
+                        "a type=schema page must list each gist in its own folder "
+                        "exactly once via relates_to kind=related, and no other "
+                        "targets (no duplicates, no omissions, no gists from "
+                        "another folder)."
+                    ),
+                }
+            )
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -608,17 +835,22 @@ def run(
     focus_path: Path | None = None
 
     schema, schema_err = load_schema(r)
+    contract_name = contract_filename(r) or "SCHEMA.json"
+    stamp_shape: str | None = None
     if schema_err:
-        critical.append({"id": "schema_present", "path": "SCHEMA.json", "msg": schema_err})
+        critical.append({"id": "schema_present", "path": contract_name, "msg": schema_err})
         schema = None
     else:
         assert schema is not None
+        stamp_shape, stamp_err = compute_stamp_shape(contract_name, schema)
+        if stamp_err:
+            critical.append({"id": "stamp_shape", "path": contract_name, "msg": stamp_err})
         tmpl = schema.get("templates")
         if tmpl is not None and not isinstance(tmpl, dict):
             critical.append(
                 {
                     "id": "schema_shape",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": "SCHEMA.templates must be an object",
                 }
             )
@@ -628,7 +860,7 @@ def run(
                 critical.append(
                     {
                         "id": "schema_shape",
-                        "path": "SCHEMA.json",
+                        "path": contract_name,
                         "msg": "SCHEMA.templates.by_type must be an object",
                     }
                 )
@@ -639,15 +871,15 @@ def run(
         schema = merged
         shape_msgs = validate_schema_shape(schema)
         for msg in shape_msgs:
-            critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
+            critical.append({"id": "schema_shape", "path": contract_name, "msg": msg})
         if shape_msgs:
             schema = None
         else:
             for msg in validate_against_contract(schema, load_contract()):
-                critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
+                critical.append({"id": "schema_contract", "path": contract_name, "msg": msg})
             if schema is not None and schema_version(schema) == "2.0":
                 for msg in validate_store_v2(schema):
-                    critical.append({"id": "schema_v2", "path": "SCHEMA.json", "msg": msg})
+                    critical.append({"id": "schema_v2", "path": contract_name, "msg": msg})
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
@@ -664,10 +896,15 @@ def run(
 
     # Memory rung (memory / gist / frame): absent means info; malformed shapes
     # raise a critical memory_rung issue but still treat the ladder as info.
-    memory_rung, memory_shape_issues = _memory_rung(schema)
+    memory_rung, memory_shape_issues = _memory_rung(schema, contract_name)
     critical.extend(memory_shape_issues)
     if schema is not None and schema_version(schema) != "2.0":
-        critical.extend(_memory_contract(schema))
+        critical.extend(_memory_contract(schema, contract_name, stamp_shape))
+    if not skip_pages and stamp_shape == "current":
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _schema_folder_findings(r, schema, staging_name):
+            if _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                critical.append(finding)
     allow_inline_ignores = True
     if isinstance(schema, dict):
         compile_cfg = schema.get("compile")
@@ -675,7 +912,9 @@ def run(
             allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
-        for finding in _memory_findings(r, schema, staging_name):
+        for finding in _memory_findings(
+            r, schema, staging_name, run_frame_rules=(stamp_shape != "current")
+        ):
             fpath = (r / finding["path"]).resolve()
             directory_scoped = fpath.is_dir()
             if allow_inline_ignores and not directory_scoped:
@@ -685,38 +924,8 @@ def run(
                     ign_text = ""
                 if finding["id"] in _ignores_in(ign_text):
                     continue
-            if focused and directory_scoped:
-                if not _in_focus(fpath, {}, None, focus_path):
-                    continue
-                if want_type:
-                    # Folder findings apply to types present in their direct concept pages.
-                    for page in iter_concept_md(fpath, staging_name):
-                        if page.parent.resolve() != fpath or page.name in RESERVED:
-                            continue
-                        try:
-                            meta, _ = read_page(page, sv)
-                        except FrontmatterError:
-                            continue
-                        if _in_focus(page, meta, want_type, None):
-                            break
-                    else:
-                        continue
-            elif focused:
-                try:
-                    meta, _ = read_page(fpath, sv)
-                except FrontmatterError:
-                    meta = None
-                if meta:
-                    if not _in_focus(fpath, meta, want_type, focus_path):
-                        continue
-                else:
-                    if want_type:
-                        continue
-                    if focus_path is not None:
-                        try:
-                            fpath.relative_to(focus_path)
-                        except ValueError:
-                            continue
+            if not _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                continue
             if memory_rung == "error":
                 finding["severity"] = "critical"
                 critical.append(finding)

@@ -10,7 +10,7 @@ path_id: schema
 
 Any of:
 
-- New Atlas root needs its first `SCHEMA.json`
+- New Atlas root needs its first contract file (`init` writes `CONTRACT.json` on new stores; shipped 0.13.0-beta stores keep `SCHEMA.json`)
 - A **project** needs a bespoke type or extra SCHEMA keys before a skill exists
 - A **skill** ships types (`protostar`, `kva`, …) into its own store or a host Atlas
 - An overlay must be upgraded or removed
@@ -33,13 +33,13 @@ root: <atlas store root>
 
 Then **read this file**. Missing card or unloaded module ⇒ incomplete Enter.
 
-Other paths may call `atlas compile` as a tool. They must not hand-edit `SCHEMA.json` or `schema.d/`.
+Other paths may call `atlas compile` as a tool. They must not hand-edit the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) or `schema.d/`.
 
 ## Choose the verb
 
 | Situation | Verb |
 |-----------|------|
-| Empty folder, no `SCHEMA.json` | `init` then, if this is a skill store, `schema install` |
+| Empty folder, no contract file | `init` then, if this is a skill store, `schema install` |
 | Project idea, not a skill yet | `schema new <id>` then `schema install` a local overlay file when types exist |
 | Skill contribution into a store | `schema install <source>` |
 | Overlay required-keys changed | `schema install … --force` |
@@ -52,7 +52,7 @@ Never skip compile after a write.
 
 ## Hard rules
 
-1. **CLI is the only writer** of `SCHEMA.json` and `schema.d/`. Do not open those files in an editor and save. If `python3 <atlas-skill>/scripts/atlas.py` is missing, **stop** (fail-closed).
+1. **CLI is the only writer** of the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) and `schema.d/`. Do not open those files in an editor and save. If `python3 <atlas-skill>/scripts/atlas.py` is missing, **stop** (fail-closed).
 2. **Init writes core only.** No skill namespaces (`kva`, …) in the born SCHEMA.
 3. **Overlays add types.** They must not set `atlas_id`, `compile`, `structure`, `schema_version`, or redeclare core `templates.by_type` entries (`work`, `document`, `experience`, …).
 4. **Author the overlay outside the store**, then install. Legal places to *compose* JSON: a skill `contributions/<id>/SCHEMA.overlay.json`, or a temp file you pass to `schema install`. Illegal: editing `schema.d/<id>.json` in place.
@@ -117,7 +117,7 @@ Deletes `schema.d/<id>.json` and paths on that overlay’s receipt (overlay + te
 python3 <atlas-skill>/scripts/atlas.py compile --root <root>
 ```
 
-Effective SCHEMA = core `SCHEMA.json` ∪ `schema.d/*.json`.
+Effective SCHEMA = the store's single core contract file (`SCHEMA.json` or `CONTRACT.json`) ∪ `schema.d/*.json`.
 
 | Issue id | Meaning | Exit |
 |----------|---------|------|
@@ -143,9 +143,9 @@ python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <roo
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <root>
 ```
 
-This is the **only** writer of `SCHEMA.memory`. It sets `rung` (plus the fixed
+This is the **only** writer of `memory.rung`; it edits whichever single contract file the store has (`SCHEMA.json` or `CONTRACT.json`). It sets `rung` (plus the fixed
 `layers` and `legacy_types` lists) and does not retype any page. Do not
-hand-edit `SCHEMA.json` to change the rung. Path `memory-migrate` must not call
+hand-edit the contract file to change the rung. Path `memory-migrate` must not call
 this command unless the operator explicitly asked to opt the rung from `info`
 toward `warn` or `error`; its `assess` and `inventory` modes never change the
 rung. Absent `memory.rung` means `info` — existing stores stay unaffected

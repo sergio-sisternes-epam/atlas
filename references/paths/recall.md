@@ -40,7 +40,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
 
 1. **Resolve root** — load path `mount` first with `atlas_id` (and `ref`) on the card. Set `--root` to what `atlas resolve <atlas_id>` prints. Never `--root` the skill tree. Omitting `--root` uses the current working directory; the CLI does not default to the mount.
 2. **Read the hot list first** — the folder `index.md` is the hot list (short-term memory); the root `index.md` is the folder map. Read it before anything else. Do not replace this with frames or gists. Unlisted pages stay searchable long-term memory; absence from an index is not absence from the store.
-3. **Abstraction walk (frame → gist → memory)** — if a matching frame exists, open it and then read a relevant gist; when there is truly no frame, recall may start at the gist. Stop at the gist when it answers the ask. Open its parent memory page only when the gist is thin, contested, or the ask needs the record itself — and record that reason on the exit receipt. Do not load every gist for one ask. A gist's parent is never a gist or frame. A frame lists exactly the gists in its own folder, never memory pages or other types. Do not paste the memory-migrate procedure into this path; that migration work lives in path `memory-migrate`.
+3. **Abstraction walk (frame → gist → memory)** — if a matching frame exists, open it and then read a relevant gist; when there is truly no frame, recall may start at the gist. Stop at the gist when it answers the ask. Open its parent memory page only when the gist is thin, contested, or the ask needs the record itself — and record that reason on the exit receipt. Do not load every gist for one ask. A gist's parent is never a gist or frame. A frame lists exactly the gists in its own folder, never memory pages or other types. Do not paste the memory-migrate procedure into this path; that migration work lives in path `memory-migrate`. This naming is the shipped `SCHEMA.json` shape (0.13.0-beta and 0.13.0-beta.2); on the 0.13.0-beta.3 write model (`CONTRACT.json`) the same walk is `schema → gist → memory` (`schema` is the renamed `frame`).
 4. **Form the query** from the intent. Free text plus only justified field tokens:
    - `type:<name>` — frontmatter type, not a body mention
    - `kva:<value>` — traffic (alive, forming, terminated, …)
@@ -73,15 +73,18 @@ root: …
 recall_cmd: atlas recall run "…" --root …
 hits_used: <paths>
 pages_read: <paths>
-stopped_at: frame | gist | memory | recall_hit | gap
+stopped_at: frame | schema | gist | memory | recall_hit | gap
 opened_page_reason: <present only when a page is opened>
 remember: no
 compile: n/a
 ```
 
 `stopped_at: recall_hit` means the answer came from an ordinary search hit without
-stopping on a frame, gist, or memory page. `stopped_at: gap` means an honest gap — nothing
-relevant was found.
+stopping on a frame, schema, gist, or memory page. `stopped_at: gap` means an honest
+gap — nothing relevant was found. `stopped_at: frame` is the shipped `SCHEMA.json`
+walk (0.13.0-beta and 0.13.0-beta.2); `stopped_at: schema` is the 0.13.0-beta.3
+`CONTRACT.json` walk (`schema` is the renamed `frame`). Record whichever the store's
+contract shape actually uses, never both.
 
 Claiming “checked the Atlas” without `recall_cmd` ⇒ incomplete Exit.
 

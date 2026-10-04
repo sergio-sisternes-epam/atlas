@@ -378,7 +378,7 @@ def main() -> int:
             "empty-remote-mounted-checkout-can-be-initialized",
             result.returncode == 0
             and payload.get("ok") is True
-            and (empty_target / "SCHEMA.json").is_file(),
+            and (empty_target / "CONTRACT.json").is_file(),
             parse_error
             or f"exit={result.returncode} payload={payload} stderr={result.stderr!r}",
         )

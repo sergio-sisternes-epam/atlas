@@ -5,6 +5,7 @@ import click
 from . import __version__
 from .commands import init as cmd_init
 from .commands import migrate as cmd_migrate
+from .commands import memory_migrate as cmd_memory_migrate
 from .commands import promote as cmd_promote
 from .commands import search as cmd_search
 from .commands import validate as cmd_validate
@@ -119,7 +120,11 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
 
 @main.command("init")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--force", is_flag=True, help="overwrite existing SCHEMA.json")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="overwrite existing CONTRACT.json (and remove a stale SCHEMA.json after the new file is written)",
+)
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option(
     "--schema-version",
@@ -129,7 +134,7 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
     help="SCHEMA envelope version (1.0 stays current behaviour; 2.0 adds disabled recall)",
 )
 def init_cmd(root: str | None, force: bool, as_json: bool, schema_version: str) -> None:
-    """Write a first SCHEMA.json and default templates."""
+    """Write a first CONTRACT.json and default templates."""
     raise SystemExit(cmd_init.run(root, force, as_json, schema_version))
 
 
@@ -210,6 +215,30 @@ def migrate_cmd(
 ) -> None:
     """Copy external/old content into staging/ only (no compile)."""
     raise SystemExit(cmd_migrate.run(root, source, into, as_json))
+
+
+@main.command("memory-migrate")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option(
+    "--operation",
+    required=True,
+    type=click.Choice(["assess", "inventory", "apply"]),
+    help="assess/inventory write nothing; apply rewrites a pre-beta contract file",
+)
+@click.option(
+    "--batch",
+    default=None,
+    help="explicit batch token for apply (only 'contract-file' is implemented)",
+)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def memory_migrate_cmd(
+    root: str | None,
+    operation: str,
+    batch: str | None,
+    as_json: bool,
+) -> None:
+    """Pre-beta -> 0.13.0-beta.3 contract-file migration (path memory-migrate)."""
+    raise SystemExit(cmd_memory_migrate.run(root, operation, batch, as_json))
 
 
 @main.command("promote")

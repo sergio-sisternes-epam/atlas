@@ -8,7 +8,7 @@ from typing import Any
 
 from ..core.jsonutil import StrictJsonError, loads_strict
 from ..core.overlay import merge_overlays
-from ..core.paths import SCHEMA_NAME, store_root
+from ..core.paths import store_root
 from ..core.recall import run_recall
 from ..core.recall_config import (
     DRIVER_CAPABILITIES,
@@ -23,7 +23,7 @@ from ..core.recall_config import (
     validate_store_v2,
 )
 from ..core.recall_index import IndexError_, load_current, publish_generation
-from ..core.schema import load_schema
+from ..core.schema import find_contract_path, load_schema
 from ..core.drivers import tgrep as tgrep_driver
 
 
@@ -53,13 +53,15 @@ def _effective(root: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def _write_recall(root: Path, recall: dict[str, Any]) -> None:
-    path = root / SCHEMA_NAME
+    path, err = find_contract_path(root)
+    if err or path is None:
+        raise RecallConfigError(err or "missing contract file")
     try:
         data = loads_strict(path.read_text(encoding="utf-8"))
     except (OSError, StrictJsonError) as e:
         raise RecallConfigError(str(e)) from e
     if not isinstance(data, dict):
-        raise RecallConfigError("SCHEMA.json must be an object")
+        raise RecallConfigError(f"{path.name} must be an object")
     if schema_version(data) != "2.0":
         raise RecallConfigError("SCHEMA 2.0 required")
     data["recall"] = recall

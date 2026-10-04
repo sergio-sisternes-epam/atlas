@@ -5,14 +5,16 @@ import shutil
 from pathlib import Path
 
 from ..core.recall_config import default_recall_block
-from ..core.schema import SCHEMA_NAME, skill_root
+from ..core.schema import BETA3_LAYERS, BETA3_RELEASE, skill_root
+from ..core.paths import CONTRACT_NAME, has_contract_file
 from ..core.paths import store_root
 
 
-DEFAULT_SCHEMA = {
+DEFAULT_CONTRACT = {
     "schema_version": "1.0",
     "atlas_id": "new-atlas",
     "title": "New Atlas",
+    "atlas_release": BETA3_RELEASE,
     "structure": {
         "free_layout": True,
         "staging_dir": "staging",
@@ -53,11 +55,12 @@ DEFAULT_SCHEMA = {
             "work",
             "protostar",
             "gist",
-            "frame",
+            "schema",
             "memory",
         ],
         "unconstrained": [],
     },
+    "memory": {"layers": list(BETA3_LAYERS)},
     "query": {"default_mode": "local", "search_engine": "grep", "fallback": "rg", "staging_visible": False},
 }
 
@@ -72,7 +75,7 @@ FM_ONLY = {
     "recipe": ["type", "title", "created"],
     "memory": ["type", "title", "created"],
     "gist": ["type", "title", "created"],
-    "frame": ["type", "title", "created"],
+    "schema": ["type", "title", "created"],
 }
 
 
@@ -95,9 +98,24 @@ def run(
 ) -> int:
     r = store_root(root)
     r.mkdir(parents=True, exist_ok=True)
-    schema_path = r / SCHEMA_NAME
-    if schema_path.is_file() and not force:
-        msg = f"{SCHEMA_NAME} already exists; pass --force to overwrite"
+    contract_path = r / CONTRACT_NAME
+    schema_path = r / "SCHEMA.json"
+    # is_file() follows symlinks and is False for a broken link, which would
+    # otherwise let write_text()/unlink() follow or replace the link (even
+    # outside the root), or leave a broken SCHEMA.json symlink invisible to
+    # has_contract_file() below. Use is_symlink() (non-following) so a broken
+    # link is caught too, and do this before any write — --force must not
+    # bypass this.
+    for path, name in ((schema_path, "SCHEMA.json"), (contract_path, CONTRACT_NAME)):
+        if path.is_symlink():
+            msg = f"{name} is a symlink; refusing to write through it"
+            if as_json:
+                print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
+            else:
+                print(f"atlas init — {msg}")
+            return 2
+    if has_contract_file(r) and not force:
+        msg = f"{CONTRACT_NAME} already exists; pass --force to overwrite"
         if as_json:
             print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
         else:
@@ -112,13 +130,18 @@ def run(
         else:
             print(f"atlas init — {msg}")
         return 2
-    schema = json.loads(json.dumps(DEFAULT_SCHEMA))
+    schema = json.loads(json.dumps(DEFAULT_CONTRACT))
     schema["schema_version"] = version
     schema["atlas_id"] = r.name or "new-atlas"
     schema["templates"]["by_type"] = {name: _by_type_block(name) for name in FM_ONLY}
     if version == "2.0":
         schema["recall"] = default_recall_block()
-    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    # Write the replacement CONTRACT.json before removing a stale SCHEMA.json
+    # so a failed write keeps the old file (or at worst leaves both present,
+    # fail-closed under schema_present) rather than ever leaving neither.
+    contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    if force and schema_path.is_file():
+        schema_path.unlink()
 
     tmpl_src = skill_root() / "references" / "templates"
     tmpl_dst = r / "templates"
@@ -139,10 +162,10 @@ def run(
     if not log.is_file() or force:
         log.write_text("# Log\n\n- init\n", encoding="utf-8")
 
-    payload = {"ok": True, "root": str(r), "schema": SCHEMA_NAME, "templates": copied}
+    payload = {"ok": True, "root": str(r), "schema": CONTRACT_NAME, "templates": copied}
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
         print(f"atlas init — root={r}")
-        print(f"wrote {SCHEMA_NAME} and {len(copied)} templates")
+        print(f"wrote {CONTRACT_NAME} and {len(copied)} templates")
     return 0

@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount. Load a path module (mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.2
+version: 0.13.0-beta.3
 activation_card: on
 ---
 
@@ -157,9 +157,9 @@ modules; they are not CLI verbs.
 9. **Wrong-frame correction** - if the user explicitly kills a comparison or thesis, resolve and load the installed companion skill **discuss**, then use its `terminate` path (recipe `references/recipes/terminate-wrong-path.md`). If `discuss` is unavailable, stop and tell the user that this path requires the companion skill; do not infer its procedure or keep writing the dead frame.
 10. **Thoughtful current-theory remember** - writing `lesson`, live `decision`, or `recipe` requires this skill's remember card and a designed inventory (path, type, one-line claim, source URIs) produced by the agent before write. Human request and approval are **not** default gates. If the human asks for review on an important persist, stop after the inventory and wait. Recipe: `references/recipes/gated-memory-building.md`. Decision (atlas-atlas store, not this package): `decisions/atlas-memory-layers.md`.
 11. **Write-home is the active git repo** - load path `mount` first. Mount-if-missing with no `--target`. Query and persist use `--root` on that mount. No git repository: refuse to persist. Never mount or write at `<skill>/references/atlas`.
-12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit `SCHEMA.json` or `schema.d/`.
+12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) or `schema.d/`.
 12a. **Recall policy = path `configure` + CLI** - load `references/paths/configure.md`. Installing a contribution is not activation.
-13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on a `SCHEMA.json` mount; `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
+13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on an Atlas mount (`SCHEMA.json` or `CONTRACT.json`); `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
 14. **Help explains; it does not execute** - paths `help` and `getting-started` are discussion modules. Reading help for mount/init/remember/recall must not run those operations. No-target help lists the installed registry without clarification. Unknown targets are explicit unknowns plus valid choices. Unqualified “help” outside Atlas context must not hijack unrelated tasks. CLI option lists come from installed non-mutating `--help`, not memory.
 
 ## CLI surface
@@ -191,6 +191,7 @@ python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch <token>]
 ```
 
 Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
@@ -199,9 +200,9 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 
 | Topic | Rule |
 |-------|------|
-| Structure | Free layout; mandatory `SCHEMA.json`; short-lived `staging/`; `index.md` / `log.md` per OKF |
-| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `memory`, `gist`, `frame` (recommended, not closed) |
-| Memory layers | `memory.layers` is exactly `frame`, `gist`, `memory`. A folder with one or more gists has exactly one same-folder frame listing those gists once each; zero gists means no frame. |
+| Structure | Free layout; mandatory single root contract file (`CONTRACT.json` on new stores, `SCHEMA.json` on shipped 0.13.0-beta and 0.13.0-beta.2 stores — never both); short-lived `staging/`; `index.md` / `log.md` per OKF |
+| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
+| Memory layers | A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind}]` - kinds: follows, records, supersedes, implements, derived_from, related |
 | Composition | Optional mesh; consolidated in compile |

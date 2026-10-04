@@ -8,7 +8,8 @@ path_id: ci
 
 ## When
 
-Use this path when a repository containing an Atlas `SCHEMA.json` needs a CI
+Use this path when a repository containing an Atlas contract file
+(`SCHEMA.json` or `CONTRACT.json`) needs a CI
 merge gate, when an existing setup must be assessed, or when an Atlas compile
 workflow is partial or incorrect.
 
@@ -36,7 +37,7 @@ subject: <mount repository>
 path: ci
 path_module: references/paths/ci.md
 intent: assess | install | repair
-root: <SCHEMA.json parent>
+root: <contract file parent>
 ```
 
 Read this file before acting. Missing card or unloaded module means incomplete
@@ -50,8 +51,8 @@ Adapters on any CI platform conform to these clauses.
 
 | ID | Clause |
 |----|--------|
-| M1 | The subject is a git repository containing `SCHEMA.json`. Dedicated stores use the git root; embedded stores declare the schema parent. |
-| M2 | Root discovery fails closed. Missing or ambiguous `SCHEMA.json` is not success. Tool-acquisition trees are excluded. |
+| M1 | The subject is a git repository containing exactly one of `SCHEMA.json` / `CONTRACT.json`. Dedicated stores use the git root; embedded stores declare the schema parent. |
+| M2 | Root discovery fails closed. Missing, ambiguous, or both `SCHEMA.json` and `CONTRACT.json` present is not success. Tool-acquisition trees are excluded. |
 | M3 | The merge gate runs unfocused `atlas compile --root <root> --json`, without `--path` or `--type`. |
 | M4 | Compile exit `0` passes. Exit `1` passes with warnings retained as evidence. Exit `2` fails. Any other abnormal failure fails. |
 | M5 | The Atlas CLI comes from an immutable tag or commit SHA, never `main` or `master`. |
@@ -74,7 +75,7 @@ Adapters on any CI platform conform to these clauses.
 | ID | Forbidden |
 |----|-----------|
 | X1 | Focused `--path` or `--type` compile as the merge gate. |
-| X2 | Success when the intended `SCHEMA.json` is missing. |
+| X2 | Success when the intended contract file is missing, or when both `SCHEMA.json` and `CONTRACT.json` are present. |
 | X3 | Substitute Atlas skill unit tests or package publishing for mount compile. |
 | X4 | Swallow compile exit `2`, including `continue-on-error` on the compile step. |
 | X5 | Use a floating CLI branch. |
@@ -86,7 +87,7 @@ Adapters on any CI platform conform to these clauses.
 
 | Grade | Meaning |
 |-------|---------|
-| `missing` | No job invokes Atlas compile on a `SCHEMA.json` root. |
+| `missing` | No job invokes Atlas compile on a contract-file root. |
 | `partial` | Compile runs, but a MUST is weak, such as missing evidence, one missing trigger, or floating third-party Action tags. |
 | `incorrect` | A MUST NOT is present, the wrong repository/root is targeted, or critical exit is swallowed. |
 | `correct` | Every MUST holds and no MUST NOT is present. |
@@ -97,7 +98,7 @@ Mark every item pass, fail, or not applicable.
 
 ### A. Identity
 
-- [ ] A1. Repository or declared subpath contains `SCHEMA.json`.
+- [ ] A1. Repository or declared subpath contains exactly one of `SCHEMA.json` / `CONTRACT.json`.
 - [ ] A2. Target is the mount store, not Atlas skill tests.
 - [ ] A3. Dedicated store uses root `.`; embedded store uses the schema parent.
 - [ ] A4. Activation-card or adapter root matches A3.
@@ -142,7 +143,7 @@ Any hit makes the setup `incorrect`.
 - [ ] F2. No remap of exit `2` or abnormal failure to success.
 - [ ] F3. No PR-diff path as the only compile scope.
 - [ ] F4. No Atlas-skill pytest job masquerading as mount compile.
-- [ ] F5. No success path when `SCHEMA.json` is missing.
+- [ ] F5. No success path when the contract file is missing or when both `SCHEMA.json` and `CONTRACT.json` are present.
 - [ ] F6. CLI is not acquired inside the compiled root.
 
 ## GitHub Actions default
@@ -159,7 +160,7 @@ Atlas skill and has `workflow_call` only. It is not Atlas-skill product CI.
 Both implementations:
 
 - acquire the pinned CLI under `${RUNNER_TEMP}`, not `${GITHUB_WORKSPACE}`;
-- require `<root>/SCHEMA.json`;
+- require exactly one of `<root>/SCHEMA.json` or `<root>/CONTRACT.json`;
 - run unfocused compile;
 - validate and print the JSON;
 - translate compile exit `1` to job success only after valid JSON exists;
@@ -173,10 +174,14 @@ read-only contents access. A public source can use `github.token`.
 ## Procedure
 
 1. **Resolve mount and root.**
-   - Use the supplied `root` when it contains `SCHEMA.json`.
-   - Otherwise use `.` when `<git-root>/SCHEMA.json` exists.
-   - Otherwise inspect the mount tree only. Exactly one `SCHEMA.json` selects
-     its parent. Zero or multiple candidates fail closed.
+   - Use the supplied `root` when it contains exactly one of `SCHEMA.json` /
+     `CONTRACT.json`.
+   - Otherwise use `.` when `<git-root>/SCHEMA.json` or
+     `<git-root>/CONTRACT.json` exists.
+   - Otherwise inspect the mount tree only. Exactly one contract file
+     (`SCHEMA.json` or `CONTRACT.json`) selects its parent. Zero or
+     multiple candidates, including a folder with both filenames, fail
+     closed.
    - Stop if the candidate is the Atlas skill package rather than a mount.
 2. **Detect adapter.** A GitHub remote or `.github/` selects GitHub Actions.
    Unknown platforms are assess-only unless the user names an adapter.
@@ -200,7 +205,7 @@ skill: atlas
 skill_path: <atlas skill root>
 subject: <mount repository>
 path: ci
-root: <SCHEMA.json parent>
+root: <contract file parent>
 intent: assess | install | repair
 adapter: github-actions | github-actions-reusable | unknown | <id>
 grade: missing | partial | incorrect | correct
