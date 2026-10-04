@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Memory layers (page/gist/frame) regressions. Run: python3 scripts/test_memory_layers.py"""
+"""Memory layers (memory/gist/frame) regressions. Run: python3 scripts/test_memory_layers.py"""
 
 from __future__ import annotations
 
@@ -199,12 +199,28 @@ def main() -> int:
             str(schema2.get("types", {}).get("recommended")),
         )
         check(
+            "fresh store recommends memory and not page",
+            "memory" in schema2.get("types", {}).get("recommended", [])
+            and "page" not in schema2.get("types", {}).get("recommended", []),
+            str(schema2.get("types", {}).get("recommended")),
+        )
+        check(
             "fresh store templates.by_type still has document",
             "document" in schema2.get("templates", {}).get("by_type", {}),
         )
         check(
             "fresh store copied templates/document.md",
             (store2 / "templates" / "document.md").is_file(),
+        )
+        check(
+            "fresh store copies memory.md without a page.md type template",
+            (store2 / "templates" / "memory.md").is_file()
+            and not (store2 / "templates" / "page.md").exists(),
+        )
+        check(
+            "fresh store templates.by_type has memory and not page",
+            "memory" in schema2.get("templates", {}).get("by_type", {})
+            and "page" not in schema2.get("templates", {}).get("by_type", {}),
         )
 
         # --- Fixture 3: gist parent cardinality ---
@@ -340,7 +356,7 @@ def main() -> int:
         )
         write_page(
             store4 / "concepts" / "page_member.md",
-            "page",
+            "memory",
             "A plain page",
             "2026-10-01",
         )
@@ -359,12 +375,12 @@ def main() -> int:
         check("frame fixture exits 0 at default info rung", code == 0, f"exit={code}")
         info_paths4 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
         check(
-            "thin frame (one gist) flagged frame_members (info, not a failure)",
+            "frame that omits a folder gist is flagged frame_members",
             ("frame_members", "concepts/thin_frame.md") in info_paths4,
             str(info_paths4),
         )
         check(
-            "good frame (two gists) not flagged frame_members",
+            "the frame listing both folder gists has no member finding",
             ("frame_members", "concepts/good_frame.md") not in info_paths4,
         )
         check(
@@ -373,8 +389,13 @@ def main() -> int:
             str(info_paths4),
         )
         check(
-            "mixed gist+page frame flagged frame_members",
+            "frame listing a memory episode as a member is flagged frame_members",
             ("frame_members", "concepts/mixed_frame.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "folder with multiple frames has a folder-level frame_members finding",
+            ("frame_members", "concepts") in info_paths4,
             str(info_paths4),
         )
         check(
@@ -388,6 +409,158 @@ def main() -> int:
         check(
             "no frames/ directory required",
             not (store4 / "frames").exists(),
+        )
+
+        # --- Fixture 4a: one gist still requires one matching frame ---
+        store4a = tmp / "store4a"
+        run(["init", "--root", str(store4a), "--json"])
+        write_index(store4a / "concepts", "Concepts")
+        write_page(
+            store4a / "concepts" / "parent.md",
+            "memory",
+            "Single gist parent",
+            "2026-10-01",
+        )
+        write_page(
+            store4a / "concepts" / "only-gist.md",
+            "gist",
+            "Only gist",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store4a / "concepts" / "frame.md",
+            "frame",
+            "Single gist frame",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/only-gist.md", "kind": "related"}],
+        )
+        code, payload = run_json(["compile", "--root", str(store4a), "--json"])
+        check("single-gist frame fixture exits 0 at info rung", code == 0)
+        check(
+            "one gist grouped by its only frame is valid",
+            not any(
+                i.get("id") == "frame_members"
+                for i in payload.get("info", [])
+                + payload.get("warnings", [])
+                + payload.get("critical", [])
+            ),
+            str(payload),
+        )
+
+        # --- Fixture 4b: gists without a frame are a memory-rung finding ---
+        store4b = tmp / "store4b"
+        run(["init", "--root", str(store4b), "--json"])
+        write_index(store4b / "concepts", "Concepts")
+        write_page(
+            store4b / "concepts" / "parent.md",
+            "memory",
+            "Parent without a frame",
+            "2026-10-01",
+        )
+        write_page(
+            store4b / "concepts" / "only-gist.md",
+            "gist",
+            "Unframed gist",
+            "2026-10-01",
+            relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+        )
+        code, payload = run_json(["compile", "--root", str(store4b), "--json"])
+        check("unframed gist fixture exits 0 at info rung", code == 0)
+        check(
+            "folder containing a gist with no frame has frame_members info",
+            any(
+                i.get("id") == "frame_members"
+                and i.get("path") == "concepts"
+                and i.get("severity") == "info"
+                for i in payload.get("info", [])
+            ),
+            str(payload.get("info")),
+        )
+        rung4b_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "warn", "--root", str(store4b), "--json"]
+        )
+        check("store4b memory-rung warn ok", rung4b_code == 0)
+        code, payload = run_json(["compile", "--root", str(store4b), "--json"])
+        check(
+            "missing-frame finding is a warning with exit 1 at warn rung",
+            code == 1
+            and any(i.get("id") == "frame_members" for i in payload.get("warnings", [])),
+            str(payload),
+        )
+        rung4b_code, _ = run_json(
+            ["schema", "memory-rung", "--set", "error", "--root", str(store4b), "--json"]
+        )
+        check("store4b memory-rung error ok", rung4b_code == 0)
+        code, payload = run_json(["compile", "--root", str(store4b), "--json"])
+        check(
+            "missing-frame finding is critical with exit 2 at error rung",
+            code == 2
+            and any(i.get("id") == "frame_members" for i in payload.get("critical", [])),
+            str(payload),
+        )
+
+        # --- Fixture 4c: exactly one frame groups both folder gists ---
+        store4c = tmp / "store4c"
+        run(["init", "--root", str(store4c), "--json"])
+        write_index(store4c / "concepts", "Concepts")
+        write_page(
+            store4c / "concepts" / "parent.md",
+            "memory",
+            "Two gist parent",
+            "2026-10-01",
+        )
+        for gist_name in ("g1.md", "g2.md"):
+            write_page(
+                store4c / "concepts" / gist_name,
+                "gist",
+                gist_name,
+                "2026-10-01",
+                relates_to=[{"path": "concepts/parent.md", "kind": "derived_from"}],
+            )
+        write_page(
+            store4c / "concepts" / "frame.md",
+            "frame",
+            "Both gists",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related"},
+                {"path": "concepts/g2.md", "kind": "related"},
+            ],
+        )
+        code, payload = run_json(["compile", "--root", str(store4c), "--json"])
+        check("two-gist single-frame fixture exits 0", code == 0)
+        check(
+            "one frame listing both folder gists has no frame finding",
+            not any(
+                i.get("id") == "frame_members"
+                for i in payload.get("info", [])
+                + payload.get("warnings", [])
+                + payload.get("critical", [])
+            ),
+            str(payload),
+        )
+
+        # --- Fixture 4d: a frame in a folder with zero gists is invalid ---
+        store4d = tmp / "store4d"
+        run(["init", "--root", str(store4d), "--json"])
+        write_index(store4d / "empty", "Empty")
+        write_page(
+            store4d / "empty" / "frame.md",
+            "frame",
+            "Orphan frame",
+            "2026-10-01",
+        )
+        code, payload = run_json(["compile", "--root", str(store4d), "--json"])
+        check("zero-gist folder with frame exits 0 at info rung", code == 0)
+        check(
+            "frame in a folder with no gists is a frame_members finding",
+            any(
+                i.get("id") == "frame_members"
+                and i.get("path") == "empty/frame.md"
+                for i in payload.get("info", [])
+            ),
+            str(payload.get("info")),
         )
 
         # --- Fixture 5: protostar with no gist produces no missing_gist ---
@@ -416,6 +589,11 @@ def main() -> int:
         check(
             "protostar without a gist has no missing_gist finding",
             ("missing_gist", "proto.md") not in all_ids_paths,
+            str(all_ids_paths),
+        )
+        check(
+            "folder with no gist and no frame has no frame_members finding",
+            "frame_members" not in {finding_id for finding_id, _ in all_ids_paths},
             str(all_ids_paths),
         )
 
@@ -454,12 +632,13 @@ def main() -> int:
             ],
         )
         write_page(
-            store6 / "concepts" / "outside_gist.md",
+            store6 / "concepts" / "unresolved" / "outside_gist.md",
             "gist",
             "Gist with unresolved parent",
             "2026-10-01",
-            relates_to=[{"path": "../outside/nope.md", "kind": "derived_from"}],
+            relates_to=[{"path": "../../outside/nope.md", "kind": "derived_from"}],
         )
+        write_index(store6 / "concepts" / "unresolved", "Unresolved")
         code, payload = run_json(["compile", "--root", str(store6), "--json"])
         info_paths6 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
         check(
@@ -480,7 +659,7 @@ def main() -> int:
         )
         check(
             "gist whose parent target resolves outside the store still flagged gist_parent",
-            ("gist_parent", "concepts/outside_gist.md") in info_paths6,
+            ("gist_parent", "concepts/unresolved/outside_gist.md") in info_paths6,
             str(info_paths6),
         )
 
@@ -551,7 +730,7 @@ def main() -> int:
         write_index(store8 / "out_of_scope", "Out of scope")
         write_page(
             store8 / "in_scope" / "note.md",
-            "page",
+            "memory",
             "In scope page",
             "2026-10-03",
         )
@@ -561,6 +740,13 @@ def main() -> int:
             "In scope gist",
             "2026-10-03",
             relates_to=[{"path": "in_scope/note.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store8 / "in_scope" / "note-frame.md",
+            "frame",
+            "In scope frame",
+            "2026-10-03",
+            relates_to=[{"path": "in_scope/note-gist.md", "kind": "related"}],
         )
         write_index(store8 / "in_scope", "In scope")
         rung8_code, _ = run_json(
@@ -611,7 +797,7 @@ def main() -> int:
         )
 
         code, payload = run_json(
-            ["compile", "--root", str(store8), "--type", "page", "--json"]
+            ["compile", "--root", str(store8), "--type", "memory", "--json"]
         )
         all_findings = (
             list(payload.get("warnings") or [])
@@ -619,7 +805,7 @@ def main() -> int:
             + list(payload.get("critical") or [])
         )
         check(
-            "focused --type page compile exits 0 and omits document memory findings",
+            "focused --type memory compile exits 0 and omits document memory findings",
             code == 0
             and not any(i.get("id") == "legacy_document" for i in all_findings),
             f"exit={code} findings={all_findings}",
@@ -919,7 +1105,7 @@ def main() -> int:
         check("init store14", init14.returncode == 0, init14.stderr)
         write_page(
             store14 / "notes" / "page.md",
-            "page",
+            "memory",
             "Clean page",
             "2026-10-03",
         )
@@ -929,6 +1115,13 @@ def main() -> int:
             "Clean page gist",
             "2026-10-03",
             relates_to=[{"path": "notes/page.md", "kind": "derived_from"}],
+        )
+        write_page(
+            store14 / "notes" / "frame.md",
+            "frame",
+            "Clean frame",
+            "2026-10-03",
+            relates_to=[{"path": "notes/page-gist.md", "kind": "related"}],
         )
         write_index(store14 / "notes", "Notes")
         text_result14 = run(["compile", "--root", str(store14)])
@@ -953,8 +1146,8 @@ def main() -> int:
         schema_doc = json.loads(schema_doc_path.read_text(encoding="utf-8"))
         memory_props = schema_doc["properties"]["memory"]["properties"]
         check(
-            "store-v2 schema: memory.layers is exact-array const frame/gist/page",
-            memory_props["layers"].get("const") == ["frame", "gist", "page"],
+            "store-v2 schema: memory.layers is exact-array const frame/gist/memory",
+            memory_props["layers"].get("const") == ["frame", "gist", "memory"],
             str(memory_props["layers"]),
         )
         check(
@@ -1015,7 +1208,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["layers"] = ["frame", "gist", "memory"]
         schema15["memory"]["legacy_types"] = ["not-a-type"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
@@ -1040,7 +1233,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["page"]
+        schema15["memory"]["layers"] = ["memory"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
         check("store15 partial layers: exit 2", code == 2, f"exit={code}")
@@ -1053,7 +1246,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["frame", "gist", "page", "frame"]
+        schema15["memory"]["layers"] = ["frame", "gist", "memory", "frame"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
         check("store15 duplicate layers: exit 2", code == 2, f"exit={code}")
@@ -1066,7 +1259,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["layers"] = ["frame", "gist", "memory"]
         schema15["memory"]["legacy_types"] = []
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
@@ -1080,7 +1273,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["layers"] = ["frame", "gist", "memory"]
         schema15["memory"]["legacy_types"] = ["document", "document"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
@@ -1094,7 +1287,7 @@ def main() -> int:
             f"critical={payload.get('critical')}",
         )
 
-        schema15["memory"]["layers"] = ["frame", "gist", "page"]
+        schema15["memory"]["layers"] = ["frame", "gist", "memory"]
         schema15["memory"]["legacy_types"] = ["document"]
         schema15_path.write_text(json.dumps(schema15, indent=2) + "\n", encoding="utf-8")
         code, payload = run_json(["compile", "--root", str(store15), "--json"])
@@ -1114,7 +1307,7 @@ def main() -> int:
         schema16 = json.loads(schema16_path.read_text(encoding="utf-8"))
         write_page(
             store16 / "notes" / "alone.md",
-            "page",
+            "memory",
             "Alone",
             "2026-10-03",
         )
@@ -1202,7 +1395,7 @@ def main() -> int:
         )
         write_page(
             store17 / "notes" / "alone.md",
-            "page",
+            "memory",
             "Alone",
             "2026-10-03",
         )
@@ -1234,7 +1427,7 @@ def main() -> int:
         )
 
         # Exact layers + legacy_types: valid, no memory_contract critical.
-        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["document"]})
+        write_schema17({"layers": ["frame", "gist", "memory"], "legacy_types": ["document"]})
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check(
             "store17 exact layers/legacy_types: no memory_contract critical",
@@ -1256,7 +1449,7 @@ def main() -> int:
         )
 
         # Wrong legacy_types.
-        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["not-a-type"]})
+        write_schema17({"layers": ["frame", "gist", "memory"], "legacy_types": ["not-a-type"]})
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check("store17 wrong legacy_types: exit 2", code == 2, f"exit={code}")
         check(
@@ -1282,7 +1475,7 @@ def main() -> int:
         )
 
         # Partial layers.
-        write_schema17({"layers": ["page"], "legacy_types": ["document"]})
+        write_schema17({"layers": ["memory"], "legacy_types": ["document"]})
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check("store17 partial layers: exit 2", code == 2, f"exit={code}")
         check(
@@ -1296,7 +1489,7 @@ def main() -> int:
 
         # Duplicate layers.
         write_schema17(
-            {"layers": ["frame", "gist", "page", "frame"], "legacy_types": ["document"]}
+            {"layers": ["frame", "gist", "memory", "frame"], "legacy_types": ["document"]}
         )
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check("store17 duplicate layers: exit 2", code == 2, f"exit={code}")
@@ -1310,7 +1503,7 @@ def main() -> int:
         )
 
         # Empty legacy_types.
-        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": []})
+        write_schema17({"layers": ["frame", "gist", "memory"], "legacy_types": []})
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check("store17 empty legacy_types: exit 2", code == 2, f"exit={code}")
         check(
@@ -1324,7 +1517,7 @@ def main() -> int:
 
         # Duplicate legacy_types.
         write_schema17(
-            {"layers": ["frame", "gist", "page"], "legacy_types": ["document", "document"]}
+            {"layers": ["frame", "gist", "memory"], "legacy_types": ["document", "document"]}
         )
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check("store17 duplicate legacy_types: exit 2", code == 2, f"exit={code}")
@@ -1340,7 +1533,7 @@ def main() -> int:
         # Extra key while layers/legacy_types are the exact legal lists.
         write_schema17(
             {
-                "layers": ["frame", "gist", "page"],
+                "layers": ["frame", "gist", "memory"],
                 "legacy_types": ["document"],
                 "note": "unexpected",
             }
@@ -1370,7 +1563,7 @@ def main() -> int:
         )
 
         # Restore exact layers/legacy_types: no memory_contract critical.
-        write_schema17({"layers": ["frame", "gist", "page"], "legacy_types": ["document"]})
+        write_schema17({"layers": ["frame", "gist", "memory"], "legacy_types": ["document"]})
         code, payload = run_json(["compile", "--root", str(store17), "--json"])
         check(
             "store17 restored exact layers/legacy_types: no memory_contract critical",
@@ -1407,10 +1600,10 @@ def main() -> int:
         )
         recall_text = (ROOT / "references/paths/recall.md").read_text(encoding="utf-8")
         check(
-            "recall.md mentions index.md, frame, gist, page, and atlas recall run",
+            "recall.md mentions index.md, frame, gist, memory, and atlas recall run",
             all(
                 term in recall_text
-                for term in ("index.md", "frame", "gist", "page", "atlas recall run")
+                for term in ("index.md", "frame", "gist", "memory", "atlas recall run")
             ),
         )
         check(
@@ -1421,7 +1614,7 @@ def main() -> int:
         )
         check(
             "recall.md still tells the reader to stop when the gist answers",
-            "Stop there when the gist answers the ask" in recall_text,
+            "Stop at the gist when it answers the ask" in recall_text,
         )
         check(
             "SKILL.md has no checkpoint/constellation path row",

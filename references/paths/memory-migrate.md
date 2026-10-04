@@ -10,7 +10,7 @@ description: Use this path when a store still treats documents as the core recor
 
 A store still treats `document` as the core record, or `atlas compile` is
 mostly reporting `legacy_document` and `missing_gist` noise, and the operator
-wants to move that store toward the memory layers (`page`, `gist`, `frame`).
+wants to move that store toward the memory layers (`frame`, `gist`, `memory`).
 
 Not for relocating a store (use path **migrate**). Not for installing the
 recall index (use path **configure**). Not for hand-editing `SCHEMA.json`.
@@ -84,7 +84,7 @@ not edit `SCHEMA.json`.
 ### inventory
 
 Same facts as assess, plus a short judgement of which named batch of pages
-could reasonably move toward `page`/`gist`/`frame` next. Write nothing. Do
+could reasonably move toward `memory`/`gist`/`frame` next. Write nothing. Do
 not create frames automatically — mining the whole store for repeated
 patterns across gists is out of scope for this path.
 

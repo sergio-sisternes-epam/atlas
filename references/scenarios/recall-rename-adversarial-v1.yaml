@@ -21,7 +21,7 @@ smokes:
     expect: "SCHEMA object key query remains the engine config. The rename does not migrate or rename that key."
   - id: recall-cmd-required
     source: "C-walk; references/paths/query.md step 5 at c073bc3; decision 2026-10-04-recall-renames-query-path-and-search"
-    expect: "Path recall still walks frame then gist then page and usually stops at the gist. The exit is incomplete without recall_cmd even when the gist answered. stopped_at uses recall_hit, not search_hit."
+    expect: "Path recall still walks frame then gist then memory and usually stops at the gist. It may start at gist only when there is truly no frame. The exit is incomplete without recall_cmd even when the gist answered. stopped_at uses memory for the episode stop and recall_hit, not search_hit."
   - id: memory-layers-not-retuned
     source: "memory-layers plan P2 P6 P8 P10; FSE 2025 warning suppressions as cited there"
     expect: "Gists and frames stay beside pages. document stays legacy. assess and inventory stay read-only. Absent memory.rung stays info with compile exit 0 aside from other faults. CI merge gates are not retuned."

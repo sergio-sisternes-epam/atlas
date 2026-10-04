@@ -80,7 +80,7 @@
           "const": [
             "frame",
             "gist",
-            "page"
+            "memory"
           ]
         },
         "legacy_types": {

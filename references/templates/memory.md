@@ -1,7 +1,7 @@
 ---
 # Required: type, title, created
 # Recommended: description, origin, sensitivity
-type: page
+type: memory
 title: 
 created: 
 description: 

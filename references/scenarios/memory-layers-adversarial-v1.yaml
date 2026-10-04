@@ -5,16 +5,22 @@ adversarial: true
 smokes:
   - id: stop-at-gist
     source: "P2; Brainerd and Reyna 2002 fuzzy-trace"
-    expect: "When the gist answers the ask, the procedure does not require opening the parent page."
+    expect: "When the gist answers the ask, the procedure does not require opening the parent memory page."
   - id: open-page-when-gist-thin
     source: "PMC4815269; NAACL 2025 findings-naacl.293 summarization hallucination"
-    expect: "When the gist is thin, contested, or the ask needs the record, the procedure opens the parent page."
+    expect: "When the gist is thin, contested, or the ask needs the record, the procedure opens the parent memory page."
   - id: stm-not-collapsed
     source: "approved plan 2026-09-18-index-md-semantic-memory; MemGPT arXiv:2310.08560"
     expect: "Folder index.md remains the hot list. Unlisted pages remain searchable. Frame and gist links are not a replacement index."
   - id: no-summary-tree
     source: "RAPTOR arXiv:2401.18059"
-    expect: "A gist parent is a page, never a gist. A frame lists gists, never a stack of summaries."
+    expect: "A gist parent is memory, never a gist or frame. Every folder with one or more gists has exactly one frame listing those gists, even when there is only one; folders with no gists have no frame."
+  - id: memory-type-id
+    source: "Sergio correction 2026-10-04"
+    expect: "The memory episode type id is memory. Page is not a type id, alias, recommended type, layer, or gist-parent type."
+  - id: frame-exact-folder-members
+    source: "Sergio correction 2026-10-04"
+    expect: "A frame is in the same folder as its gists and relates to exactly those gist paths once each. A folder with multiple gists has one frame listing all of them; a lone gist still has one frame; a zero-gist folder has no frame."
   - id: default-rung-info-not-failure
     source: "P8; P10; FSE 2025 warning suppressions"
     expect: "With no memory.rung, legacy document and missing gist are info and compile exit is 0 aside from other faults."
@@ -32,7 +38,7 @@ smokes:
     expect: "No Atlas path or type named checkpoint or constellation is added. Discuss still owns constellation."
   - id: same-atlas-no-sidecar
     source: "P4"
-    expect: "Gists and frames are ordinary pages in the store folders. No required gists or frames directory."
+    expect: "Gists and frames are ordinary markdown files in their store folders. No required gists or frames directory."
   - id: document-reported-not-rewritten
     source: "P6; P9"
     expect: "type document is reported on the rung and is not auto-retyped."

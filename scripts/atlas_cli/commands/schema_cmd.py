@@ -319,7 +319,7 @@ def run_memory_rung(
         return 2
     schema["memory"] = {
         "rung": value,
-        "layers": ["frame", "gist", "page"],
+        "layers": ["frame", "gist", "memory"],
         "legacy_types": ["document"],
     }
     schema_path = r / SCHEMA_NAME
