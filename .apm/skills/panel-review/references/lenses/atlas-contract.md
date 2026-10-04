@@ -14,7 +14,7 @@ Always-on. Knowledge-store integrity for this package.
   `kind: implements`. YAML scenario/eval fixtures are not OKF pages and do not
   use this page relationship contract.
 - Protostars include `kind: derived_from` to origin. No `residuals/` buckets.
-- Path protocol vs CLI tool stay distinct (`path: query` vs `atlas search`; compile gate vs search inventory).
+- Path protocol vs CLI tool stay distinct (`path: recall` vs `atlas recall run`; compile gate vs search inventory).
 - Skills with `activation_card: on` keep Enter card + path-module load.
 - Frontmatter required keys for the page type still hold.
 

@@ -13,7 +13,8 @@ PATHS = (
     "mount",
     "init",
     "migrate",
-    "query",
+    "memory-migrate",
+    "recall",
     "remember",
     "work",
     "landscape",
@@ -56,7 +57,7 @@ class ActivationCardContractTests(unittest.TestCase):
                 self.assertEqual(1, len(blocks))
 
     def test_operational_cards_have_canonical_fields(self) -> None:
-        for path in ("query", "remember", "work", "landscape", "schema", "configure", "ci", "history", "version-hint", "prune"):
+        for path in ("recall", "remember", "work", "landscape", "schema", "configure", "ci", "memory-migrate", "history", "version-hint", "prune"):
             with self.subTest(path=path):
                 section = enter_section(path)
                 for field in (

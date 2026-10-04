@@ -44,4 +44,4 @@ root: <atlas store root>
 ## Non-goals
 
 - Full session narrative (that is an **experience** via **remember**).
-- Search (use **query**).
+- Search (use **recall**).

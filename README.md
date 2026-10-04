@@ -88,11 +88,12 @@ how to get started. Starting is asking Atlas how to do it.
 | Getting started | First-use purpose, prerequisites, shortest useful journey, and storage choices. |
 | Help | Explain installed modules without running them. |
 | Init | Scaffold a new Atlas in the active git repository. |
-| Query | Find and answer from an Atlas store. |
+| Recall | Find and answer from an Atlas store. |
 | Remember | Persist experiences, decisions, lessons, and recipes. A basic Semantic Knowledge Organisation (SMO). |
 | Work | Open, update, or close work hubs. |
 | Landscape | Research competitors and symbionts into comparison memory. |
 | Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss` skill for best results. |
+| Memory migrate | Assess or migrate a document-era store toward page, gist, and frame. Assess and inventory write nothing. |
 | Configure | Inspect and select Semantic Memory Recall. |
 | History | Read one store path at a git rev. A `ref` edge is not a tip hop. |
 | Version hint | Point a living page at a prior git rev without copying the old body. |

@@ -100,10 +100,14 @@ def validate_entry(entry: dict, source: str) -> list[str]:
     return errs
 
 
-def consolidate(root: Path) -> dict[str, Any]:
+def consolidate(root: Path, write: bool = True) -> dict[str, Any]:
     """
     Merge all partial fragments; return result structure:
       ok, critical[], warnings[], mesh (dict|None), written (path|None)
+
+    When ``write`` is False (dry-run), the merge/validation still runs and
+    the same ``mesh`` structure is returned, but ``mesh.json`` is never
+    written to disk and ``written`` is always ``None``.
     """
     critical: list[dict] = []
     warnings: list[dict] = []
@@ -204,15 +208,18 @@ def consolidate(root: Path) -> dict[str, Any]:
         ],
     }
 
-    out = root / "mesh.json"
-    out.write_text(json.dumps(mesh, indent=2) + "\n", encoding="utf-8")
+    written: str | None = None
+    if write:
+        out = root / "mesh.json"
+        out.write_text(json.dumps(mesh, indent=2) + "\n", encoding="utf-8")
+        written = "mesh.json"
 
     return {
         "ok": True,
         "critical": [],
         "warnings": warnings,
         "mesh": mesh,
-        "written": "mesh.json",
+        "written": written,
         "fragment_count": len(fragments),
         "atlas_count": len(atlases),
     }
