@@ -13,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 
+sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.core.recall_config import default_recall_block  # noqa: E402
+
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -32,6 +35,140 @@ def run_json(args: list[str]) -> tuple[int, dict]:
             f"invalid JSON for {args}: {error}; stdout={result.stdout!r} stderr={result.stderr!r}"
         ) from error
     return result.returncode, payload
+
+
+# --- SCHEMA.json (0.13.0-beta.2) fixture writer -----------------------------
+#
+# `atlas init` always writes CONTRACT.json (0.13.0-beta.3) now, so the
+# SCHEMA.json (memory.layers frame/gist/memory) fixtures this suite exercises
+# are written directly, mirroring the actual `atlas init` default shape
+# byte-for-byte (no atlas_release stamp, no memory key) so the
+# frame/gist/memory and frame_members checks below keep exercising real
+# shipped 0.13.0-beta.2 behaviour rather than the new beta.3 contract shape.
+_LEGACY_FM_ONLY = {
+    "experience": ["type", "title", "created", "work_id"],
+    "decision": ["type", "title", "created"],
+    "work": ["type", "title", "created", "work_id"],
+    "document": ["type", "title", "created"],
+    "protostar": ["type", "title", "created"],
+    "lesson": ["type", "title", "created"],
+    "recipe": ["type", "title", "created"],
+    "memory": ["type", "title", "created"],
+    "gist": ["type", "title", "created"],
+    "frame": ["type", "title", "created"],
+}
+
+
+def _legacy_by_type_block(tname: str) -> dict:
+    return {
+        "file": f"templates/{tname}.md",
+        "frontmatter": {
+            "required": _LEGACY_FM_ONLY.get(tname, ["type", "title", "created"]),
+            "recommended": [],
+        },
+        "sections": {"required": [], "recommended": []},
+    }
+
+
+def _legacy_default_schema() -> dict:
+    return {
+        "schema_version": "1.0",
+        "atlas_id": "new-atlas",
+        "title": "New Atlas",
+        "structure": {
+            "free_layout": True,
+            "staging_dir": "staging",
+            "require_index_in_folders": True,
+            "reserved_names": ["index.md", "log.md", "staging", "schema.d"],
+        },
+        "compile": {
+            "hard_fail": True,
+            "allow_inline_ignores": True,
+            "min_body_chars": 40,
+            "core_checks": [
+                "okf_compliance",
+                "frontmatter",
+                "internal_links",
+                "not_just_links",
+                "schema_present",
+                "no_answerable_in_staging",
+                "index_md_present",
+                "index_md_listing",
+            ],
+            "simplicity_budget": {
+                "max_required_frontmatter_keys_per_type": 8,
+                "max_required_sections_per_type": 6,
+            },
+            "page_contract": {
+                "when_work_id": {"require_kind": "implements"},
+                "when_type": {"protostar": {"require_kind": "derived_from"}},
+                "forming_requires_type": "protostar",
+            },
+        },
+        "templates": {"directory": "templates/", "by_type": {}},
+        "types": {
+            "recommended": [
+                "experience",
+                "decision",
+                "lesson",
+                "recipe",
+                "work",
+                "protostar",
+                "gist",
+                "frame",
+                "memory",
+            ],
+            "unconstrained": [],
+        },
+        "query": {
+            "default_mode": "local",
+            "search_engine": "grep",
+            "fallback": "rg",
+            "staging_visible": False,
+        },
+    }
+
+
+def _default_recall_block() -> dict:
+    return default_recall_block()
+
+
+def init_legacy(root: Path, schema_version: str = "1.0") -> subprocess.CompletedProcess[str]:
+    """Write a shipped-beta SCHEMA.json store directly (no CLI `init` call).
+
+    Returns a CompletedProcess-shaped result (returncode/stderr) so existing
+    `check("init storeN", initN.returncode == 0, initN.stderr)` call sites do
+    not need to change shape, only the call itself.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    schema = _legacy_default_schema()
+    version = (schema_version or "1.0").strip() or "1.0"
+    schema["schema_version"] = version
+    schema["atlas_id"] = root.name or "new-atlas"
+    schema["templates"]["by_type"] = {
+        name: _legacy_by_type_block(name) for name in _LEGACY_FM_ONLY
+    }
+    if version == "2.0":
+        schema["recall"] = _default_recall_block()
+    (root / "SCHEMA.json").write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+
+    tmpl_src = ROOT / "references" / "templates"
+    tmpl_dst = root / "templates"
+    tmpl_dst.mkdir(exist_ok=True)
+    if tmpl_src.is_dir():
+        for src in sorted(tmpl_src.glob("*.md")):
+            shutil.copy2(src, tmpl_dst / src.name)
+
+    index = root / "index.md"
+    if not index.is_file():
+        index.write_text(
+            f"# {schema['atlas_id']}\n\nInitialised by atlas init.\n", encoding="utf-8"
+        )
+    log = root / "log.md"
+    if not log.is_file():
+        log.write_text("# Log\n\n- init\n", encoding="utf-8")
+
+    return subprocess.CompletedProcess(args=["init-legacy"], returncode=0, stdout="", stderr="")
 
 
 PROSE = (
@@ -92,7 +229,7 @@ def main() -> int:
     try:
         # --- Fixture 1: default rung, a legacy document with no gist ---
         store1 = tmp / "store1"
-        init = run(["init", "--root", str(store1), "--json"])
+        init = init_legacy(store1)
         check("init store1", init.returncode == 0, init.stderr)
 
         write_page(
@@ -182,7 +319,7 @@ def main() -> int:
 
         # --- Fixture 2: fresh init confirms absent rung behaves as info ---
         store2 = tmp / "store2"
-        init2 = run(["init", "--root", str(store2), "--json"])
+        init2 = init_legacy(store2)
         check("init store2", init2.returncode == 0, init2.stderr)
         write_page(store2 / "legacy2.md", "document", "Legacy 2", "2026-10-01")
         code, payload = run_json(["compile", "--root", str(store2), "--json"])
@@ -225,7 +362,7 @@ def main() -> int:
 
         # --- Fixture 3: gist parent cardinality ---
         store3 = tmp / "store3"
-        run(["init", "--root", str(store3), "--json"])
+        init_legacy(store3)
         write_index(store3 / "concepts", "Concepts")
         write_page(
             store3 / "concepts" / "parent.md",
@@ -305,7 +442,7 @@ def main() -> int:
 
         # --- Fixture 4: frame members ---
         store4 = tmp / "store4"
-        run(["init", "--root", str(store4), "--json"])
+        init_legacy(store4)
         write_index(store4 / "concepts", "Concepts")
         write_page(
             store4 / "concepts" / "parent.md",
@@ -413,7 +550,7 @@ def main() -> int:
 
         # --- Fixture 4a: one gist still requires one matching frame ---
         store4a = tmp / "store4a"
-        run(["init", "--root", str(store4a), "--json"])
+        init_legacy(store4a)
         write_index(store4a / "concepts", "Concepts")
         write_page(
             store4a / "concepts" / "parent.md",
@@ -502,7 +639,7 @@ def main() -> int:
 
         # --- Fixture 4b: gists without a frame are a memory-rung finding ---
         store4b = tmp / "store4b"
-        run(["init", "--root", str(store4b), "--json"])
+        init_legacy(store4b)
         write_index(store4b / "concepts", "Concepts")
         write_page(
             store4b / "concepts" / "parent.md",
@@ -597,7 +734,7 @@ def main() -> int:
 
         # --- Fixture 4c: exactly one frame groups both folder gists ---
         store4c = tmp / "store4c"
-        run(["init", "--root", str(store4c), "--json"])
+        init_legacy(store4c)
         write_index(store4c / "concepts", "Concepts")
         write_page(
             store4c / "concepts" / "parent.md",
@@ -638,7 +775,7 @@ def main() -> int:
 
         # --- Fixture 4d: a frame in a folder with zero gists is invalid ---
         store4d = tmp / "store4d"
-        run(["init", "--root", str(store4d), "--json"])
+        init_legacy(store4d)
         write_index(store4d / "empty", "Empty")
         write_page(
             store4d / "empty" / "frame.md",
@@ -660,7 +797,7 @@ def main() -> int:
 
         # --- Fixture 5: protostar with no gist produces no missing_gist ---
         store5 = tmp / "store5"
-        run(["init", "--root", str(store5), "--json"])
+        init_legacy(store5)
         write_page(
             store5 / "origin.md",
             "decision",
@@ -694,7 +831,7 @@ def main() -> int:
 
         # --- Fixture 6: relates_to targets normalized to canonical page keys ---
         store6 = tmp / "store6"
-        run(["init", "--root", str(store6), "--json"])
+        init_legacy(store6)
         write_index(store6 / "concepts", "Concepts")
         write_page(
             store6 / "concepts" / "parent.md",
@@ -760,7 +897,7 @@ def main() -> int:
 
         # --- Fixture 7: schema memory-rung then schema upgrade must not block on memory ---
         store7 = tmp / "store7"
-        init7 = run(["init", "--root", str(store7), "--json"])
+        init7 = init_legacy(store7)
         check("init store7", init7.returncode == 0, init7.stderr)
         schema7_before = json.loads((store7 / "SCHEMA.json").read_text(encoding="utf-8"))
         check(
@@ -814,7 +951,7 @@ def main() -> int:
 
         # --- Fixture 8: focused compile must not emit out-of-scope memory findings ---
         store8 = tmp / "store8"
-        init8 = run(["init", "--root", str(store8), "--json"])
+        init8 = init_legacy(store8)
         check("init store8", init8.returncode == 0, init8.stderr)
         write_page(
             store8 / "out_of_scope" / "legacy.md",
@@ -908,7 +1045,7 @@ def main() -> int:
 
         # --- Fixture 9: malformed relates_to (scalar) must not crash compile ---
         store9 = tmp / "store9"
-        init9 = run(["init", "--root", str(store9), "--schema-version", "2.0", "--json"])
+        init9 = init_legacy(store9, schema_version="2.0")
         check("init store9", init9.returncode == 0, init9.stderr)
         (store9 / "notes").mkdir(parents=True, exist_ok=True)
         (store9 / "notes" / "bad-gist.md").write_text(
@@ -948,7 +1085,7 @@ def main() -> int:
 
         # --- Fixture 10: --dry-run compile writes nothing (mesh.json, recall) ---
         store10 = tmp / "store10"
-        init10 = run(["init", "--root", str(store10), "--schema-version", "2.0", "--json"])
+        init10 = init_legacy(store10, schema_version="2.0")
         check("init store10", init10.returncode == 0, init10.stderr)
 
         (store10 / "mesh.fragment.json").write_text(
@@ -1040,7 +1177,7 @@ def main() -> int:
 
         # --- Fixture 11: inline atlas-ignore comments suppress memory findings ---
         store11 = tmp / "store11"
-        init11 = run(["init", "--root", str(store11), "--json"])
+        init11 = init_legacy(store11)
         check("init store11", init11.returncode == 0, init11.stderr)
         write_page(
             store11 / "notes" / "ignored_doc.md",
@@ -1114,7 +1251,7 @@ def main() -> int:
 
         # --- Fixture 12: inline ignores are page-scoped, not global ---
         store12 = tmp / "store12"
-        init12 = run(["init", "--root", str(store12), "--json"])
+        init12 = init_legacy(store12)
         check("init store12", init12.returncode == 0, init12.stderr)
         write_page(
             store12 / "notes" / "doc_commented.md",
@@ -1164,7 +1301,7 @@ def main() -> int:
 
         # --- Fixture 13: info-only terminal summary line ---
         store13 = tmp / "store13"
-        init13 = run(["init", "--root", str(store13), "--json"])
+        init13 = init_legacy(store13)
         check("init store13", init13.returncode == 0, init13.stderr)
         write_page(
             store13 / "notes" / "legacy.md",
@@ -1196,7 +1333,7 @@ def main() -> int:
         )
 
         store14 = tmp / "store14"
-        init14 = run(["init", "--root", str(store14), "--json"])
+        init14 = init_legacy(store14)
         check("init store14", init14.returncode == 0, init14.stderr)
         write_page(
             store14 / "notes" / "page.md",
@@ -1240,6 +1377,10 @@ def main() -> int:
         schema_doc_path = ROOT / "scripts/atlas_cli/schemas/store-v2.schema.json"
         schema_doc = json.loads(schema_doc_path.read_text(encoding="utf-8"))
         memory_props = schema_doc["properties"]["memory"]["properties"]
+        layers_const_options = [
+            o.get("const")
+            for o in (memory_props["layers"].get("oneOf") or [memory_props["layers"]])
+        ]
         check(
             "store-v2 schema: memory.layers is exact-array const frame/gist/memory",
             memory_props["layers"].get("const") == ["frame", "gist", "memory"],
@@ -1252,7 +1393,7 @@ def main() -> int:
         )
 
         store15 = tmp / "store15"
-        init15 = run(["init", "--root", str(store15), "--json"])
+        init15 = init_legacy(store15)
         check("init store15", init15.returncode == 0, init15.stderr)
         rung15_code, _ = run_json(
             ["schema", "memory-rung", "--set", "info", "--root", str(store15), "--json"]
@@ -1396,7 +1537,7 @@ def main() -> int:
         # SCHEMA 1.0 stores skip the v2 JSON Schema check, so 0/false/[]/{} must
         # not collapse via `or ""` into an absent rung that lets compile exit 0.
         store16 = tmp / "store16"
-        init16 = run(["init", "--root", str(store16), "--json"])
+        init16 = init_legacy(store16)
         check("init store16", init16.returncode == 0, init16.stderr)
         schema16_path = store16 / "SCHEMA.json"
         schema16 = json.loads(schema16_path.read_text(encoding="utf-8"))
@@ -1479,7 +1620,7 @@ def main() -> int:
         # SCHEMA 1.0 stores are not upgraded to v2 so they skip validate_store_v2,
         # but the fixed memory.layers/legacy_types contract must still hold.
         store17 = tmp / "store17"
-        init17 = run(["init", "--root", str(store17), "--json"])
+        init17 = init_legacy(store17)
         check("init store17", init17.returncode == 0, init17.stderr)
         schema17_path = store17 / "SCHEMA.json"
         schema17 = json.loads(schema17_path.read_text(encoding="utf-8"))

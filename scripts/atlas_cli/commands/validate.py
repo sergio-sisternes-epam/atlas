@@ -14,6 +14,8 @@ from ..core.recall_config import recall_enabled, schema_version, validate_store_
 from ..core.recall_index import IndexError_, publish_generation
 from ..core.schema import (
     by_type_map,
+    compute_stamp_shape,
+    contract_filename,
     load_contract,
     load_schema,
     min_body_chars,
@@ -22,6 +24,9 @@ from ..core.schema import (
     staging_dir_name,
     validate_against_contract,
     validate_schema_shape,
+    BETA3_LAYERS,
+    IN_BETA_LAYERS,
+    SHIPPED_BETA_LAYERS,
 )
 
 # Inline ignore: <!-- atlas-ignore: rule_id -->
@@ -30,7 +35,8 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
-# Memory layers (frame / gist / memory) are pinned here, not read from the store.
+# Memory layers (frame / gist / memory, shipped 0.13.0-beta and 0.13.0-beta.2;
+# schema / gist / memory, beta.3) are pinned here, not read from the store.
 GIST_PARENT_TYPES = frozenset(
     {"experience", "decision", "lesson", "recipe", "document", "memory", "protostar"}
 )
@@ -278,7 +284,7 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
     return issues
 
 
-def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
+def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tuple[str, list[dict]]:
     """Resolve the memory rung (info|warn|error) plus any shape-critical issues.
 
     No memory key, a memory object with no/empty rung, or any shape problem
@@ -298,7 +304,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": "SCHEMA.memory must be an object; treating memory rung as info",
             }
         ]
@@ -309,7 +315,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": (
                     "SCHEMA.memory.rung must be a string (info, warn, or error); "
                     f"got {type(raw).__name__} {raw!r}; treating memory rung as info"
@@ -323,7 +329,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
         return "info", [
             {
                 "id": "memory_rung",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": (
                     f"SCHEMA.memory.rung must be info, warn, or error (got {rung!r}); "
                     "treating memory rung as info"
@@ -334,16 +340,24 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
 
 
 _MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
-_MEMORY_LAYERS_FIXED = ["frame", "gist", "memory"]
+_MEMORY_LAYERS_FIXED = IN_BETA_LAYERS
 _MEMORY_LEGACY_TYPES_FIXED = ["document"]
 
 
-def _memory_contract(schema: dict | None) -> list[dict]:
-    """Enforce the fixed memory.layers / memory.legacy_types contract on SCHEMA 1.0.
+def _memory_contract(schema: dict | None, contract_name: str = "SCHEMA.json", shape: str | None = None) -> list[dict]:
+    """Enforce the memory.layers / memory.legacy_types contract for a given shape.
 
     SCHEMA 2.0 stores already enforce this (and more) via validate_store_v2
     against the store-v2 JSON Schema, so this check only runs for stores that
     are not 2.0 (the default 1.0 contract, or any other non-2.0 value).
+
+    in_beta stores may have differing types/layers by design (pin 3), so
+    layers enforcement is skipped there. Every other shape (shipped_beta,
+    current, and a stamp_shape mismatch that still carries a memory.layers
+    key) keeps the pre-existing strict layers check for its contract
+    filename, so a malformed SCHEMA.json/CONTRACT.json still raises
+    memory_contract in addition to (not instead of) the separate
+    stamp_shape finding.
     """
     if not schema:
         return []
@@ -356,20 +370,23 @@ def _memory_contract(schema: dict | None) -> list[dict]:
         findings.append(
             {
                 "id": "memory_contract",
-                "path": "SCHEMA.json",
+                "path": contract_name,
                 "msg": f"SCHEMA.memory has an unexpected key: {key!r}",
             }
         )
-    if "layers" in memory:
+    expected_layers = None if shape == "in_beta" else (
+        BETA3_LAYERS if contract_name == "CONTRACT.json" else SHIPPED_BETA_LAYERS
+    )
+    if expected_layers is not None and "layers" in memory:
         layers = memory["layers"]
-        if layers != _MEMORY_LAYERS_FIXED:
+        if layers != expected_layers:
             findings.append(
                 {
                     "id": "memory_contract",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": (
                         "SCHEMA.memory.layers must be exactly "
-                        f"{_MEMORY_LAYERS_FIXED!r} (got {layers!r})"
+                        f"{expected_layers!r} (got {layers!r})"
                     ),
                 }
             )
@@ -379,7 +396,7 @@ def _memory_contract(schema: dict | None) -> list[dict]:
             findings.append(
                 {
                     "id": "memory_contract",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": (
                         "SCHEMA.memory.legacy_types must be exactly "
                         f"{_MEMORY_LEGACY_TYPES_FIXED!r} (got {legacy_types!r})"
@@ -590,6 +607,58 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
     return findings
 
 
+def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """On the beta.3 (current) shape only, schema is the renamed frame.
+
+    A folder with >=1 gist has exactly one type=schema page; a folder with
+    zero gists has none (one gist still counts). Unlike frame_members (an
+    info-by-default ladder finding on shipped-beta stores), this is a hard
+    compile failure: pin 4 says a second schema in a gist-bearing folder
+    "fails", not merely "is flagged".
+    """
+    pages: list[tuple[Path, dict]] = []
+    for path in iter_concept_md(root, staging_name):
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, _ = read_page(path, schema_version(schema) if schema else "1.0")
+        except FrontmatterError:
+            continue
+        if not meta:
+            continue
+        pages.append((path, meta))
+
+    gists_by_folder: dict[str, int] = {}
+    schemas_by_folder: dict[str, list[str]] = {}
+    for p, m in pages:
+        folder = str(p.parent.resolve().relative_to(root.resolve())).replace("\\", "/")
+        ptype = str(m.get("type") or "").strip()
+        if ptype == "gist":
+            gists_by_folder[folder] = gists_by_folder.get(folder, 0) + 1
+        elif ptype == "schema":
+            schemas_by_folder.setdefault(folder, []).append(rel(root, p))
+
+    findings: list[dict] = []
+    all_folders = set(gists_by_folder) | set(schemas_by_folder)
+    for folder in sorted(all_folders):
+        gist_count = gists_by_folder.get(folder, 0)
+        schema_paths = schemas_by_folder.get(folder, [])
+        expected = 1 if gist_count >= 1 else 0
+        if len(schema_paths) != expected:
+            findings.append(
+                {
+                    "id": "schema_folder",
+                    "path": schema_paths[0] if schema_paths else (folder or "."),
+                    "msg": (
+                        f"folder {folder or '.'!r} has {gist_count} gist(s) and "
+                        f"{len(schema_paths)} type=schema page(s); expected exactly "
+                        f"{expected} (one gist still counts)."
+                    ),
+                }
+            )
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -608,17 +677,22 @@ def run(
     focus_path: Path | None = None
 
     schema, schema_err = load_schema(r)
+    contract_name = contract_filename(r) or "SCHEMA.json"
+    stamp_shape: str | None = None
     if schema_err:
-        critical.append({"id": "schema_present", "path": "SCHEMA.json", "msg": schema_err})
+        critical.append({"id": "schema_present", "path": contract_name, "msg": schema_err})
         schema = None
     else:
         assert schema is not None
+        stamp_shape, stamp_err = compute_stamp_shape(contract_name, schema)
+        if stamp_err:
+            critical.append({"id": "stamp_shape", "path": contract_name, "msg": stamp_err})
         tmpl = schema.get("templates")
         if tmpl is not None and not isinstance(tmpl, dict):
             critical.append(
                 {
                     "id": "schema_shape",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": "SCHEMA.templates must be an object",
                 }
             )
@@ -628,7 +702,7 @@ def run(
                 critical.append(
                     {
                         "id": "schema_shape",
-                        "path": "SCHEMA.json",
+                        "path": contract_name,
                         "msg": "SCHEMA.templates.by_type must be an object",
                     }
                 )
@@ -639,15 +713,15 @@ def run(
         schema = merged
         shape_msgs = validate_schema_shape(schema)
         for msg in shape_msgs:
-            critical.append({"id": "schema_shape", "path": "SCHEMA.json", "msg": msg})
+            critical.append({"id": "schema_shape", "path": contract_name, "msg": msg})
         if shape_msgs:
             schema = None
         else:
             for msg in validate_against_contract(schema, load_contract()):
-                critical.append({"id": "schema_contract", "path": "SCHEMA.json", "msg": msg})
+                critical.append({"id": "schema_contract", "path": contract_name, "msg": msg})
             if schema is not None and schema_version(schema) == "2.0":
                 for msg in validate_store_v2(schema):
-                    critical.append({"id": "schema_v2", "path": "SCHEMA.json", "msg": msg})
+                    critical.append({"id": "schema_v2", "path": contract_name, "msg": msg})
 
     staging_name = staging_dir_name(schema)
     min_body = min_body_chars(schema)
@@ -664,10 +738,12 @@ def run(
 
     # Memory rung (memory / gist / frame): absent means info; malformed shapes
     # raise a critical memory_rung issue but still treat the ladder as info.
-    memory_rung, memory_shape_issues = _memory_rung(schema)
+    memory_rung, memory_shape_issues = _memory_rung(schema, contract_name)
     critical.extend(memory_shape_issues)
     if schema is not None and schema_version(schema) != "2.0":
-        critical.extend(_memory_contract(schema))
+        critical.extend(_memory_contract(schema, contract_name, stamp_shape))
+    if not skip_pages and stamp_shape == "current":
+        critical.extend(_schema_folder_findings(r, schema, staging_name))
     allow_inline_ignores = True
     if isinstance(schema, dict):
         compile_cfg = schema.get("compile")

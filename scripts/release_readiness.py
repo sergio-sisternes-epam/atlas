@@ -21,7 +21,9 @@ class VersionSurface:
     pattern: str
 
 
-SURFACES = (
+# Package surfaces: the in-development package version. These must all agree
+# with each other (manifest is the source of truth for "expected").
+PACKAGE_SURFACES = (
     VersionSurface("manifest", "apm.yml", rf"^version:\s*({SEMVER})\s*$"),
     VersionSurface("skill", "SKILL.md", rf"^version:\s*({SEMVER})\s*$"),
     VersionSurface(
@@ -29,6 +31,13 @@ SURFACES = (
         "scripts/atlas_cli/__init__.py",
         rf'^__version__\s*=\s*"({SEMVER})"\s*$',
     ),
+)
+
+# CI ref surfaces: pinned to the last *tagged* (published) release, not to
+# the in-development package version. During a beta line (e.g. package at
+# 0.13.0-beta.3 while only v0.13.0-beta has been tagged) these intentionally
+# lag behind PACKAGE_SURFACES. They must still agree with *each other*.
+CI_SURFACES = (
     VersionSurface(
         "reusable workflow default",
         ".github/workflows/atlas-compile.yml",
@@ -51,6 +60,8 @@ SURFACES = (
     ),
 )
 
+SURFACES = PACKAGE_SURFACES + CI_SURFACES
+
 
 def read_surface(surface: VersionSurface, root: Path = ROOT) -> str:
     content = (root / surface.path).read_text(encoding="utf-8")
@@ -63,14 +74,14 @@ def read_surface(surface: VersionSurface, root: Path = ROOT) -> str:
 
 
 def manifest_version(root: Path = ROOT) -> str:
-    return read_surface(SURFACES[0], root)
+    return read_surface(PACKAGE_SURFACES[0], root)
 
 
 def validate_versions(root: Path = ROOT) -> tuple[str, list[str]]:
     expected = manifest_version(root)
     errors: list[str] = []
 
-    for surface in SURFACES[1:]:
+    for surface in PACKAGE_SURFACES[1:]:
         try:
             actual = read_surface(surface, root)
         except (OSError, ValueError) as error:
@@ -79,6 +90,24 @@ def validate_versions(root: Path = ROOT) -> tuple[str, list[str]]:
         if actual != expected:
             errors.append(
                 f"{surface.path}: {surface.label} version {actual} != {expected}"
+            )
+
+    # CI ref surfaces are pinned to the last tagged release, not the
+    # in-development package version (e.g. v0.13.0-beta can stay the CI ref
+    # while the package advances to 0.13.0-beta.3). They only need to agree
+    # with each other.
+    ci_expected: str | None = None
+    for surface in CI_SURFACES:
+        try:
+            actual = read_surface(surface, root)
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+            continue
+        if ci_expected is None:
+            ci_expected = actual
+        elif actual != ci_expected:
+            errors.append(
+                f"{surface.path}: {surface.label} version {actual} != {ci_expected} (CI ref)"
             )
 
     return expected, errors

@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.13.0-beta.3 - 2026-10-04
+
+### Added
+
+- `CONTRACT.json` is the 0.13.0-beta.3 WRITE model root contract (type/key
+  contract, not a JSON Schema document). New `atlas init` writes
+  `CONTRACT.json` and does not write `SCHEMA.json`; it sets `atlas_release`
+  to `0.13.0-beta.3` and `memory.layers` to `["schema", "gist", "memory"]`,
+  with recommended types `schema`, `gist`, and `memory` (episode type id is
+  `memory`, not `page`).
+- Readers accept exactly one contract filename: both `SCHEMA.json` and
+  `CONTRACT.json` present, or neither present, fail compile closed (finding
+  id `schema_present`). Shipped 0.13.0-beta stays readable byte-for-byte:
+  `SCHEMA.json`, layers `frame`/`gist`/`page`, episode type id `page`,
+  frame still requires at least two distinct gists.
+- Stamp/shape agreement (finding id `stamp_shape`): `SCHEMA.json` with
+  layers `frame`/`gist`/`page` (`atlas_release` absent or `0.13.0-beta`) is
+  shipped-beta; `SCHEMA.json` with `atlas_release` `0.13.0-beta.2` is
+  in-beta even if types differ; `CONTRACT.json` with `atlas_release`
+  `0.13.0-beta.3` and layers `schema`/`gist`/`memory` is the beta.3 shape.
+  Any other combination fails compile closed. Existing fixtures with
+  `SCHEMA.json`/`frame`/`gist`/`page` and no stamp keep compiling under the
+  old frame rules unchanged.
+- On the beta.3 shape only, `schema` is the renamed `frame` (finding id
+  `schema_folder`): one gist still counts — a folder with one or more
+  gists has exactly one `type: schema` page, a folder with zero gists has
+  none, and a second `schema` in a gist-bearing folder fails. This rule
+  does not apply to shipped-beta `SCHEMA.json` stores, which keep
+  `frame_members` (two or more gists) unchanged.
+- CLI `atlas memory-migrate --operation assess|inventory|apply [--batch
+  <token>]`: the pre-beta -> beta.3 contract-file migration path (path id
+  `memory-migrate`). `assess`/`inventory` write nothing and report
+  `lineage` (`pre-beta`, `in-beta`, or `current`). `apply` refuses an
+  unscoped/unattested request (no `--batch`, or `"migrate everything"`)
+  and writes nothing; refuses an in-beta store (finding id
+  `in_beta_not_legacy`) and leaves its bytes unchanged; is a no-op on a
+  current store; and, on a pre-beta store with `--batch contract-file`,
+  renames `SCHEMA.json` to `CONTRACT.json` and stamps `atlas_release` /
+  `memory.layers` to the beta.3 shape without rewriting other pages.
+
 ## Unreleased
 
 ### Added

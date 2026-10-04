@@ -19,9 +19,16 @@ from ..core.overlay import (
     write_json,
     write_receipt,
 )
-from ..core.paths import SCHEMA_NAME, rel, store_root
+from ..core.paths import CONTRACT_NAME, rel, store_root
 from ..core.recall_config import RecallConfigError, schema_version, validate_contribution
-from ..core.schema import load_schema, staging_dir_name
+from ..core.schema import (
+    BETA3_LAYERS,
+    IN_BETA_LAYERS,
+    SHIPPED_BETA_LAYERS,
+    find_contract_path,
+    load_schema,
+    staging_dir_name,
+)
 from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
 
 
@@ -315,22 +322,40 @@ def run_memory_rung(
         return 2
     schema, err = load_schema(r)
     if err or schema is None:
-        _print(as_json, {"ok": False, "error": err or "missing SCHEMA.json", "root": str(r)})
+        _print(as_json, {"ok": False, "error": err or "missing contract file", "root": str(r)})
         return 2
+    contract_path, path_err = find_contract_path(r)
+    if path_err or contract_path is None:
+        _print(as_json, {"ok": False, "error": path_err or "missing contract file", "root": str(r)})
+        return 2
+    # The only writer of memory.rung edits whichever single contract file the
+    # store has; the layers/legacy_types are pinned to the shape that file
+    # already carries (0.13.0-beta frame/gist/page, 0.13.0-beta.2
+    # frame/gist/memory, or beta.3 schema/gist/memory). A SCHEMA.json store
+    # that already declares the shipped-beta frame/gist/page layers keeps
+    # that shape; every other SCHEMA.json store (no memory key yet, or
+    # already frame/gist/memory) uses the 0.13.0-beta.2 shape.
+    existing_memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
+    existing_layers = existing_memory.get("layers") if isinstance(existing_memory, dict) else None
+    if contract_path.name == CONTRACT_NAME:
+        layers = list(BETA3_LAYERS)
+    elif existing_layers == SHIPPED_BETA_LAYERS:
+        layers = list(SHIPPED_BETA_LAYERS)
+    else:
+        layers = list(IN_BETA_LAYERS)
     schema["memory"] = {
         "rung": value,
-        "layers": ["frame", "gist", "memory"],
+        "layers": layers,
         "legacy_types": ["document"],
     }
-    schema_path = r / SCHEMA_NAME
-    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
     _print(
         as_json,
         {
             "ok": True,
             "root": str(r),
             "rung": value,
-            "notes": [f"wrote SCHEMA.json memory.rung={value}"],
+            "notes": [f"wrote {contract_path.name} memory.rung={value}"],
         },
     )
     return 0

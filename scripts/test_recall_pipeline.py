@@ -189,7 +189,7 @@ def main() -> int:
     )
     inst = run(["schema", "install", str(contrib.parent), "--root", str(store), "--json"])
     check("install-preset", inst.returncode == 0, inst.stderr[:200] or inst.stdout[:200])
-    schema = json.loads((store / "SCHEMA.json").read_text())
+    schema = json.loads((store / "CONTRACT.json").read_text())
     check("install-not-activate", schema.get("recall", {}).get("preset") != "demo-skill:explore")
     act2 = run(["recall", "activate", "--profile", "demo-skill:explore", "--root", str(store), "--json"])
     check("activate-contrib-preset", act2.returncode == 0, act2.stderr[:200] or act2.stdout[:200])

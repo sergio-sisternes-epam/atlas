@@ -91,6 +91,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "atlas_release": {
+      "type": "string"
     }
   }
 }

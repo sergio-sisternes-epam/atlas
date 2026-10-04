@@ -27,6 +27,7 @@ from ..core.gitops import (
 from ..core.github_driver import github_hostname
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_store, upsert
+from ..core.paths import has_contract_file
 from ..core.translate import remote_url
 
 
@@ -260,11 +261,11 @@ def _persistable_ref(*candidates: str | None) -> str:
 
 
 def _infer_subpath(dest: Path) -> str:
-    if (dest / "SCHEMA.json").is_file():
+    if has_contract_file(dest):
         return ""
-    if (dest / "atlas" / "SCHEMA.json").is_file():
+    if has_contract_file(dest / "atlas"):
         return "atlas"
-    if (dest / "references" / "atlas" / "SCHEMA.json").is_file():
+    if has_contract_file(dest / "references" / "atlas"):
         return "references/atlas"
     return ""
 

@@ -10,9 +10,8 @@ from typing import Any
 
 from .jsonutil import StrictJsonError, load_strict
 from .overlay import SCHEMA_D, overlay_path, receipt_path, write_json, write_receipt
-from .paths import SCHEMA_NAME
 from .recall_config import default_recall_block, schema_version, validate_store_v2
-from .schema import load_schema
+from .schema import find_contract_path, load_schema
 
 KNOWN_ROOT_KEYS = frozenset(
     {
@@ -33,6 +32,7 @@ KNOWN_ROOT_KEYS = frozenset(
         "bindings",
         "presets",
         "memory",
+        "atlas_release",
     }
 )
 COMPAT_ID = "atlas-compat-v1"
@@ -130,13 +130,16 @@ def apply(root: Path) -> dict[str, Any]:
             os.close(fd)
         schema, err = load_schema(root)
         if schema is None:
-            raise UpgradeError(err or "missing SCHEMA.json")
+            raise UpgradeError(err or "missing SCHEMA.json or CONTRACT.json")
+        contract_path, path_err = find_contract_path(root)
+        if path_err or contract_path is None:
+            raise UpgradeError(path_err or "missing SCHEMA.json or CONTRACT.json")
         try:
-            live = load_strict(root / SCHEMA_NAME)
+            live = load_strict(contract_path)
         except StrictJsonError as e:
             raise UpgradeError(str(e)) from e
         if live != schema:
-            raise UpgradeError("SCHEMA.json is not strict JSON")
+            raise UpgradeError(f"{contract_path.name} is not strict JSON")
         target = _target_schema(schema)
         overlay = _compat_overlay(schema)
         dest = overlay_path(root, COMPAT_ID)
@@ -148,10 +151,9 @@ def apply(root: Path) -> dict[str, Any]:
             [f"{SCHEMA_D}/{COMPAT_ID}.json", f"{SCHEMA_D}/{COMPAT_ID}.receipt.json"],
             types=[],
         )
-        schema_path = root / SCHEMA_NAME
-        tmp = schema_path.with_suffix(".json.upgrade")
+        tmp = contract_path.with_suffix(".json.upgrade")
         tmp.write_text(json.dumps(target, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, schema_path)
+        os.replace(tmp, contract_path)
     except Exception:
         if lock.exists():
             # leave lock for fail-closed detection
@@ -165,5 +167,5 @@ def apply(root: Path) -> dict[str, Any]:
         "to": "2.0",
         "compat_contribution": COMPAT_ID,
         "recall_enabled": False,
-        "schema": SCHEMA_NAME,
+        "schema": contract_path.name,
     }

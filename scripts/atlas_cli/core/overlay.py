@@ -39,6 +39,8 @@ RESERVED_CORE_TYPES = frozenset(
         "memory",
         "gist",
         "frame",
+        "schema",
+        "memory",
     }
 )
 

@@ -27,7 +27,7 @@ Then **read this file**. Missing card or unloaded module ⇒ incomplete Enter.
 
 ## Hard rules
 
-1. **CLI is the only writer** of `SCHEMA.json` and `schema.d/`.
+1. **CLI is the only writer** of the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) and `schema.d/`.
 2. **Explicit selection.** Installing a contribution must not enable its preset.
 3. **Legacy until opt-in.** SCHEMA 1.0 and 2.0 with `recall.enabled=false` keep `atlas recall run` compatibility behaviour.
 4. **tgrep is argv-only.** Use an Atlas-owned `.atlas-index/tgrep/` index rebuilt when the projection digest mismatches. Never `tgrep serve`, never write `serve.json`, never `--no-index`. Missing binary fails closed (`unsupported_capability: tgrep_binary_missing`). Detected `serve.json` fails closed (`tgrep_serve_detected`). Do not auto-install tgrep.

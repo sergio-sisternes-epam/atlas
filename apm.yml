@@ -1,23 +1,2 @@
 name: atlas
-version: 0.13.0-beta.2
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains."
-author: Sergio Sisternes
-license: Apache-2.0
-homepage: https://github.com/sergio-sisternes-epam/atlas
-repository: https://github.com/sergio-sisternes-epam/atlas
-keywords:
-  - knowledge-management
-  - knowledge-graph
-  - agent-memory
-  - okf
-type: hybrid
-includes:
-  - .apm/skills/code-review/
-  - .apm/skills/panel-review/
-dependencies:
-  apm:
-    - name: okf
-      marketplace: atlas
-  python:
-    - jsonschema>=4.0
-    - click>=8.0
+version: 0.13.0-beta.3

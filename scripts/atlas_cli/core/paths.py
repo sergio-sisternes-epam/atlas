@@ -4,6 +4,13 @@ from pathlib import Path
 
 RESERVED = frozenset({"index.md", "log.md"})
 SCHEMA_NAME = "SCHEMA.json"
+# 0.13.0-beta.3 WRITE model: a store's root type/key contract lives in
+# CONTRACT.json instead of SCHEMA.json. Readers accept exactly one of the
+# two filenames (see core.schema.find_contract_path); callers that merely
+# need to know "does this directory already have a contract file" should
+# use has_contract_file() rather than hard-coding SCHEMA_NAME.
+CONTRACT_NAME = "CONTRACT.json"
+CONTRACT_FILENAMES = (SCHEMA_NAME, CONTRACT_NAME)
 DEFAULT_STAGING = "staging"
 SKIP_DIRS = frozenset({"staging", "templates", ".atlas-index", "mesh", "schema.d", ".git"})
 
@@ -12,6 +19,15 @@ def store_root(root: str | None) -> Path:
     if root:
         return Path(root).expanduser().resolve()
     return Path.cwd().resolve()
+
+
+def has_contract_file(root: Path) -> bool:
+    """True when root has exactly one of SCHEMA.json / CONTRACT.json.
+
+    Used by callers (store init/rehost) that only need a presence check,
+    not the strict single-file compile gate in core.schema.find_contract_path.
+    """
+    return any((root / name).is_file() for name in CONTRACT_FILENAMES)
 
 
 def rel(root: Path, path: Path) -> str:
