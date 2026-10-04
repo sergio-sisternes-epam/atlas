@@ -187,7 +187,10 @@ python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--typ
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]
 python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <atlas> [--force]
 python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info|warn|error --root <atlas>
+# --set accepts exactly one of: info, warn, error
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
 ```
 
 Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
