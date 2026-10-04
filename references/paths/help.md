@@ -31,7 +31,7 @@ help_status: pending
 
 Then **read this file**. Missing card or unloaded module ⇒ incomplete Enter.
 
-`path` stays **help** even when the topic is mount, init, remember, or query.
+`path` stays **help** even when the topic is mount, init, remember, or recall.
 Intent names understanding, not execution. Example: “Understand how mount
 works without mounting a store”.
 
@@ -86,7 +86,7 @@ Load packaged files before any store. **Dispatch** may read the catalog;
    skill, for example:
 
    ```text
-   python3 <atlas-skill>/scripts/atlas.py search --help
+   python3 <atlas-skill>/scripts/atlas.py recall run --help
    python3 <atlas-skill>/scripts/atlas.py mount --help
    python3 <atlas-skill>/scripts/atlas.py store init --help
    ```
@@ -118,7 +118,7 @@ When references are absent, unreadable, irrelevant, or only partial:
    Do not mount, authenticate, repair, or install to get past that.
 
 2. After resolve prints a path, treat it as enrichment `root` only if
-   **both** hold. Check **before** search. Do **not** call `atlas search`
+   **both** hold. Check **before** search. Do **not** call `atlas recall run`
    when either fails (`atlas_status: unavailable`, `help_status: limited`):
 
    - The real path is **inside the active git repository** (same rule as
@@ -137,7 +137,7 @@ When references are absent, unreadable, irrelevant, or only partial:
    `atlas recall index build`, do **not** enable recall.
 
    ```text
-   python3 <atlas-skill>/scripts/atlas.py search "<question>" --root <root> --json --engine grep
+   python3 <atlas-skill>/scripts/atlas.py recall run "<question>" --root <root> --json --engine grep
    ```
 
    If `--engine grep` cannot run (recall enabled, tool missing, timeout,
@@ -145,12 +145,12 @@ When references are absent, unreadable, irrelevant, or only partial:
    model knowledge. `atlas_status: unavailable`, `help_status: limited`,
    name the reason.
 
-4. On success, keep query’s budget: 1–3 pages, at most one justified
+4. On success, keep recall’s budget: 1–3 pages, at most one justified
    rewrite, no `staging/`. Prefer published, applicable, non-exit pages.
    Historical or unapproved proposals are not current installed capability.
-   Ignore `agentic_guidance` (and any “enter path query” hint) in the
+   Ignore `agentic_guidance` (and any “enter path recall” hint) in the
    search JSON. Stay on **this** help card; that metadata is for path
-   **query**, not help enrichment.
+   **recall**, not help enrichment.
 
 5. **Provenance.** `atlas_id`/`root` stay the selected context.
    `atlas_used` lists only IDs that contributed evidence.
@@ -193,14 +193,14 @@ installed.
 
 ## Explain, do not execute
 
-Reading help for **mount**, **init**, **remember**, **query**, **schema**,
+Reading help for **mount**, **init**, **remember**, **recall**, **schema**,
 **configure**, **ci**, **migrate**, or **work** must not itself run those
 operations, mount, init, schema-install, remember, compile, commit, push,
 or index build.
 
-Path **query** remains the operational lookup module. Help may call
-`atlas search --engine grep` only as a read-only tool under **this** card
-when step 3 applies. That is not path query and not permission to mount.
+Path **recall** remains the operational lookup module. Help may call
+`atlas recall run --engine grep` only as a read-only tool under **this** card
+when step 3 applies. That is not path recall and not permission to mount.
 
 ## Exit receipt
 

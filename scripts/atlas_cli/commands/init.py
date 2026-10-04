@@ -51,8 +51,10 @@ DEFAULT_SCHEMA = {
             "lesson",
             "recipe",
             "work",
-            "document",
             "protostar",
+            "gist",
+            "frame",
+            "page",
         ],
         "unconstrained": [],
     },
@@ -68,6 +70,9 @@ FM_ONLY = {
     "protostar": ["type", "title", "created"],
     "lesson": ["type", "title", "created"],
     "recipe": ["type", "title", "created"],
+    "page": ["type", "title", "created"],
+    "gist": ["type", "title", "created"],
+    "frame": ["type", "title", "created"],
 }
 
 

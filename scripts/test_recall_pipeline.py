@@ -56,12 +56,12 @@ def main() -> int:
     write(store / ".hidden" / "note.md", "---\ntype: document\ntitle: Hidden page\ncreated: 2026-09-09\n---\n\n## Claim\n\nHidden current-tree pages remain eligible for recall.\n")
 
     conflict = run(
-        ["search", "ranking", "--root", str(store), "--engine", "grep", "--profile", "atlas:scan", "--json"]
+        ["recall", "run", "ranking", "--root", str(store), "--engine", "grep", "--profile", "atlas:scan", "--json"]
     )
     check("engine-profile-conflict", conflict.returncode == 2)
 
     scoped = run(
-        ["search", "ranking", "--root", str(store), "--profile", "atlas:scan", "--json"]
+        ["recall", "run", "ranking", "--root", str(store), "--profile", "atlas:scan", "--json"]
     )
     payload = json.loads(scoped.stdout) if scoped.stdout.strip().startswith("{") else {}
     paths = [h.get("path") for h in payload.get("hits") or []]
@@ -73,7 +73,7 @@ def main() -> int:
     check("staging-excluded", not any("staging" in p for p in paths))
 
     graph = run(
-        ["search", "ranking", "--root", str(store), "--profile", "atlas:ranked-graph", "--json"]
+        ["recall", "run", "ranking", "--root", str(store), "--profile", "atlas:ranked-graph", "--json"]
     )
     gp = json.loads(graph.stdout) if graph.stdout.strip().startswith("{") else {}
     if graph.returncode == 2 and "sqlite_fts5" in str(gp.get("error")):
@@ -112,7 +112,7 @@ def main() -> int:
         compiled2.returncode in (0, 1) and bool((cp2.get("recall_index") or {}).get("published")),
         str(cp2.get("recall_index") or compiled2.stdout[:200]),
     )
-    warm = run(["search", "ranking", "--root", str(store), "--json"])
+    warm = run(["recall", "run", "ranking", "--root", str(store), "--json"])
     wp = json.loads(warm.stdout) if warm.stdout.strip().startswith("{") else {}
     rec = wp.get("recall") or {}
     check(
@@ -122,7 +122,7 @@ def main() -> int:
     )
     alpha = store / "decisions" / "alpha.md"
     alpha.write_text(alpha.read_text(encoding="utf-8") + "\nChanged body for fingerprint miss.\n", encoding="utf-8")
-    cold = run(["search", "ranking", "--root", str(store), "--json"])
+    cold = run(["recall", "run", "ranking", "--root", str(store), "--json"])
     clp = json.loads(cold.stdout) if cold.stdout.strip().startswith("{") else {}
     crec = clp.get("recall") or {}
     check(
@@ -135,13 +135,13 @@ def main() -> int:
     focused = run(["compile", "--root", str(store), "--type", "decision", "--json"])
     fp = json.loads(focused.stdout) if focused.stdout.strip().startswith("{") else {}
     check("focused-does-not-publish", not (fp.get("recall_index") or {}).get("published"))
-    hidden = run(["search", "Hidden", "--root", str(store), "--profile", "atlas:scan", "--json"])
+    hidden = run(["recall", "run", "Hidden", "--root", str(store), "--profile", "atlas:scan", "--json"])
     hp = json.loads(hidden.stdout) if hidden.stdout.strip().startswith("{") else {}
     hpaths = [h.get("path") for h in hp.get("hits") or []]
     check("hidden-current-tree", any("note.md" in (p or "") for p in hpaths), str(hpaths))
 
     tgrep_probe = run(
-        ["search", "ranking", "--root", str(store), "--profile", "atlas:tgrep", "--json"]
+        ["recall", "run", "ranking", "--root", str(store), "--profile", "atlas:tgrep", "--json"]
     )
     tp = json.loads(tgrep_probe.stdout) if tgrep_probe.stdout.strip().startswith("{") else {}
     if shutil.which("tgrep"):
@@ -160,7 +160,7 @@ def main() -> int:
         )
 
     write(store / "schema.d" / "broken.json", "{not json")
-    overlay_fail = run(["search", "ranking", "--root", str(store), "--json"])
+    overlay_fail = run(["recall", "run", "ranking", "--root", str(store), "--json"])
     ofp = json.loads(overlay_fail.stdout) if overlay_fail.stdout.strip().startswith("{") else {}
     check(
         "search-overlay-fail-closed",

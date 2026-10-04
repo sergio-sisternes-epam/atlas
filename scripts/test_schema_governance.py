@@ -115,6 +115,24 @@ def main() -> int:
         del ov["atlas_id"]
         (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
 
+        # absent-host-memory-overlay-clash-fails (memory is FORBIDDEN_CORE / operator opt-in only)
+        schema = json.loads((store / "SCHEMA.json").read_text(encoding="utf-8"))
+        schema.pop("memory", None)
+        (store / "SCHEMA.json").write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        ov["memory"] = {"rung": "warn"}
+        (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
+        r = run(["compile", "--root", str(store), "--json"])
+        payload = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
+        crit_ids = [i.get("id") for i in payload.get("critical") or []]
+        host_after = json.loads((store / "SCHEMA.json").read_text(encoding="utf-8"))
+        check(
+            "absent-host-memory-overlay-clash-fails",
+            r.returncode == 2 and "overlay_core_clash" in crit_ids and "memory" not in host_after,
+            f"exit={r.returncode} crit={crit_ids} host_memory={host_after.get('memory')}",
+        )
+        del ov["memory"]
+        (store / "schema.d" / "foo.json").write_text(json.dumps(ov, indent=2) + "\n")
+
         # overlay must not mutate core type
         ov["templates"] = {
             "by_type": {
