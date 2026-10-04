@@ -2244,15 +2244,20 @@ def main() -> int:
                 )
             finally:
                 refcmd._exchange_names = real_exchange
+            overwritten_left = [
+                path.read_text(encoding="utf-8")
+                for path in future.glob(".atlas-prune-*")
+                if path.is_file()
+            ]
             if (
                 raced_bytes == 0
                 or not (future / "dead.md").is_file()
-                or (future / "living.md").read_text(encoding="utf-8") != before_living
-                or list(future.glob(".atlas-prune-*"))
+                or (future / "living.md").read_text(encoding="utf-8") != "racer page\n"
+                or before_living not in overwritten_left
             ):
-                failures.append("rewritten page with replaced bytes was treated as success")
+                failures.append("in-place replacement was deleted with the displaced page")
             else:
-                print("[PASS] prune rolls back when the rewritten bytes change")
+                print("[PASS] prune keeps an in-place replacement and the displaced page")
 
         summary_only = tmp / "summary-rewritten"
         summary_init = run(["init", "--root", str(summary_only), "--json"])

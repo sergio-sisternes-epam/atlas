@@ -835,27 +835,17 @@ def _abort_replaced_destination(
     name: str,
     original_dev: int,
     original_ino: int,
-    written_dev: int,
-    written_ino: int,
     label: str,
 ) -> None:
-    """Restore our own inode, or leave a foreign destination untouched.
+    """Leave a destination we no longer own, and keep the displaced page.
 
-    The temp name is deleted by the caller after a successful undo. Exchanging
-    a file we did not install onto that name would delete the other writer's data.
+    Do not exchange the name back. Linux can reuse the unlinked inode number for
+    a new file, so an inode match is not proof the destination is still our write.
+    Exchanging that file onto the temp name would delete the other writer's data.
     """
     if _dir_inode_is(dirfd, name, original_dev, original_ino):
         return
-    if not _dir_inode_is(dirfd, name, written_dev, written_ino):
-        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
-    if not _dir_inode_is(dirfd, tmp, original_dev, original_ino):
-        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
-    try:
-        _exchange_names(dirfd, tmp, name)
-    except OSError as e:
-        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
-    if not _dir_inode_is(dirfd, name, original_dev, original_ino):
-        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+    raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
 
 
 def _installed_write_matches(dirfd: int, name: str, dev: int, ino: int, data: bytes, label: str) -> bool:
@@ -992,8 +982,6 @@ def _rewrite_dir_file(
                             name,
                             info.st_dev,
                             info.st_ino,
-                            written.st_dev,
-                            written.st_ino,
                             label,
                         )
                     except RefError:
@@ -1022,8 +1010,6 @@ def _rewrite_dir_file(
                             name,
                             info.st_dev,
                             info.st_ino,
-                            written.st_dev,
-                            written.st_ino,
                             label,
                         )
                     except RefError:
