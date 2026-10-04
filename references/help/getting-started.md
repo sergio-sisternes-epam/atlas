@@ -1,7 +1,7 @@
 ---
 name: atlas/help/getting-started
 description: Bundled first-use baseline. No Atlas mount required.
-package_version: 0.13.0-beta.6
+package_version: 0.13.0-beta.7
 ---
 
 # Getting started with Atlas

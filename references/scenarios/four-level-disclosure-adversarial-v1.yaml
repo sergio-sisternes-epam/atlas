@@ -26,4 +26,4 @@ smokes:
     expect: "Migration builds current-shape suffix pages, allows additional schemas for new subjects, adds schema cues to index.md, and preserves stamp behavior. One gist still requires coverage by a schema."
   - id: package-and-store-versions
     source: "apm.yml; SKILL.md; scripts/atlas_cli/__init__.py; scripts/atlas_cli/core/schema.py"
-    expect: "Package surfaces are 0.13.0-beta.6; CURRENT_RELEASE and current store write stamp remain 0.13.0-beta.4, beta.3 current readers remain accepted, unknown stamps fail closed, and malformed stamps do not match by prefix."
+    expect: "Package surfaces and current store write stamp are 0.13.0-beta.7; beta.3 and beta.4 current readers remain accepted, unknown stamps fail closed, and malformed stamps do not match by prefix."

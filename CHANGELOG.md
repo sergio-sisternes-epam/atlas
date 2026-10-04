@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0-beta.7 - 2026-10-04
+
+- Package versions and the stamp written by `atlas init` and operator-chosen
+  `memory-migrate apply --batch contract-file` now agree at `0.13.0-beta.7`.
+  The `CONTRACT.json` shape and layers `schema`/`gist`/`memory` are unchanged;
+  beta.3 and beta.4 remain current readers, and apply never restamps them.
+  Unknown stamps (including beta.6) still fail closed. SCHEMA 2.0 behavior
+  and the fleet pin `v0.12.0` are unchanged.
+- Frame conversion preserves long plain descriptions without YAML wrapping
+  and checks the full converted frontmatter with the store's existing reader.
+  A failed round-trip exits 2 with `frame_description_not_round_trippable`,
+  preserves the frame and contract, and stages the original description plus
+  explicit operator steps. No migration is triggered by install, compile,
+  or schema upgrade; existing page types and multiple-schema coverage stay
+  unchanged.
+
 ## 0.13.0-beta.6 - 2026-10-04
 
 - Current-shape recall now progressively discloses `index → schema → gist →
