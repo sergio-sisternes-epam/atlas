@@ -2210,6 +2210,127 @@ def main() -> int:
             else:
                 print("[PASS] prune rolls back when the rewritten name is replaced")
 
+            real_exchange = refcmd._exchange_names
+            overwritten = {"done": False}
+
+            def overwrite_destination(dirfd, src, dst):
+                real_exchange(dirfd, src, dst)
+                if not overwritten["done"] and dst == "living.md":
+                    overwritten["done"] = True
+                    fd = os.open(dst, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+                    try:
+                        os.ftruncate(fd, 0)
+                        os.write(fd, b"racer page\n")
+                    finally:
+                        os.close(fd)
+
+            refcmd._exchange_names = overwrite_destination
+            try:
+                raced_bytes = run_prune(
+                    str(future),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                refcmd._exchange_names = real_exchange
+            if (
+                raced_bytes == 0
+                or not (future / "dead.md").is_file()
+                or (future / "living.md").read_text(encoding="utf-8") != before_living
+                or list(future.glob(".atlas-prune-*"))
+            ):
+                failures.append("rewritten page with replaced bytes was treated as success")
+            else:
+                print("[PASS] prune rolls back when the rewritten bytes change")
+
+        summary_only = tmp / "summary-rewritten"
+        summary_init = run(["init", "--root", str(summary_only), "--json"])
+        if summary_init.returncode != 0:
+            failures.append(f"summary-rewritten store init failed: {summary_init.stdout}")
+        else:
+            git(summary_only, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (summary_only / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (summary_only / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (summary_only / "other.md").write_text(page("Other", "relates_to: []\n", prose), encoding="utf-8")
+            git(summary_only, ["add", "."])
+            git(summary_only, ["commit", "-m", "summary only"])
+            listed = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(summary_only),
+                    "--json",
+                ]
+            )
+            try:
+                listed_payload = json.loads(listed.stdout)
+            except json.JSONDecodeError:
+                listed_payload = {}
+            if listed.returncode != 0 or "summary.md" not in listed_payload.get("rewritten", []):
+                failures.append(f"summary history edge was omitted from rewritten: {listed.stdout}")
+            else:
+                print("[PASS] prune records the summary when history edges change it")
+
+        reappear = tmp / "drop-reappear"
+        reappear_init = run(["init", "--root", str(reappear), "--json"])
+        if reappear_init.returncode != 0:
+            failures.append(f"drop-reappear store init failed: {reappear_init.stdout}")
+        else:
+            git(reappear, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (reappear / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (reappear / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(reappear, ["add", "."])
+            git(reappear, ["commit", "-m", "drop reappear"])
+            before_dead = (reappear / "dead.md").read_text(encoding="utf-8")
+            import atlas_cli.commands.refcmd as refcmd
+
+            real_absent = refcmd._name_is_absent
+            seen = {"n": 0}
+
+            def recreate_drop(dirfd, name):
+                absent = real_absent(dirfd, name)
+                if name == "dead.md":
+                    seen["n"] += 1
+                    if seen["n"] >= 2 and absent:
+                        fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
+                        os.write(fd, b"racer page\n")
+                        os.close(fd)
+                        return False
+                return absent
+
+            refcmd._name_is_absent = recreate_drop
+            try:
+                reappeared = run_prune(
+                    str(reappear),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                refcmd._name_is_absent = real_absent
+            originals = [before_dead]
+            originals.extend(path.read_text(encoding="utf-8") for path in reappear.glob(".atlas-prune-drop-*"))
+            if reappeared == 0 or before_dead not in originals:
+                failures.append("recreated drop path was deleted as a successful prune")
+            else:
+                print("[PASS] prune refuses a drop when the name reappears")
+
         cleanup = tmp / "cleanup-rewrite"
         cleanup_init = run(["init", "--root", str(cleanup), "--json"])
         if cleanup_init.returncode != 0:

@@ -771,6 +771,14 @@ def _lock_fd(fd: int, label: str) -> None:
         raise RefError(f"refusing to update locked page {label}") from e
 
 
+def _lock_dir(dirfd: int, label: str) -> None:
+    """Hold the parent directory across a rename and the following delete or exchange."""
+    try:
+        fcntl.flock(dirfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        raise RefError(f"refusing to update locked page {label}") from e
+
+
 def _exchange_names(dirfd: int, src: str, dst: str) -> None:
     """Atomically swap two names in one directory. The destination is not overwritten."""
     src_b = os.fsencode(src)
@@ -842,6 +850,27 @@ def _abort_replaced_destination(
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
 
 
+def _installed_write_matches(dirfd: int, name: str, dev: int, ino: int, data: bytes, label: str) -> bool:
+    """True when the destination is still the inode and bytes we installed.
+
+    An unlinked inode number can be reused for a different file, so identity alone is not enough.
+    """
+    if not _dir_inode_is(dirfd, name, dev, ino):
+        return False
+    try:
+        return _read_dir_file(dirfd, name, label) == data
+    except RefError:
+        return False
+
+
+def _name_is_absent(dirfd: int, name: str) -> bool:
+    try:
+        os.lstat(name, dir_fd=dirfd)
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def _dir_inode_is(dirfd: int, name: str, dev: int, ino: int) -> bool:
     """True when the directory entry is still the regular file we installed."""
     try:
@@ -887,6 +916,7 @@ def _rewrite_dir_file(
         if info.st_nlink > 1:
             raise RefError(f"refusing to rewrite hard-linked page {label}")
         mode = stat.S_IMODE(info.st_mode)
+    _lock_dir(dirfd, label)
     tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}-{os.urandom(4).hex()}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
     try:
@@ -944,7 +974,9 @@ def _rewrite_dir_file(
                         tmp = ""
                         raise
                     raise RefError(f"refusing to rewrite changed page {label}")
-                if not _dir_inode_is(dirfd, name, written.st_dev, written.st_ino):
+                if not _installed_write_matches(
+                    dirfd, name, written.st_dev, written.st_ino, data, label
+                ):
                     try:
                         _abort_replaced_destination(
                             dirfd, tmp, name, info.st_dev, info.st_ino, label
@@ -959,6 +991,23 @@ def _rewrite_dir_file(
                 except OSError as e:
                     tmp = ""
                     raise RefError(f"refusing to rewrite {label}; displaced file left at {held}") from e
+                if (
+                    stat.S_ISREG(current.st_mode)
+                    and not stat.S_ISLNK(current.st_mode)
+                    and current.st_dev == info.st_dev
+                    and current.st_ino == info.st_ino
+                    and not _installed_write_matches(
+                        dirfd, name, written.st_dev, written.st_ino, data, label
+                    )
+                ):
+                    try:
+                        _abort_replaced_destination(
+                            dirfd, tmp, name, info.st_dev, info.st_ino, label
+                        )
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
                 if (
                     stat.S_ISREG(current.st_mode)
                     and not stat.S_ISLNK(current.st_mode)
@@ -997,8 +1046,6 @@ def _rewrite_dir_file(
                             raise
                         raise RefError(f"refusing to rewrite {label}") from unlink_error
                 tmp = ""
-                if not _dir_inode_is(dirfd, name, written.st_dev, written.st_ino):
-                    raise RefError(f"refusing to rewrite changed page {label}")
             finally:
                 os.close(lockfd)
         else:
@@ -1117,6 +1164,7 @@ def _restore_failed_unlink(dirfd: int, name: str, tmp: str, label: str, exc: OSE
 def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
     dirfd, name = _open_store_parent(root, rel)
     try:
+        _lock_dir(dirfd, rel)
         try:
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
         except FileNotFoundError as e:
@@ -1152,11 +1200,7 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")
-            try:
-                os.lstat(name, dir_fd=dirfd)
-            except FileNotFoundError:
-                pass
-            else:
+            if not _name_is_absent(dirfd, name):
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")
             os.lseek(fd, 0, os.SEEK_SET)
@@ -1176,6 +1220,9 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
                 raise RefError(
                     f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
                 )
+            if not _name_is_absent(dirfd, name):
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
             try:
                 os.unlink(tmp, dir_fd=dirfd)
             except OSError as exc:
@@ -1457,7 +1504,10 @@ def run_prune(
                     for item in drop_rels
                     if (item, kind, sha) not in have
                 ]
+                before_edges = updated
                 updated = append_ref_edges(updated, edges)
+                if updated != before_edges and rel not in rewritten:
+                    rewritten.append(rel)
                 summary_final = updated
             leftover = _remaining_drop_edge(updated, drop_set, version)
             if leftover:
@@ -1496,7 +1546,7 @@ def run_prune(
             for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
                 dirfd, name = _open_store_parent(store, rel)
                 try:
-                    if not _dir_inode_is(dirfd, name, new_dev, new_ino):
+                    if not _installed_write_matches(dirfd, name, new_dev, new_ino, _new_bytes, rel):
                         raise RefError(f"refusing to rewrite changed page {rel}")
                 finally:
                     os.close(dirfd)
