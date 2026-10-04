@@ -85,8 +85,14 @@ not edit `SCHEMA.json`.
 
 Same facts as assess, plus a short judgement of which named batch of pages
 could reasonably move toward `memory`/`gist`/`frame` next. Write nothing. Do
-not create frames automatically — mining the whole store for repeated
-patterns across gists is out of scope for this path.
+not create or edit files during inventory. When the judgement names a batch
+that would add one or more gists in a folder, plan that folder's single
+deterministic frame: one frame in the same folder grouping exactly the
+gists the folder will contain after the batch, including gists already
+there and gists the batch adds. A lone gist still requires one frame; a
+folder that will have zero gists gets no frame. Planning names the frame;
+it does not write it. Mining the store for repeated patterns across gists
+remains out of scope for this path.
 
 ### apply
 
@@ -94,7 +100,11 @@ Only when the operator asks and names the batch. Refuse an unscoped or
 unattested "migrate everything" request. For that named batch only:
 
 1. Use path **remember** to retype, add a gist, or add a frame as named by
-   the operator. Remember's index-only exception applies here: a first
+   the operator. Whenever the named batch adds a gist, include the planned
+   frame for that folder, creating or updating its single frame to group
+   exactly the gists the folder will contain after the batch. Do not leave
+   a folder with gists and no frame (`frame_members`). Remember's index-only
+   exception applies here: a first
    compile that exits 1 solely for `index_md_present` / missing `index.md`
    may proceed to create or update that folder's hot list, then the second
    compile must exit 0 before the page counts as stored.
