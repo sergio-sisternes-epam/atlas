@@ -49,20 +49,32 @@ python3 <atlas-skill>/scripts/atlas.py compile --root <root> --json --dry-run
 `mesh.json` and never publishes the recall index — an unfocused compile
 would otherwise do both. The compile JSON includes a `memory_rung` field:
 the effective rung (`info`, `warn`, or `error`) resolved the same way as
-`SCHEMA.memory.rung`. An absent `memory` key, a missing or null `rung`, or
-a blank/whitespace string `rung` all mean effective rung `info`, with no
-`memory_rung` critical finding, so this dry-run assess exits 0 when
-nothing else is critical.
+`SCHEMA.memory.rung`. Whether an absent, missing, or blank `rung` is
+benign depends on the schema:
+
+- **SCHEMA 1.0** (no `validate_store_v2`): an absent `memory` key, a
+  missing or null `rung`, or a blank/whitespace string `rung` all mean
+  effective rung `info`, with no `memory_rung` critical finding, so this
+  dry-run assess exits 0 when nothing else is critical.
+- **SCHEMA 2.0** (`validate_store_v2`, `rung` typed as a string enum
+  `info` | `warn` | `error`): the default `info` rung is only reached by
+  *omitting* the `rung` key, or by omitting `memory` entirely — that
+  still exits 0 with `memory_rung` reporting `info`. A **present** `rung`
+  that is null or a blank/whitespace string fails the schema's own
+  validation (`schema_v2`, not just `memory_rung`) and exits 2. Do not
+  tell a SCHEMA 2.0 operator that a present null or blank rung is benign;
+  tell them to remove the key instead.
 
 A malformed `rung` — a non-string value such as `0`, `false`, `[]`, or
 `{}`, or a string that is not `info`, `warn`, or `error` — does **not**
-behave like a blank rung. `_memory_rung` emits a critical finding (id
-`memory_rung`), so assess fails closed and exits 2. The compile JSON
-`memory_rung` field still reports the effective ladder `info` for that
-run, but that field is not the exit code — do not read a malformed
-configuration as benign because the field says `info`. Report the memory
-rung in effect (read from `memory_rung`) and the finding ids present.
-Write nothing. Do not edit `SCHEMA.json`.
+behave like an absent/omitted rung on either schema. `_memory_rung` emits
+a critical finding (id `memory_rung`), so assess fails closed and exits 2;
+on SCHEMA 2.0 this also fails `schema_v2`. The compile JSON `memory_rung`
+field still reports the effective ladder `info` for that run, but that
+field is not the exit code — do not read a malformed configuration as
+benign because the field says `info`. Report the memory rung in effect
+(read from `memory_rung`) and the finding ids present. Write nothing. Do
+not edit `SCHEMA.json`.
 
 ### inventory
 
