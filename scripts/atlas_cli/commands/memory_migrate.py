@@ -1,9 +1,9 @@
-"""`atlas memory-migrate` — the pre-beta -> beta.3 contract-file migration path.
+"""`atlas memory-migrate` — the pre-beta -> current contract-file migration path.
 
 This is distinct from `atlas migrate` (content into staging) and from the
 document-era-to-memory-layers content migration described in
 references/paths/memory-migrate.md. This command rewrites the root contract file (SCHEMA.json -> CONTRACT.json)
-and adds missing beta.3 schema pages for gist-bearing folders; it never
+and adds missing schema pages for gist-bearing folders; it never
 rewrites existing pages.
 """
 
@@ -17,7 +17,7 @@ from ..core.paths import CONTRACT_NAME, RESERVED, SCHEMA_NAME, iter_concept_md, 
 from ..core.recall_config import schema_version
 from ..core.schema import (
     BETA3_LAYERS,
-    BETA3_RELEASE,
+    CURRENT_RELEASE,
     classify_lineage,
     find_contract_path,
     staging_dir_name,
@@ -216,7 +216,7 @@ def run(
             "operation": "apply",
             "contract_file": contract_name,
             "lineage": lineage,
-            "error": "in-beta stores are not eligible for the pre-beta -> beta.3 contract-file migration",
+            "error": "in-beta stores are not eligible for the pre-beta -> current contract-file migration",
             "findings": [
                 {
                     "id": "in_beta_not_legacy",
@@ -266,7 +266,7 @@ def run(
         return 2
 
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
-    # atlas_release/memory.layers to the beta.3 shape. Existing pages stay
+    # atlas_release/memory.layers to the current shape. Existing pages stay
     # untouched; missing folder schema pages are added below.
     new_path = r / CONTRACT_NAME
     if new_path.is_symlink():
@@ -305,7 +305,7 @@ def run(
         _print(as_json, payload)
         return 2
 
-    schema["atlas_release"] = BETA3_RELEASE
+    schema["atlas_release"] = CURRENT_RELEASE
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
     memory["layers"] = list(BETA3_LAYERS)
     schema["memory"] = memory
@@ -322,7 +322,7 @@ def run(
         "contract_file": CONTRACT_NAME,
         "lineage": "current",
         "notes": [
-            f"renamed {SCHEMA_NAME} -> {CONTRACT_NAME}; set atlas_release={BETA3_RELEASE}",
+            f"renamed {SCHEMA_NAME} -> {CONTRACT_NAME}; set atlas_release={CURRENT_RELEASE}",
             *[f"created schema page {rel(r, path)}" for path, _ in schema_pages],
         ],
     }

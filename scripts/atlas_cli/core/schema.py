@@ -17,7 +17,16 @@ SHIPPED_BETA_LAYERS = ["frame", "gist", "page"]
 # this shape without treating it as a stamp_shape mismatch.
 IN_BETA_LAYERS = ["frame", "gist", "memory"]
 BETA3_LAYERS = ["schema", "gist", "memory"]
+# BETA3_RELEASE ("0.13.0-beta.3") is the original stamp for this contract
+# shape; it is still accepted on read (compute_stamp_shape / classify_lineage
+# -> "current") but is no longer written. CURRENT_RELEASE ("0.13.0-beta.4")
+# is the stamp that `atlas init` and `memory-migrate apply --batch
+# contract-file` WRITE for this same shape. Both stamps, with layers
+# schema/gist/memory on CONTRACT.json, are "current" — never a rewrite
+# target and never unknown.
 BETA3_RELEASE = "0.13.0-beta.3"
+CURRENT_RELEASE = "0.13.0-beta.4"
+CURRENT_STAMPS = (BETA3_RELEASE, CURRENT_RELEASE)
 IN_BETA_RELEASES = ("0.13.0-beta.2",)
 
 
@@ -73,7 +82,7 @@ def load_schema(root: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 # The only unstamped (or "0.13.0-beta"-stamped) release markers that may
 # resolve to shipped_beta. Any other stamp value — including unknown or
-# newer ones such as "0.13.0-beta.4" — must fail stamp_shape instead of
+# newer ones such as "0.13.0-beta.5" — must fail stamp_shape instead of
 # silently compiling under the old frame rules.
 SHIPPED_BETA_STAMPS = (None, "0.13.0-beta")
 
@@ -110,7 +119,7 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
       frame/gist/page (or absent and not the full beta.2 init document):
       shipped_beta — reads/compiles under old frame rules. Any other stamp
       value never resolves to shipped_beta, even when layers happen to
-      match; an unknown stamp (e.g. "0.13.0-beta.4") always fails closed,
+      match; an unknown stamp (e.g. "0.13.0-beta.5") always fails closed,
       regardless of layers.
     - SCHEMA.json, atlas_release "0.13.0-beta.2": in_beta, regardless of
       layers. SCHEMA.json with layers frame/gist/memory and a known stamp
@@ -118,8 +127,10 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
       layers shape), and so is an unstamped full beta.2 init document
       (templates plus types.recommended including "frame") with no memory
       key at all — align with classify_lineage.
-    - CONTRACT.json, atlas_release "0.13.0-beta.3", layers schema/gist/memory:
-      current — the beta.3 contract shape.
+    - CONTRACT.json, atlas_release "0.13.0-beta.3" or "0.13.0-beta.4", layers
+      schema/gist/memory: current — the current contract shape. beta.3 is
+      the original stamp (still accepted on read); beta.4 is the stamp
+      `atlas init` and `memory-migrate apply` WRITE for this shape.
     - Anything else is a stamp_shape mismatch (shape is None).
     """
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else None
@@ -127,15 +138,15 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
     atlas_release = schema.get("atlas_release")
 
     if contract_name == SCHEMA_NAME:
-        if atlas_release == BETA3_RELEASE:
+        if atlas_release in CURRENT_STAMPS:
             return None, (
-                f"SCHEMA.json cannot carry atlas_release={BETA3_RELEASE!r}; "
-                f"the {BETA3_RELEASE} contract shape is written to {CONTRACT_NAME}"
+                f"SCHEMA.json cannot carry atlas_release={atlas_release!r}; "
+                f"the current contract shape is written to {CONTRACT_NAME}"
             )
         if atlas_release in IN_BETA_RELEASES:
             return "in_beta", None
         if atlas_release not in SHIPPED_BETA_STAMPS:
-            # Unknown/newer stamps (e.g. "0.13.0-beta.4") must fail closed
+            # Unknown/newer stamps (e.g. "0.13.0-beta.5") must fail closed
             # rather than inferring a shape from memory.layers alone — an
             # unknown stamp never resolves to in_beta or shipped_beta.
             return None, (
@@ -162,11 +173,11 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
         )
 
     if contract_name == CONTRACT_NAME:
-        if atlas_release == BETA3_RELEASE and layers == BETA3_LAYERS:
+        if atlas_release in CURRENT_STAMPS and layers == BETA3_LAYERS:
             return "current", None
         return None, (
             f"CONTRACT.json atlas_release={atlas_release!r} layers={layers!r} does not match "
-            f"the {BETA3_RELEASE} contract shape (layers={BETA3_LAYERS!r})"
+            f"the current contract shape ({CURRENT_STAMPS!r}, layers={BETA3_LAYERS!r})"
         )
 
     return None, f"unknown contract filename {contract_name!r}"
@@ -314,7 +325,7 @@ def _release_older_than_beta_line(atlas_release: Any) -> bool:
     as older/pre-beta; it fails closed to "not older" so `apply` falls
     through to in-beta rather than migrating an unknown stamp. Unknown,
     non-numeric, or newer-looking values (including unknown beta stamps
-    such as "0.13.0-beta.4") are likewise never treated as older.
+    such as "0.13.0-beta.5") are likewise never treated as older.
     """
     if atlas_release is None:
         return True
@@ -330,8 +341,10 @@ def _release_older_than_beta_line(atlas_release: Any) -> bool:
 def classify_lineage(contract_name: str, schema: dict) -> str:
     """Classify a store for `memory-migrate` (path memory-migrate / pin 5).
 
-    - current: the beta.3 shape (CONTRACT.json, atlas_release 0.13.0-beta.3,
-      memory.layers schema/gist/memory).
+    - current: the current contract shape (CONTRACT.json, atlas_release
+      0.13.0-beta.3 or 0.13.0-beta.4, memory.layers schema/gist/memory).
+      beta.3 is the original stamp (still accepted on read, apply is a
+      no-op); beta.4 is the stamp `apply`/`atlas init` WRITE.
     - in-beta: atlas_release is exactly "0.13.0-beta" or "0.13.0-beta.2", OR
       SCHEMA.json already has memory.layers ["frame", "gist", "page"], OR
       SCHEMA.json is a full shipped-beta.2 init document (templates plus
@@ -351,7 +364,7 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else None
     layers = memory.get("layers") if isinstance(memory, dict) else None
 
-    if contract_name == CONTRACT_NAME and atlas_release == BETA3_RELEASE and layers == BETA3_LAYERS:
+    if contract_name == CONTRACT_NAME and atlas_release in CURRENT_STAMPS and layers == BETA3_LAYERS:
         return "current"
 
     if atlas_release in ("0.13.0-beta", *IN_BETA_RELEASES):

@@ -1895,19 +1895,19 @@ def main() -> int:
         unknown_stamp_doc = {
             "schema_version": "1.0",
             "atlas_id": "unknown-stamp",
-            "atlas_release": "0.13.0-beta.4",
+            "atlas_release": "0.13.0-beta.999",
             "structure": {},
             "compile": {},
             "memory": {"layers": ["frame", "gist", "memory"]},
         }
         unknown_shape, unknown_err = compute_stamp_shape("SCHEMA.json", unknown_stamp_doc)
         check(
-            "unknown stamp 0.13.0-beta.4 with IN_BETA_LAYERS is not in_beta",
+            "unknown stamp 0.13.0-beta.999 with IN_BETA_LAYERS is not in_beta",
             unknown_shape != "in_beta",
             f"shape={unknown_shape} err={unknown_err}",
         )
         check(
-            "unknown stamp 0.13.0-beta.4 with IN_BETA_LAYERS fails closed (shape is None)",
+            "unknown stamp 0.13.0-beta.999 with IN_BETA_LAYERS fails closed (shape is None)",
             unknown_shape is None and bool(unknown_err),
             f"shape={unknown_shape} err={unknown_err}",
         )

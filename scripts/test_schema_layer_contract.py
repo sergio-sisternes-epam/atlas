@@ -232,8 +232,8 @@ def main() -> int:
         )
         migrated = json.loads((pre_beta / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "pre-beta-eligible: migrated store stamps atlas_release/memory.layers beta.3",
-            migrated.get("atlas_release") == "0.13.0-beta.3"
+            "pre-beta-eligible: migrated store stamps atlas_release/memory.layers beta.4",
+            migrated.get("atlas_release") == "0.13.0-beta.4"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -292,8 +292,8 @@ def main() -> int:
         )
         migrated = json.loads((page_shaped / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "page-shaped-store: migration writes beta.3 contract stamp and layers",
-            migrated.get("atlas_release") == "0.13.0-beta.3"
+            "page-shaped-store: migration writes beta.4 contract stamp and layers",
+            migrated.get("atlas_release") == "0.13.0-beta.4"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -922,6 +922,77 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        # === beta3-contract-still-current ========================================
+        # A hand-stamped CONTRACT.json still carrying the original
+        # "0.13.0-beta.3" stamp (not the "0.13.0-beta.4" stamp init/apply now
+        # write) with layers schema/gist/memory must still read as "current":
+        # compile succeeds, memory-migrate assess reports lineage current, and
+        # apply is a no-op that never rewrites the stamp to beta.4.
+        beta3_reader = tmp / "beta3-contract-still-current"
+        beta3_reader.mkdir(parents=True)
+        (beta3_reader / "index.md").write_text("# Store\n\n- notes\n", encoding="utf-8")
+        write_index(beta3_reader / "notes")
+        write_page(
+            beta3_reader / "notes" / "g1.md",
+            "gist",
+            [{"path": "notes/index.md", "kind": "derived_from"}],
+        )
+        write_page(
+            beta3_reader / "notes" / "s1.md",
+            "schema",
+            [{"path": "notes/g1.md", "kind": "related"}],
+        )
+        (beta3_reader / "CONTRACT.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "beta3-reader",
+                    "atlas_release": "0.13.0-beta.3",
+                    "structure": {},
+                    "compile": {},
+                    "memory": {"layers": ["schema", "gist", "memory"]},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        before_beta3_hash = sha(beta3_reader / "CONTRACT.json")
+        code, payload = run_json(["compile", "--root", str(beta3_reader), "--json"])
+        check(
+            "beta3-contract-still-current: a hand-stamped 0.13.0-beta.3 CONTRACT.json compiles",
+            code == 0,
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(beta3_reader), "--operation", "assess", "--json"]
+        )
+        check(
+            "beta3-contract-still-current: memory-migrate assess reports lineage current",
+            code == 0 and payload.get("lineage") == "current",
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(beta3_reader),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "beta3-contract-still-current: apply on an already-current beta.3 store is a no-op",
+            code == 0 and (beta3_reader / "CONTRACT.json").is_file(),
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "beta3-contract-still-current: apply does not rewrite the stamp to beta.4",
+            sha(beta3_reader / "CONTRACT.json") == before_beta3_hash,
+        )
+
         # === memory-rung-preserves-lineage =======================================
         # A shipped 0.13.0-beta SCHEMA.json with no memory block must keep
         # frame/gist/page after `schema memory-rung --set` — merely setting the
@@ -1024,7 +1095,7 @@ def main() -> int:
                 {
                     "schema_version": "1.0",
                     "atlas_id": "rung-mismatch",
-                    "atlas_release": "0.13.0-beta.4",
+                    "atlas_release": "0.13.0-beta.999",
                     "structure": {},
                     "compile": {},
                 }
