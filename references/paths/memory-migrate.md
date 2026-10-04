@@ -105,7 +105,15 @@ unattested "migrate everything" request. For that named batch only:
    ```
    Focused `--path` / `--type` omit out-of-batch pages, so legacy
    `document` / `missing_gist` findings elsewhere do not block an in-batch
-   finish once the store is at `warn` or `error`. A red focused compile
+   finish once the store is at `warn` or `error`. Folder-level `frame_members`
+   findings follow the same descendant-only path prefix: focus the folder
+   (or an ancestor), not an individual file, to include them. Type focus
+   includes a folder finding when a direct concept page has that type;
+   `--type gist` therefore includes missing-frame findings, while
+   `--type frame` includes multiple-frame findings but not folders with
+   no frame. Both filters apply when combined. Folder findings have no
+   page body for inline ignores and remain on the configured memory rung.
+   A red focused compile
    stops the batch — fix before moving to the next page. There is no
    unattended bulk rewrite and **no** whole-store rewrite authorised here.
 3. **Optional rung-hold** — if the operator explicitly attests a temporary

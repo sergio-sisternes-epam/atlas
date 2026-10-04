@@ -667,16 +667,32 @@ def run(
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
         for finding in _memory_findings(r, schema, staging_name):
-            if allow_inline_ignores:
-                fpath_ign = (r / finding["path"]).resolve()
+            fpath = (r / finding["path"]).resolve()
+            directory_scoped = fpath.is_dir()
+            if allow_inline_ignores and not directory_scoped:
                 try:
-                    ign_text = fpath_ign.read_text(encoding="utf-8", errors="replace")
+                    ign_text = fpath.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     ign_text = ""
                 if finding["id"] in _ignores_in(ign_text):
                     continue
-            if focused:
-                fpath = (r / finding["path"]).resolve()
+            if focused and directory_scoped:
+                if not _in_focus(fpath, {}, None, focus_path):
+                    continue
+                if want_type:
+                    # Folder findings apply to types present in their direct concept pages.
+                    for page in iter_concept_md(fpath, staging_name):
+                        if page.parent.resolve() != fpath or page.name in RESERVED:
+                            continue
+                        try:
+                            meta, _ = read_page(page, sv)
+                        except FrontmatterError:
+                            continue
+                        if _in_focus(page, meta, want_type, None):
+                            break
+                    else:
+                        continue
+            elif focused:
                 try:
                     meta, _ = read_page(fpath, sv)
                 except FrontmatterError:

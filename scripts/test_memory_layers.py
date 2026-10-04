@@ -477,6 +477,49 @@ def main() -> int:
             ),
             str(payload.get("info")),
         )
+        for store, case, gist_file, has_frame in (
+            (store4b, "missing frame", "only-gist.md", False),
+            (store4, "multiple frames", "g1.md", True),
+        ):
+            write_index(store / "other", "Other")
+            for focus_args, expected in (
+                (["--path", "concepts"], True),
+                (["--path", "."], True),
+                (["--type", "gist"], True),
+                (["--type", "frame"], has_frame),
+                (["--path", "concepts", "--type", "gist"], True),
+                (["--path", "concepts", "--type", "frame"], has_frame),
+                (["--path", "other"], False),
+                (["--path", "other", "--type", "gist"], False),
+                (["--path", "other", "--type", "frame"], False),
+                (["--path", f"concepts/{gist_file}"], False),
+            ):
+                code, payload = run_json(
+                    ["compile", "--root", str(store), *focus_args, "--json"]
+                )
+                label = f"{case}, focus {' '.join(focus_args)}"
+                check(
+                    f"{label}: valid JSON and exit 0 at default info rung",
+                    code == 0 and payload.get("memory_rung") == "info",
+                    str(payload),
+                )
+                folder_findings = [
+                    finding
+                    for bucket in ("info", "warnings", "critical")
+                    for finding in payload.get(bucket, [])
+                    if finding.get("id") == "frame_members"
+                    and finding.get("path") == "concepts"
+                ]
+                check(
+                    f"{label}: folder finding follows path/type focus",
+                    len(folder_findings) == int(expected)
+                    and all(
+                        finding.get("severity") == "info"
+                        and finding in payload.get("info", [])
+                        for finding in folder_findings
+                    ),
+                    str(payload),
+                )
         rung4b_code, _ = run_json(
             ["schema", "memory-rung", "--set", "warn", "--root", str(store4b), "--json"]
         )
