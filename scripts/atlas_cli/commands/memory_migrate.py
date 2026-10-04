@@ -2,9 +2,9 @@
 
 This is distinct from `atlas migrate` (content into staging) and from the
 document-era-to-memory-layers content migration described in
-references/paths/memory-migrate.md. This command only ever rewrites the
-store's root contract file (SCHEMA.json -> CONTRACT.json) and its stamp; it
-never rewrites other pages.
+references/paths/memory-migrate.md. This command rewrites the root contract file (SCHEMA.json -> CONTRACT.json)
+and adds missing beta.3 schema pages for gist-bearing folders; it never
+rewrites existing pages.
 """
 
 from __future__ import annotations
@@ -12,16 +12,110 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..core.paths import CONTRACT_NAME, SCHEMA_NAME, store_root
+from ..core.frontmatter import FrontmatterError, read_page
+from ..core.paths import CONTRACT_NAME, RESERVED, SCHEMA_NAME, iter_concept_md, rel, store_root
+from ..core.recall_config import schema_version
 from ..core.schema import (
     BETA3_LAYERS,
     BETA3_RELEASE,
     classify_lineage,
     find_contract_path,
+    staging_dir_name,
 )
 
 REFUSE_BATCH_TOKENS = frozenset({"", "migrate everything"})
 LEGACY_BATCH = "contract-file"
+MEMORY_PAGE_TYPES = frozenset({"memory", "gist", "frame"})
+SCHEMA_PAGE_BODY = (
+    "This schema page groups the gists in this folder for consistent "
+    "navigation and interpretation."
+)
+
+
+def _read_concept_pages(root: Path, schema: dict) -> list[tuple[Path, dict]]:
+    pages: list[tuple[Path, dict]] = []
+    version = schema_version(schema)
+    for path in iter_concept_md(root, staging_dir_name(schema)):
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, _ = read_page(path, version)
+        except FrontmatterError:
+            continue
+        if meta:
+            pages.append((path, meta))
+    return pages
+
+
+def _schema_pages_to_create(
+    root: Path, pages: list[tuple[Path, dict]]
+) -> tuple[list[tuple[Path, list[str]]], dict | None]:
+    gists_by_folder: dict[str, list[str]] = {}
+    schemas_by_folder: dict[str, list[str]] = {}
+    for path, meta in pages:
+        folder = str(path.parent.resolve().relative_to(root.resolve())).replace("\\", "/")
+        ptype = str(meta.get("type") or "").strip()
+        if ptype == "gist":
+            gists_by_folder.setdefault(folder, []).append(rel(root, path))
+        elif ptype == "schema":
+            schemas_by_folder.setdefault(folder, []).append(rel(root, path))
+
+    additions: list[tuple[Path, list[str]]] = []
+    for folder in sorted(set(gists_by_folder) | set(schemas_by_folder)):
+        existing_schemas = schemas_by_folder.get(folder, [])
+        if len(existing_schemas) > 1:
+            return [], {
+                "id": "schema_folder",
+                "path": folder or ".",
+                "msg": (
+                    f"folder {folder or '.'!r} already has {len(existing_schemas)} "
+                    "type=schema pages; refusing to make the schema_folder invariant worse"
+                ),
+            }
+        gist_paths = sorted(gists_by_folder.get(folder, []))
+        if not gist_paths or existing_schemas:
+            continue
+
+        directory = root if folder == "." else root.joinpath(*folder.split("/"))
+        target = directory / "schema.md"
+        current = root
+        has_symlink_component = current.is_symlink()
+        for part in (() if folder == "." else folder.split("/")):
+            current = current / part
+            has_symlink_component = has_symlink_component or current.is_symlink()
+        if has_symlink_component or target.is_symlink():
+            return [], {
+                "id": "schema_symlink",
+                "path": rel(root, target),
+                "msg": f"{rel(root, target)} would be written through a symlink; refusing",
+            }
+        if target.exists():
+            return [], {
+                "id": "schema_path_exists",
+                "path": rel(root, target),
+                "msg": f"{rel(root, target)} already exists; refusing to overwrite it",
+            }
+        additions.append((target, gist_paths))
+    return additions, None
+
+
+def _write_schema_page(path: Path, gist_paths: list[str]) -> None:
+    relates = "".join(
+        f"  - path: {json.dumps(gist_path, ensure_ascii=False)}\n"
+        "    kind: related\n"
+        for gist_path in gist_paths
+    )
+    path.write_text(
+        "---\n"
+        "type: schema\n"
+        "title: Gist schema\n"
+        "created: 2026-10-04\n"
+        "relates_to:\n"
+        f"{relates}"
+        "---\n\n"
+        f"{SCHEMA_PAGE_BODY}\n",
+        encoding="utf-8",
+    )
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -77,7 +171,13 @@ def run(
         return 2
 
     contract_name = contract_path.name
-    lineage = classify_lineage(contract_name, schema)
+    contract_lineage = classify_lineage(contract_name, schema)
+    lineage = contract_lineage
+    if lineage == "pre-beta" and any(
+        str(meta.get("type") or "").strip() in MEMORY_PAGE_TYPES
+        for _, meta in _read_concept_pages(r, schema)
+    ):
+        lineage = "in-beta"
 
     if operation in ("assess", "inventory"):
         payload = {
@@ -97,7 +197,7 @@ def run(
         return 2
 
     # --- apply ---
-    if lineage == "current":
+    if contract_lineage == "current":
         payload = {
             "ok": True,
             "root": str(r),
@@ -109,7 +209,7 @@ def run(
         _print(as_json, payload)
         return 0
 
-    if lineage == "in-beta":
+    if contract_lineage == "in-beta":
         payload = {
             "ok": False,
             "root": str(r),
@@ -132,7 +232,7 @@ def run(
         _print(as_json, payload)
         return 2
 
-    # lineage == "pre-beta"
+    # contract_lineage == "pre-beta"
     batch_value = (batch or "").strip()
     if batch_value.lower() in REFUSE_BATCH_TOKENS:
         payload = {
@@ -166,7 +266,8 @@ def run(
         return 2
 
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
-    # atlas_release/memory.layers to the beta.3 shape. Other pages untouched.
+    # atlas_release/memory.layers to the beta.3 shape. Existing pages stay
+    # untouched; missing folder schema pages are added below.
     new_path = r / CONTRACT_NAME
     if new_path.is_symlink():
         # is_file() follows symlinks and is False for a broken link, which would
@@ -189,6 +290,21 @@ def run(
         }
         _print(as_json, payload)
         return 2
+
+    schema_pages, schema_error = _schema_pages_to_create(r, _read_concept_pages(r, schema))
+    if schema_error:
+        payload = {
+            "ok": False,
+            "root": str(r),
+            "operation": "apply",
+            "contract_file": contract_name,
+            "lineage": lineage,
+            "error": schema_error["msg"],
+            "findings": [schema_error],
+        }
+        _print(as_json, payload)
+        return 2
+
     schema["atlas_release"] = BETA3_RELEASE
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else {}
     memory["layers"] = list(BETA3_LAYERS)
@@ -196,6 +312,8 @@ def run(
     new_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
     if contract_path != new_path:
         contract_path.unlink()
+    for schema_path, gist_paths in schema_pages:
+        _write_schema_page(schema_path, gist_paths)
     payload = {
         "ok": True,
         "root": str(r),
@@ -203,7 +321,10 @@ def run(
         "batch": batch_value,
         "contract_file": CONTRACT_NAME,
         "lineage": "current",
-        "notes": [f"renamed {SCHEMA_NAME} -> {CONTRACT_NAME}; set atlas_release={BETA3_RELEASE}"],
+        "notes": [
+            f"renamed {SCHEMA_NAME} -> {CONTRACT_NAME}; set atlas_release={BETA3_RELEASE}",
+            *[f"created schema page {rel(r, path)}" for path, _ in schema_pages],
+        ],
     }
     _print(as_json, payload)
     return 0
