@@ -201,8 +201,8 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 | Topic | Rule |
 |-------|------|
 | Structure | Free layout; mandatory single root contract file (`CONTRACT.json` on new stores, `SCHEMA.json` on shipped 0.13.0-beta and 0.13.0-beta.2 stores — never both); short-lived `staging/`; `index.md` / `log.md` per OKF |
-| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, frame needs two or more gists), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
-| Memory layers | A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. On 0.13.0-beta.2/beta.3 a lone gist still counts; the shipped 0.13.0-beta original required two or more. |
+| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
+| Memory layers | A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind}]` - kinds: follows, records, supersedes, implements, derived_from, related |
 | Composition | Optional mesh; consolidated in compile |

@@ -14,7 +14,7 @@
   `CONTRACT.json` present, or neither present, fail compile closed (finding
   id `schema_present`). Shipped 0.13.0-beta stays readable byte-for-byte:
   `SCHEMA.json`, layers `frame`/`gist`/`page`, episode type id `page`,
-  frame still requires at least two distinct gists.
+  one gist still gets a frame (same as beta.2 and beta.3 `schema_folder`).
 - Stamp/shape agreement (finding id `stamp_shape`): `SCHEMA.json` with
   layers `frame`/`gist`/`page` (`atlas_release` absent or `0.13.0-beta`) is
   shipped-beta; `SCHEMA.json` with `atlas_release` `0.13.0-beta.2` is
@@ -28,7 +28,7 @@
   gists has exactly one `type: schema` page, a folder with zero gists has
   none, and a second `schema` in a gist-bearing folder fails. This rule
   does not apply to shipped-beta `SCHEMA.json` stores, which keep
-  `frame_members` (two or more gists) unchanged.
+  `frame_members` (one gist still counts) unchanged.
 - CLI `atlas memory-migrate --operation assess|inventory|apply [--batch
   <token>]`: the pre-beta -> beta.3 contract-file migration path (path id
   `memory-migrate`). `assess`/`inventory` write nothing and report
