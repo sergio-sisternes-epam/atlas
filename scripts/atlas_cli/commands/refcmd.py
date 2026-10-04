@@ -35,6 +35,15 @@ class RefError(ValueError):
     pass
 
 
+class RewriteInstalled(RefError):
+    """Replacement is installed and this function could not undo the exchange."""
+
+    def __init__(self, message: str, *, dev: int, ino: int):
+        super().__init__(message)
+        self.dev = dev
+        self.ino = ino
+
+
 def _reject_rev(rev: str) -> None:
     if (
         not rev
@@ -100,6 +109,14 @@ def _resolve_commit(repo: Path, rev: str) -> str:
     if code != 0 or not out:
         raise RefError(err or f"rev does not resolve in the store repo: {rev}")
     return out
+
+
+def _require_tip_ancestor(repo: Path, sha: str) -> None:
+    """A prune rev is the pre-prune snapshot, not a later or unrelated commit."""
+    code, _out, err = run_git(["merge-base", "--is-ancestor", sha, "HEAD"], cwd=repo)
+    if code != 0:
+        detail = f": {err}" if err else ""
+        raise RefError(f"refusing rev {sha}; it is not an ancestor of HEAD{detail}")
 
 
 def _historical_mode(repo: Path, sha: str, gitpath: str) -> str | None:
@@ -835,7 +852,7 @@ def _rewrite_dir_file(
         if info.st_nlink > 1:
             raise RefError(f"refusing to rewrite hard-linked page {label}")
         mode = stat.S_IMODE(info.st_mode)
-    tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}.tmp"
+    tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}-{os.urandom(4).hex()}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
     try:
         if mode is not None:
@@ -904,7 +921,37 @@ def _rewrite_dir_file(
                     and current.st_dev == info.st_dev
                     and current.st_ino == info.st_ino
                 ):
-                    os.unlink(tmp, dir_fd=dirfd)
+                    try:
+                        os.unlink(tmp, dir_fd=dirfd)
+                    except OSError as unlink_error:
+                        try:
+                            _rollback_exchange(
+                                dirfd,
+                                tmp,
+                                name,
+                                written.st_dev,
+                                written.st_ino,
+                                label,
+                            )
+                        except RefError as rollback_error:
+                            tmp = ""
+                            try:
+                                installed = os.lstat(name, dir_fd=dirfd)
+                            except OSError:
+                                raise rollback_error
+                            if (
+                                stat.S_ISREG(installed.st_mode)
+                                and not stat.S_ISLNK(installed.st_mode)
+                                and installed.st_dev == written.st_dev
+                                and installed.st_ino == written.st_ino
+                            ):
+                                raise RewriteInstalled(
+                                    f"refusing to rewrite {label}",
+                                    dev=installed.st_dev,
+                                    ino=installed.st_ino,
+                                ) from rollback_error
+                            raise
+                        raise RefError(f"refusing to rewrite {label}") from unlink_error
                 tmp = ""
             finally:
                 os.close(lockfd)
@@ -1302,6 +1349,7 @@ def run_prune(
             raise RefError("duplicate --drop path")
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
+        _require_tip_ancestor(repo, sha)
         warnings: list[str] = []
         for rel in drop_rels:
             gitpath = _git_path(store, repo, rel)
@@ -1379,14 +1427,18 @@ def run_prune(
         try:
             for rel, updated, original_bytes, _mode, dev, ino in pending:
                 new_bytes = updated.encode("utf-8")
-                new_dev, new_ino = _rewrite_store(
-                    store,
-                    rel,
-                    new_bytes,
-                    expected=original_bytes,
-                    expected_dev=dev,
-                    expected_ino=ino,
-                )
+                try:
+                    new_dev, new_ino = _rewrite_store(
+                        store,
+                        rel,
+                        new_bytes,
+                        expected=original_bytes,
+                        expected_dev=dev,
+                        expected_ino=ino,
+                    )
+                except RewriteInstalled as installed:
+                    written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
+                    raise
                 written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
             for rel in drop_rels:
                 gitpath = _git_path(store, repo, rel)

@@ -26,6 +26,7 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
     _empty_relates,
     _write_all,
     append_ref_edges,
+    run_prune,
 )
 from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: E402
 from atlas_cli.core import recall_index  # noqa: E402
@@ -2120,6 +2121,140 @@ def main() -> int:
             failures.append("current recall generation should still take the fast path")
         else:
             print("[PASS] fast path accepts the current recall format")
+
+        future = tmp / "future-rev"
+        future_init = run(["init", "--root", str(future), "--json"])
+        if future_init.returncode != 0:
+            failures.append(f"future-rev store init failed: {future_init.stdout}")
+        else:
+            git(future, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (future / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (future / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (future / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            git(future, ["add", "."])
+            git(future, ["commit", "-m", "trial"])
+            before_living = (future / "living.md").read_text(encoding="utf-8")
+            git(future, ["commit", "--allow-empty", "-m", "later snapshot"])
+            later = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=future,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            git(future, ["reset", "--hard", "HEAD~1"])
+            later_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    later,
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(future),
+                    "--json",
+                ]
+            )
+            if (
+                later_prune.returncode == 0
+                or not (future / "dead.md").is_file()
+                or (future / "living.md").read_text(encoding="utf-8") != before_living
+                or "ancestor" not in later_prune.stdout
+            ):
+                failures.append(f"descendant rev should be refused before mutation: {later_prune.stdout}")
+            else:
+                print("[PASS] prune refuses a descendant rev with matching blobs")
+
+        cleanup = tmp / "cleanup-rewrite"
+        cleanup_init = run(["init", "--root", str(cleanup), "--json"])
+        if cleanup_init.returncode != 0:
+            failures.append(f"cleanup-rewrite store init failed: {cleanup_init.stdout}")
+        else:
+            git(cleanup, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (cleanup / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (cleanup / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (cleanup / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            git(cleanup, ["add", "."])
+            git(cleanup, ["commit", "-m", "trial"])
+            before_living = (cleanup / "living.md").read_text(encoding="utf-8")
+            import atlas_cli.commands.refcmd as refcmd
+
+            real_unlink = os.unlink
+            unlinked = {"temps": 0}
+
+            def failing_temp_unlink(path, *args, **kwargs):
+                if str(path).startswith(".atlas-prune-") and unlinked["temps"] == 0:
+                    unlinked["temps"] += 1
+                    raise OSError("injected temp unlink failure")
+                return real_unlink(path, *args, **kwargs)
+
+            os.unlink = failing_temp_unlink
+            try:
+                undone = run_prune(
+                    str(cleanup),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                os.unlink = real_unlink
+            if (
+                undone == 0
+                or not (cleanup / "dead.md").is_file()
+                or (cleanup / "living.md").read_text(encoding="utf-8") != before_living
+                or list(cleanup.glob(".atlas-prune-*"))
+            ):
+                failures.append("temp unlink failure left a rewritten tip page")
+            else:
+                print("[PASS] temp unlink failure exchanges the original page back")
+
+            real_rollback = refcmd._rollback_exchange
+            rollbacks = {"n": 0}
+
+            def failing_rollback(*args, **kwargs):
+                rollbacks["n"] += 1
+                if rollbacks["n"] == 1:
+                    raise RefError("injected rollback failure")
+                return real_rollback(*args, **kwargs)
+
+            unlinked["temps"] = 0
+            os.unlink = failing_temp_unlink
+            refcmd._rollback_exchange = failing_rollback
+            try:
+                recorded = run_prune(
+                    str(cleanup),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                os.unlink = real_unlink
+                refcmd._rollback_exchange = real_rollback
+            if (
+                recorded == 0
+                or not (cleanup / "dead.md").is_file()
+                or (cleanup / "living.md").read_text(encoding="utf-8") != before_living
+            ):
+                failures.append("completed exchange was not rolled back with the prune")
+            else:
+                print("[PASS] failed undo of a completed exchange is rolled back with the prune")
 
         if failures:
             print("\n" + "\n".join(failures))

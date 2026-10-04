@@ -260,7 +260,7 @@ def ref_show_cmd(path: str, rev: str, root: str | None, as_json: bool) -> None:
 @ref_group.command("prune")
 @click.option("--summary", required=True, help="tip stand-in that remains")
 @click.option("--drop", "drops", multiple=True, required=True, help="exclusive-to-frame page to remove from tip")
-@click.option("--ref", "rev", required=True, help="pre-prune git rev that still contains --drop")
+@click.option("--ref", "rev", required=True, help="pre-prune git rev that still contains --drop and is an ancestor of HEAD")
 @click.option("--kind", required=True, help="kind for the summary history edges; not invented")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")

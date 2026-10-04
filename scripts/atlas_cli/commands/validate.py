@@ -556,6 +556,8 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
         for item in rels:
             if not isinstance(item, dict):
                 continue
+            if str(item.get("ref") or "").strip():
+                continue
             if str(item.get("kind") or item.get("role") or "").strip().lower() == kind:
                 out.append(item)
         return out
