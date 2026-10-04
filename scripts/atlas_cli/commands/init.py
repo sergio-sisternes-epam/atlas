@@ -99,16 +99,21 @@ def run(
     r = store_root(root)
     r.mkdir(parents=True, exist_ok=True)
     contract_path = r / CONTRACT_NAME
-    if contract_path.is_symlink():
-        # is_file() follows symlinks and is False for a broken link, which would
-        # otherwise let write_text() follow the link (even outside the root).
-        # Refuse unconditionally — --force must not bypass this.
-        msg = f"{CONTRACT_NAME} is a symlink; refusing to write through it"
-        if as_json:
-            print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
-        else:
-            print(f"atlas init — {msg}")
-        return 2
+    schema_path = r / "SCHEMA.json"
+    # is_file() follows symlinks and is False for a broken link, which would
+    # otherwise let write_text()/unlink() follow or replace the link (even
+    # outside the root), or leave a broken SCHEMA.json symlink invisible to
+    # has_contract_file() below. Use is_symlink() (non-following) so a broken
+    # link is caught too, and do this before any write — --force must not
+    # bypass this.
+    for path, name in ((schema_path, "SCHEMA.json"), (contract_path, CONTRACT_NAME)):
+        if path.is_symlink():
+            msg = f"{name} is a symlink; refusing to write through it"
+            if as_json:
+                print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
+            else:
+                print(f"atlas init — {msg}")
+            return 2
     if has_contract_file(r) and not force:
         msg = f"{CONTRACT_NAME} already exists; pass --force to overwrite"
         if as_json:
@@ -135,9 +140,8 @@ def run(
     # so a failed write keeps the old file (or at worst leaves both present,
     # fail-closed under schema_present) rather than ever leaving neither.
     contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
-    stale_schema = r / "SCHEMA.json"
-    if force and stale_schema.is_file():
-        stale_schema.unlink()
+    if force and schema_path.is_file():
+        schema_path.unlink()
 
     tmpl_src = skill_root() / "references" / "templates"
     tmpl_dst = r / "templates"

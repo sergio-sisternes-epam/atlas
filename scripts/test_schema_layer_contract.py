@@ -837,6 +837,81 @@ def main() -> int:
             f"exit={code} payload={payload}",
         )
 
+        # === init-schema-symlink-rejected (broken SCHEMA.json symlink) ===========
+        # A broken SCHEMA.json symlink must be caught by init too, not just
+        # find_contract_path's readers — has_contract_file() uses is_file(),
+        # which is False for a broken link, so without an explicit is_symlink()
+        # check init would silently write CONTRACT.json alongside the dangling
+        # SCHEMA.json symlink.
+        init_symlink_store = tmp / "init-schema-symlink-store"
+        init_symlink_store.mkdir(parents=True)
+        (init_symlink_store / "SCHEMA.json").symlink_to(tmp / "init-schema-symlink-does-not-exist.json")
+        code, payload = run_json(["init", "--root", str(init_symlink_store), "--json"])
+        check(
+            "init-schema-symlink-rejected: init refuses a broken SCHEMA.json symlink",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "init-schema-symlink-rejected: init does not create CONTRACT.json",
+            not (init_symlink_store / "CONTRACT.json").exists(),
+        )
+        check(
+            "init-schema-symlink-rejected: the SCHEMA.json symlink is left in place",
+            (init_symlink_store / "SCHEMA.json").is_symlink(),
+        )
+
+        code, payload = run_json(["init", "--root", str(init_symlink_store), "--force", "--json"])
+        check(
+            "init-schema-symlink-rejected: --force also refuses a broken SCHEMA.json symlink",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "init-schema-symlink-rejected: --force does not create CONTRACT.json",
+            not (init_symlink_store / "CONTRACT.json").exists(),
+        )
+        check(
+            "init-schema-symlink-rejected: --force leaves the SCHEMA.json symlink in place",
+            (init_symlink_store / "SCHEMA.json").is_symlink(),
+        )
+
+        # A SCHEMA.json symlink to a real outside file must not have that file
+        # modified either.
+        init_symlink_outside = tmp / "init-schema-symlink-outside-target.json"
+        init_symlink_outside.write_text(
+            json.dumps({"schema_version": "1.0", "atlas_id": "outside", "structure": {}, "compile": {}}),
+            encoding="utf-8",
+        )
+        init_symlink_outside_before = sha(init_symlink_outside)
+        init_symlink_store_live = tmp / "init-schema-symlink-store-live"
+        init_symlink_store_live.mkdir(parents=True)
+        (init_symlink_store_live / "SCHEMA.json").symlink_to(init_symlink_outside)
+        code, payload = run_json(["init", "--root", str(init_symlink_store_live), "--force", "--json"])
+        check(
+            "init-schema-symlink-rejected: init refuses a SCHEMA.json symlink to a real file",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "init-schema-symlink-rejected: the outside symlink target is unchanged",
+            sha(init_symlink_outside) == init_symlink_outside_before,
+        )
+
+        # A normal (non-symlink) init with no pre-existing SCHEMA.json/CONTRACT.json
+        # still writes only CONTRACT.json.
+        init_plain_store = tmp / "init-schema-symlink-plain-store"
+        code, payload = run_json(["init", "--root", str(init_plain_store), "--json"])
+        check(
+            "init-schema-symlink-rejected: a plain init (no symlink) still succeeds",
+            code == 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "init-schema-symlink-rejected: a plain init writes only CONTRACT.json",
+            (init_plain_store / "CONTRACT.json").is_file() and not (init_plain_store / "SCHEMA.json").exists(),
+        )
+
         # === malformed-stamp-fails-closed (stamp compare) ========================
         malformed = tmp / "malformed-stamp-fails-closed"
         malformed.mkdir(parents=True)
