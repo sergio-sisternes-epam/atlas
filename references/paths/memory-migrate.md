@@ -10,7 +10,8 @@ description: Use this path when a store still treats documents as the core recor
 
 A store still treats `document` as the core record, or `atlas compile` is
 mostly reporting `legacy_document` and `missing_gist` noise, and the operator
-wants to move that store toward the memory layers (`frame`, `gist`, `memory`).
+wants to move that store toward the memory layers (`frame`/`schema`, `gist`,
+`memory`).
 
 Not for relocating a store (use path **migrate**). Not for installing the
 recall index (use path **configure**). Not for hand-editing `SCHEMA.json`.
@@ -84,29 +85,28 @@ not edit `SCHEMA.json`.
 ### inventory
 
 Same facts as assess, plus a short judgement of which named batch of pages
-could reasonably move toward `memory`/`gist`/`frame` next. Write nothing. Do
-not create or edit files during inventory. When the judgement names a batch
-that would add one or more gists in a folder, plan that folder's single
-deterministic frame: one frame in the same folder grouping exactly the
-gists the folder will contain after the batch, including gists already
-there and gists the batch adds. A lone gist still requires one frame; a
-folder that will have zero gists gets no frame. Planning names the frame;
-it does not write it. Mining the store for repeated patterns across gists
-remains out of scope for this path.
+could reasonably move toward `memory`/`gist`/`schema` next. Write nothing. Do
+not create or edit files during inventory. On shipped `SCHEMA.json` shapes,
+retain the existing `frame_members` ladder. On the current `CONTRACT.json`
+shape, plan a schema to own the gists and list the schema from the folder
+`index.md`; multiple schemas are legal when subjects differ. A schema-only
+folder is not a compile error.
 
 ### apply
 
 Only when the operator asks and names the batch. Refuse an unscoped or
 unattested "migrate everything" request. For that named batch only:
 
-1. Use path **remember** to retype, add a gist, or add a frame as named by
-   the operator. Whenever the named batch adds a gist, include the planned
-   frame for that folder, creating or updating its single frame to group
-   exactly the gists the folder will contain after the batch. Do not leave
-   a folder with gists and no frame (`frame_members`). Remember's index-only
-   exception applies here: a first
-   compile that exits 1 solely for `index_md_present` / missing `index.md`
-   may proceed to create or update that folder's hot list, then the second
+1. Use path **remember** to retype, add a gist, or add a schema as named by
+   the operator. On current shape, every gist must be covered by at least
+   one same-folder schema; each schema lists its own gists. When the live
+   subject changes, create another `<name>.schema.md`, link it same-level to
+   the prior schema, and list it from `index.md`; do not rewrite sibling
+   schemas. Keep `hub.md` in place as a work hub, not a memory page.
+   Remember's index-only exception applies here: a first compile whose only
+   findings are `schema_missing_from_index` criticals and/or
+   `index_md_present` warnings may proceed to create or update the reserved
+   directory listing and schema cue even when the exit is 2; the second
    compile must exit 0 before the page counts as stored.
 2. **Batch-scoped validation** — after each remember (or after the batch),
    compile focused on the named batch path(s), not the whole store:
@@ -119,9 +119,8 @@ unattested "migrate everything" request. For that named batch only:
    findings follow the same descendant-only path prefix: focus the folder
    (or an ancestor), not an individual file, to include them. Type focus
    includes a folder finding when a direct concept page has that type;
-   `--type gist` therefore includes missing-frame findings, while
-   `--type frame` includes multiple-frame findings but not folders with
-   no frame. Both filters apply when combined. Folder findings have no
+   `--type gist` therefore includes shipped-beta missing-frame findings,
+   while `--type frame` includes shipped-beta frame findings. Both filters apply when combined. Folder findings have no
    page body for inline ignores and remain on the configured memory rung.
    A red focused compile
    stops the batch — fix before moving to the next page. There is no
@@ -146,7 +145,7 @@ has (`SCHEMA.json` or `CONTRACT.json`), never both.
 ### Contract-file migration (CLI, pre-beta only)
 
 Distinct from the assess/inventory/apply procedure above (which moves
-*content* toward page/gist/frame), `atlas memory-migrate` is a CLI command
+*content* toward memory/gist/schema on current shape), `atlas memory-migrate` is a CLI command
 that rewrites the store's root contract file and adds the required schema
 pages, without rewriting existing pages:
 
@@ -191,11 +190,17 @@ and writes nothing — same unscoped-batch guard as the content-migration
 procedure above. On a store with an eligible pre-beta contract, passing
 `--batch contract-file` renames `SCHEMA.json` to `CONTRACT.json`, sets
 `atlas_release` to `0.13.0-beta.4` and `memory.layers` to
-`["schema", "gist", "memory"]`, and does not rewrite any other page.
+`["schema", "gist", "memory"]`, and does not rewrite existing pages.
 Existing `frame`, `gist`, and `memory` pages are preserved byte-for-byte.
-The contract-file batch adds exactly one `type: schema` page in each folder
-with one or more gists (one gist counts); folders with zero gists get no
-schema page. Stamps `0.13.0-beta` and `0.13.0-beta.2`, and the unstamped
+The contract-file batch adds a `type: schema` page named
+`schema.schema.md` in each gist-bearing folder that has no schema yet, and
+cues it from that folder's index. It does not require exactly one schema;
+later subject changes can add further `<name>.schema.md` pages. Folders with
+zero gists are not required to have schemas by compile. Current-shape suffixes
+are search handles only; frontmatter `type` is authoritative. If this batch
+replaces an unsuffixed `frame.md` of type `frame` with the generated schema,
+it removes that leftover frame file; unrelated frame pages are preserved. Stamps
+`0.13.0-beta` and `0.13.0-beta.2`, and the unstamped
 full beta.2 init, and the specified `memory.layers` shapes return
 `in_beta_not_legacy` and are not rewritten.
 

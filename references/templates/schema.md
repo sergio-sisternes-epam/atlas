@@ -11,11 +11,11 @@ relates_to: []  # [{path: <gist>, kind: related}, ...] — one or more gists
 ---
 
 <!--
-schema is the 0.13.0-beta.3 rename of frame: it names a repeated pattern
-across the gists in its folder. One gist still counts — a folder with one
-or more gists has exactly one type=schema page; a folder with zero gists
-has none. It lists its gists by `relates_to` kind `related`; it does not
-rewrite them, and its members are gists, never pages.
+On the current CONTRACT.json shape, schema pages own related gists and each
+folder gist must be covered by at least one same-folder schema. More than one
+schema is legal when subjects differ. The index cues schemas; it is not a
+copy of their memories. Use a `.schema.md` search-handle suffix while keeping
+frontmatter type `schema`.
 -->
 
 ## Content

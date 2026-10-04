@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0-beta.6 - 2026-10-04
+
+- Current-shape recall now progressively discloses `index → schema → gist →
+  memory` and stops at the first level that answers. The folder `index.md` is
+  a schema cue list, not copied memory or a hot list of every gist; work hubs
+  stay outside the memory walk.
+- Remember cascades new or contradicted memories up through their owning gist
+  and schema. Same-folder gists may be covered by multiple schemas; each
+  schema is cued from `index.md`. Current-shape `.schema.md`, `.gist.md`, and
+  `.memory.md` suffixes are search handles; frontmatter `type` remains the
+  contract. Compile checks uncovered gists, missing schema index cues, and
+  stale gist descriptions using the exact specified gates.
+- `memory-migrate` creates suffixed schema pages and adds their index cues.
+  Package surfaces move to v0.13.0-beta.6; the current-store write stamp
+  remains `atlas_release` `0.13.0-beta.4` and existing beta.3 readers remain
+  supported.
+
 ## 0.13.0-beta.5 - 2026-10-04
 
 - `atlas init` and `memory-migrate apply --batch contract-file` now write

@@ -1,0 +1,20 @@
+id: schema-layer-contract-adversarial-v2
+packages: [atlas]
+work_id: 2026-10-04-four-level-disclosure
+adversarial: true
+smokes:
+  - id: current-shape-gist-schema-coverage
+    source: "scripts/atlas_cli/commands/validate.py::_schema_folder_findings; scripts/test_schema_layer_contract.py"
+    expect: "Each current-shape folder gist is listed via relates_to kind related by at least one same-folder type=schema page. One gist still requires schema coverage; zero schemas with gists fails."
+  - id: multiple-subject-schemas
+    source: "scripts/atlas_cli/commands/validate.py::_schema_folder_findings; references/paths/remember.md"
+    expect: "A second schema is legal. Distinct schemas may list their own gists; compile does not require one schema to list every folder gist and does not reject a schema-only folder."
+  - id: schema-index-cue
+    source: "scripts/atlas_cli/commands/validate.py::_schema_folder_findings; scripts/test_schema_layer_contract.py"
+    expect: "Each current-shape type=schema page must be linked from its same-folder index.md, otherwise critical id schema_missing_from_index."
+  - id: no-current-schema-gate-on-shipped-store
+    source: "scripts/atlas_cli/commands/validate.py; scripts/test_schema_layer_contract.py"
+    expect: "A shipped SCHEMA.json store does not need any type=schema page. Its existing frame_members info/warn/error behavior and frame/gist/page or memory type names remain unchanged."
+  - id: no-subject-change-or-suffix-type-gate
+    source: "scripts/atlas_cli/commands/validate.py"
+    expect: "Compile does not detect subject change and does not compare filename suffix with frontmatter type. Suffixes are search handles; frontmatter type is authoritative."
