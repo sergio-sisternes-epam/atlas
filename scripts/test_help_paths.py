@@ -54,6 +54,43 @@ def registry_ids(skill: str) -> list[str]:
     return ids
 
 
+# Retired path/module name. SCHEMA object key `query` (engine config) is not a path.
+_SCHEMA_QUERY_KEY = re.compile(
+    r"SCHEMA(?:\.json)?\b(?:(?!\n\n).){0,180}?key\s+`query`"
+    r"|`query\.search_engine`"
+    r"|\bquery\.search_engine\b"
+    r"|\"query\"\s*:",
+    re.IGNORECASE | re.DOTALL,
+)
+_OPERATIONAL_QUERY_MODULE = re.compile(
+    r"\*\*query\*\*"
+    r"|`query`"
+    r"|\bhelp\s+query\b"
+    r"|\bpaths/query(?:\.md)?\b"
+    r"|\breferences/paths/query\.md\b"
+    r"|\b(?:module|path)\s+query\b"
+    r"|\bmount/init/query\b"
+    r"|\bsame as query\b"
+    r"|\bto query and remember\b"
+    r"|\bremember,\s*query\b"
+    r"|\bwhat does query\b"
+    r"|\(\s*query\s*,"
+    r"|,\s*query\s*,"
+    r"|\bquery\s+module\b",
+    re.IGNORECASE,
+)
+
+
+def operational_query_module_mentions(text: str) -> list[str]:
+    """Return operational path/module uses of the retired name ``query``.
+
+    SCHEMA object key ``query`` (engine config, including ``query.search_engine``)
+    is not an operational path and is ignored.
+    """
+    masked = _SCHEMA_QUERY_KEY.sub(lambda match: " " * len(match.group(0)), text)
+    return _OPERATIONAL_QUERY_MODULE.findall(masked)
+
+
 class HelpPathContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -228,8 +265,33 @@ class HelpPathContractTests(unittest.TestCase):
             "retrieval-failures-are-visible",
             "no-match-is-not-outage",
             "no-visualise-path",
+            "no-operational-query-module",
         ):
             self.assertIn(f"id: {smoke}", scenario)
+        self.assertIn("SCHEMA object key query", scenario)
+
+    def test_packaged_baseline_rejects_operational_query_module(self) -> None:
+        for label, text in (
+            ("help/index", self.baseline_index),
+            ("help/getting-started", self.baseline_gs),
+            ("paths/mount", (ROOT / "references/paths/mount.md").read_text(encoding="utf-8")),
+            ("paths/landscape", (ROOT / "references/paths/landscape.md").read_text(encoding="utf-8")),
+            ("paths/schema", (ROOT / "references/paths/schema.md").read_text(encoding="utf-8")),
+        ):
+            hits = operational_query_module_mentions(text)
+            self.assertEqual([], hits, f"{label} still names query as an operational path: {hits}")
+        self.assertNotIn("query", self.catalog)
+        self.assertIn("recall", self.catalog)
+        self.assertIn("`recall`", self.baseline_gs)
+        self.assertIn("**help recall**", self.baseline_gs)
+        self.assertIn("**recall**", self.baseline_gs)
+        schema_only = (
+            "SCHEMA object key `query` configures `query.search_engine` "
+            'and the born store keeps "query": {"search_engine": "grep"}.'
+        )
+        self.assertEqual([], operational_query_module_mentions(schema_only))
+        mixed = "Select module `query` or ask **help query**. " + schema_only
+        self.assertEqual(["`query`", "help query"], operational_query_module_mentions(mixed))
 
 
 class HelpEnrichmentContainmentTests(unittest.TestCase):

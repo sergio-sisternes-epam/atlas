@@ -6,19 +6,19 @@ package_version: 0.13.0
 
 # Getting started with Atlas
 
-Atlas is a durable **OKF v0.2** knowledge substrate. Agents use it to query
+Atlas is a durable **OKF v0.2** knowledge substrate. Agents use it to recall
 and remember process memory, decisions, work hubs, and project knowledge
 without treating the skill package itself as a store.
 
 This article is the packaged baseline for module **getting-started**. It is
-enough for first use. Do not mount, init, remember, query, commit, or push
+enough for first use. Do not mount, init, remember, recall, commit, or push
 in order to read it.
 
 ## Purpose
 
 - Keep claim-bearing knowledge in an OKF store (`SCHEMA.json` at the store
   root).
-- Select one **module** per intent (`help`, `query`, `remember`, …) and
+- Select one **module** per intent (`help`, `recall`, `remember`, …) and
   follow that module; do not improvise from the router alone.
 - Run the deterministic CLI from the installed skill directory when a module
   calls for it.
@@ -57,14 +57,14 @@ python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 1. Install Atlas as above.
 2. Ask **getting-started** (this article) for purpose, storage choices, and
    this journey. Ask **help** with no target to list every installed module.
-3. If you already have a store checkout, ask **help mount** or **help query**
+3. If you already have a store checkout, ask **help mount** or **help recall**
    before doing anything. Explanation is not permission to run those modules.
 4. If you need a **new** store in the active git repo, ask **help init**, then
    run **init** only when you intend to create one.
-5. After a store root exists, use **query** to find knowledge and **remember**
+5. After a store root exists, use **recall** to find knowledge and **remember**
    to write it. Writes end on `atlas compile --root <root>` exit 0.
 
-Do not start by creating a GitHub repository. Do not run mount/init/query
+Do not start by creating a GitHub repository. Do not run mount/init/recall
 because you asked for help.
 
 ## Storage choices (equals)
@@ -93,7 +93,7 @@ that is accepted.
 
 - No target — “Atlas help” or “what can Atlas do?” lists every installed
   module with a one-line purpose.
-- Named — “explain mount”, “what does query need?” loads **only** that
+- Named — “explain mount”, “what does recall need?” loads **only** that
   module’s packaged source.
 - Unknown names are rejected with the valid list. Do not invent flags.
 

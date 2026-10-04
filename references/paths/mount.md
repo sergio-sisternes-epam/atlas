@@ -51,6 +51,6 @@ root: <set after resolve>
    checkout detached). Same-repo shared submodules duplicate the git object
    store on recursive clone; that is accepted.
 
-3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (query, remember, work, landscape).
+3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (recall, remember, work, landscape).
 
 Do not write into the calling skill package. This file is not a store.

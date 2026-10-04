@@ -63,7 +63,7 @@ Never skip compile after a write.
 
 ### 0. Resolve root
 
-Same as query. Always pass `--root`. Omitting `--root` uses cwd, not the skill mount.
+Same as recall. Always pass `--root`. Omitting `--root` uses cwd, not the skill mount.
 
 ### 1. Birth a store
 
