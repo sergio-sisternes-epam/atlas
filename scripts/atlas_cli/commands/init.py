@@ -121,12 +121,13 @@ def run(
     schema["templates"]["by_type"] = {name: _by_type_block(name) for name in FM_ONLY}
     if version == "2.0":
         schema["recall"] = default_recall_block()
-    # Remove a stale SCHEMA.json before writing CONTRACT.json so --force never
-    # leaves both filenames present (compile-closed under schema_present).
+    # Write the replacement CONTRACT.json before removing a stale SCHEMA.json
+    # so a failed write keeps the old file (or at worst leaves both present,
+    # fail-closed under schema_present) rather than ever leaving neither.
+    contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
     stale_schema = r / "SCHEMA.json"
     if force and stale_schema.is_file():
         stale_schema.unlink()
-    contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
 
     tmpl_src = skill_root() / "references" / "templates"
     tmpl_dst = r / "templates"

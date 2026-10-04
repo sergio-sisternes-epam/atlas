@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.0-beta.3 - 2026-10-04
+## Unreleased
 
 ### Added
 
@@ -39,11 +39,6 @@
   current store; and, on a pre-beta store with `--batch contract-file`,
   renames `SCHEMA.json` to `CONTRACT.json` and stamps `atlas_release` /
   `memory.layers` to the beta.3 shape without rewriting other pages.
-
-## Unreleased
-
-### Added
-
 - Memory layers **frame**, **gist**, and **memory**: `memory` is the memory
   episode type; `gist` summarises exactly one parent memory page
   (`relates_to` kind `derived_from`); each folder with one or more gists has

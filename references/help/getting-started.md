@@ -16,8 +16,9 @@ in order to read it.
 
 ## Purpose
 
-- Keep claim-bearing knowledge in an OKF store (`SCHEMA.json` at the store
-  root).
+- Keep claim-bearing knowledge in an OKF store (new stores carry
+  `CONTRACT.json` at the store root; readers also accept the shipped-beta
+  `SCHEMA.json` name, but exactly one of the two, never both).
 - Select one **module** per intent (`help`, `recall`, `remember`, …) and
   follow that module; do not improvise from the router alone.
 - Run the deterministic CLI from the installed skill directory when a module

@@ -78,7 +78,14 @@ class CiActivationContractTests(unittest.TestCase):
 
     def test_missing_schema_fails_closed(self) -> None:
         for workflow in (self.copy, self.reusable):
-            self.assertIn('test -f "$ROOT/SCHEMA.json"', workflow)
+            self.assertIn('if [ -f "$ROOT/SCHEMA.json" ]; then', workflow)
+            self.assertIn('if [ -f "$ROOT/CONTRACT.json" ]; then', workflow)
+            self.assertIn('if [ "$count" -ne 1 ]; then', workflow)
+            self.assertIn(
+                "Atlas root must contain exactly one of SCHEMA.json or CONTRACT.json",
+                workflow,
+            )
+            self.assertIn("exit 2", workflow)
 
     def test_cli_is_acquired_outside_workspace(self) -> None:
         for workflow in (self.copy, self.reusable):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -61,15 +62,26 @@ def load_schema(root: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
+# The only unstamped (or "0.13.0-beta"-stamped) release markers that may
+# resolve to shipped_beta. Any other stamp value — including unknown or
+# newer ones such as "0.13.0-beta.4" — must fail stamp_shape instead of
+# silently compiling under the old frame rules.
+SHIPPED_BETA_STAMPS = (None, "0.13.0-beta")
+
+
 def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, str | None]:
     """Return (shape, error). shape in {'shipped_beta', 'in_beta', 'current'}.
 
     The stamp (atlas_release) and the shape (contract filename + memory.layers)
     must agree or compile fails closed with finding id stamp_shape:
 
-    - SCHEMA.json, layers frame/gist/page, atlas_release absent/"0.13.0-beta"
-      (or absent entirely): shipped_beta — reads/compiles under old frame rules.
-    - SCHEMA.json, atlas_release "0.13.0-beta.2": in_beta, regardless of layers.
+    - SCHEMA.json, atlas_release absent or exactly "0.13.0-beta", layers
+      absent or frame/gist/page: shipped_beta — reads/compiles under old
+      frame rules. Any other stamp value never resolves to shipped_beta,
+      even when layers happen to match.
+    - SCHEMA.json, atlas_release "0.13.0-beta.2": in_beta, regardless of
+      layers. SCHEMA.json with layers frame/gist/memory and no stamp is also
+      in_beta (the shipped beta.2 layers shape).
     - CONTRACT.json, atlas_release "0.13.0-beta.3", layers schema/gist/memory:
       current — the beta.3 contract shape.
     - Anything else is a stamp_shape mismatch (shape is None).
@@ -86,14 +98,14 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
             )
         if atlas_release in IN_BETA_RELEASES:
             return "in_beta", None
-        if layers in (None, SHIPPED_BETA_LAYERS):
+        if atlas_release in SHIPPED_BETA_STAMPS and layers in (None, SHIPPED_BETA_LAYERS):
             return "shipped_beta", None
         if layers == IN_BETA_LAYERS:
             return "in_beta", None
         return None, (
-            f"SCHEMA.json memory.layers={layers!r} does not match the shipped beta shape "
-            f"{SHIPPED_BETA_LAYERS!r} or the 0.13.0-beta.2 shape {IN_BETA_LAYERS!r} "
-            f"(atlas_release={atlas_release!r})"
+            f"SCHEMA.json atlas_release={atlas_release!r} memory.layers={layers!r} does not "
+            f"match the shipped beta shape {SHIPPED_BETA_LAYERS!r} (stamp absent or "
+            f'"0.13.0-beta") or the 0.13.0-beta.2 shape {IN_BETA_LAYERS!r}'
         )
 
     if contract_name == CONTRACT_NAME:
@@ -227,19 +239,46 @@ def validate_schema_shape(schema: dict) -> list[str]:
     return errs
 
 
+def _release_older_than_beta_line(atlas_release: Any) -> bool:
+    """True when atlas_release is absent, or a parsed X.Y.Z is < 0.13.0.
+
+    Unknown, non-numeric, or newer-looking values (including unknown beta
+    stamps such as "0.13.0-beta.4") are never treated as older; they must
+    fall through to in-beta so `apply` does not rewrite a shape it was not
+    told about.
+    """
+    if atlas_release is None:
+        return True
+    if not isinstance(atlas_release, str):
+        return False
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", atlas_release)
+    if not match:
+        return False
+    major, minor, patch = (int(part) for part in match.groups())
+    return (major, minor, patch) < (0, 13, 0)
+
+
 def classify_lineage(contract_name: str, schema: dict) -> str:
     """Classify a store for `memory-migrate` (path memory-migrate / pin 5).
 
     - current: the beta.3 shape (CONTRACT.json, atlas_release 0.13.0-beta.3,
       memory.layers schema/gist/memory).
     - in-beta: atlas_release is exactly "0.13.0-beta" or "0.13.0-beta.2", OR
-      SCHEMA.json already has memory.layers ["frame", "gist", "page"].
-    - pre-beta: contract file is SCHEMA.json, no memory object, and
-      atlas_release is absent or older than 0.13.0-beta (e.g. 0.12.0).
+      SCHEMA.json already has memory.layers ["frame", "gist", "page"], OR
+      SCHEMA.json is a full shipped-beta.2 init document (templates plus
+      types.recommended including "frame") even though it has no memory key
+      and no atlas_release stamp.
+    - pre-beta: contract file is SCHEMA.json, the `memory` key is absent
+      (not merely present-but-invalid), it is not the full shipped-beta.2
+      init document above, and atlas_release is absent or semantically
+      older than the 0.13.0-beta line (e.g. 0.12.0).
     Anything not covered by the three rules above is treated as in-beta so
-    `apply` never silently rewrites a shape it was not told about.
+    `apply` never silently rewrites a shape it was not told about — this
+    includes unknown or newer atlas_release values and a present-but-invalid
+    (non-object) `memory` value.
     """
     atlas_release = schema.get("atlas_release")
+    has_memory_key = "memory" in schema
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else None
     layers = memory.get("layers") if isinstance(memory, dict) else None
 
@@ -251,7 +290,21 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
     if contract_name == SCHEMA_NAME and layers == SHIPPED_BETA_LAYERS:
         return "in-beta"
 
-    if contract_name == SCHEMA_NAME and memory is None and atlas_release != BETA3_RELEASE:
+    types = schema.get("types") if isinstance(schema.get("types"), dict) else None
+    recommended_types = types.get("recommended") if isinstance(types, dict) else None
+    full_init_shape = (
+        "templates" in schema
+        and isinstance(recommended_types, list)
+        and "frame" in recommended_types
+    )
+    if contract_name == SCHEMA_NAME and full_init_shape:
+        return "in-beta"
+
+    if (
+        contract_name == SCHEMA_NAME
+        and not has_memory_key
+        and _release_older_than_beta_line(atlas_release)
+    ):
         return "pre-beta"
 
     return "in-beta"

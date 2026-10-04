@@ -73,15 +73,18 @@ root: …
 recall_cmd: atlas recall run "…" --root …
 hits_used: <paths>
 pages_read: <paths>
-stopped_at: frame | gist | memory | recall_hit | gap
+stopped_at: frame | schema | gist | memory | recall_hit | gap
 opened_page_reason: <present only when a page is opened>
 remember: no
 compile: n/a
 ```
 
 `stopped_at: recall_hit` means the answer came from an ordinary search hit without
-stopping on a frame, gist, or memory page. `stopped_at: gap` means an honest gap — nothing
-relevant was found.
+stopping on a frame, schema, gist, or memory page. `stopped_at: gap` means an honest
+gap — nothing relevant was found. `stopped_at: frame` is the shipped `SCHEMA.json`
+walk (0.13.0-beta and 0.13.0-beta.2); `stopped_at: schema` is the 0.13.0-beta.3
+`CONTRACT.json` walk (`schema` is the renamed `frame`). Record whichever the store's
+contract shape actually uses, never both.
 
 Claiming “checked the Atlas” without `recall_cmd` ⇒ incomplete Exit.
 

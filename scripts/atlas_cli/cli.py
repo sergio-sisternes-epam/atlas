@@ -120,7 +120,11 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
 
 @main.command("init")
 @click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--force", is_flag=True, help="overwrite existing SCHEMA.json")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="overwrite existing CONTRACT.json (and remove a stale SCHEMA.json after the new file is written)",
+)
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option(
     "--schema-version",
@@ -130,7 +134,7 @@ def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
     help="SCHEMA envelope version (1.0 stays current behaviour; 2.0 adds disabled recall)",
 )
 def init_cmd(root: str | None, force: bool, as_json: bool, schema_version: str) -> None:
-    """Write a first SCHEMA.json and default templates."""
+    """Write a first CONTRACT.json and default templates."""
     raise SystemExit(cmd_init.run(root, force, as_json, schema_version))
 
 

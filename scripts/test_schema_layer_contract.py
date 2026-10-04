@@ -254,6 +254,70 @@ def main() -> int:
                 sha(schema_path) == before and not (store / "CONTRACT.json").exists(),
             )
 
+        # === in-beta-refused-unstamped-shipped-beta2 ==============================
+        # The actual shipped 0.13.0-beta.2 init shape: no atlas_release stamp and
+        # no memory key, but the full init document (templates plus
+        # types.recommended including frame) — the same discriminator pin 5 uses
+        # to tell it apart from the minimal pre-beta-eligible fixture above.
+        unstamped = tmp / "in-beta-refused-unstamped-shipped-beta2"
+        unstamped.mkdir(parents=True)
+        unstamped_schema_path = unstamped / "SCHEMA.json"
+        unstamped_schema_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "ib2",
+                    "structure": {},
+                    "compile": {},
+                    "templates": {"directory": "templates/", "by_type": {}},
+                    "types": {
+                        "recommended": [
+                            "experience",
+                            "decision",
+                            "lesson",
+                            "recipe",
+                            "work",
+                            "protostar",
+                            "gist",
+                            "frame",
+                            "memory",
+                        ],
+                        "unconstrained": [],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        unstamped_before = sha(unstamped_schema_path)
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(unstamped),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        findings = [f.get("id") for f in payload.get("findings", [])]
+        check(
+            "in-beta-refused-unstamped-shipped-beta2: apply exits non-zero",
+            code != 0,
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "in-beta-refused-unstamped-shipped-beta2: finding id in_beta_not_legacy",
+            "in_beta_not_legacy" in findings,
+            f"findings={findings}",
+        )
+        check(
+            "in-beta-refused-unstamped-shipped-beta2: leaves SCHEMA.json bytes unchanged",
+            sha(unstamped_schema_path) == unstamped_before
+            and not (unstamped / "CONTRACT.json").exists(),
+        )
+
         # === one-schema-per-gist-folder (beta.3 / current shape only) ============
         def beta3_store(name: str) -> Path:
             d = tmp / name

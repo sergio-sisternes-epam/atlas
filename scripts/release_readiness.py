@@ -77,7 +77,9 @@ def manifest_version(root: Path = ROOT) -> str:
     return read_surface(PACKAGE_SURFACES[0], root)
 
 
-def validate_versions(root: Path = ROOT) -> tuple[str, list[str]]:
+def validate_versions(
+    root: Path = ROOT, require_ci_match_package: bool = False
+) -> tuple[str, list[str]]:
     expected = manifest_version(root)
     errors: list[str] = []
 
@@ -94,8 +96,11 @@ def validate_versions(root: Path = ROOT) -> tuple[str, list[str]]:
 
     # CI ref surfaces are pinned to the last tagged release, not the
     # in-development package version (e.g. v0.13.0-beta can stay the CI ref
-    # while the package advances to 0.13.0-beta.3). They only need to agree
-    # with each other.
+    # while the package advances to 0.13.0-beta.3) — but only during pre-tag
+    # development. When `--tag` is passed (an actual release cut),
+    # `require_ci_match_package` is set and every CI ref must equal the
+    # package version; a tag validation must never pass while workflows
+    # still point at an older ref.
     ci_expected: str | None = None
     for surface in CI_SURFACES:
         try:
@@ -103,7 +108,13 @@ def validate_versions(root: Path = ROOT) -> tuple[str, list[str]]:
         except (OSError, ValueError) as error:
             errors.append(str(error))
             continue
-        if ci_expected is None:
+        if require_ci_match_package:
+            if actual != expected:
+                errors.append(
+                    f"{surface.path}: {surface.label} version {actual} != {expected} "
+                    "(CI ref must equal the package version for a tagged release)"
+                )
+        elif ci_expected is None:
             ci_expected = actual
         elif actual != ci_expected:
             errors.append(
@@ -161,7 +172,7 @@ def main() -> int:
     if args.is_prerelease_tag is not None:
         return 0 if is_prerelease_tag(args.is_prerelease_tag) else 1
 
-    version, errors = validate_versions()
+    version, errors = validate_versions(require_ci_match_package=bool(args.tag))
     expected_tag = f"v{version}"
     if args.tag and args.tag != expected_tag:
         errors.append(f"release tag {args.tag} != {expected_tag}")

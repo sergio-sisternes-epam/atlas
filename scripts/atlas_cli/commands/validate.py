@@ -43,6 +43,51 @@ GIST_PARENT_TYPES = frozenset(
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
 
+def _canonical_local_target(root: Path, target: str) -> str | None:
+    """Resolve a relates_to target to the canonical store-relative key.
+
+    Mirrors the resolution ``_check_relates_to`` uses: remote references
+    (http(s):// or atlas://) are left alone (handled elsewhere), and any
+    local target is resolved against the store root so it matches a page
+    index built from ``rel()``. Targets that resolve outside the store root
+    are not treated as local page keys.
+    """
+    if not target or target.startswith(("http://", "https://", "atlas://")):
+        return None
+    resolved_root = root.resolve()
+    cand = (root / target).resolve()
+    try:
+        cand.relative_to(resolved_root)
+    except ValueError:
+        return None
+    return str(cand.relative_to(resolved_root)).replace("\\", "/")
+
+
+def _resolve_related_gist(
+    item: dict, root: Path, by_rel_path: dict, kind: str = "related"
+) -> str | None:
+    """Resolve one relates_to entry to a local gist page's canonical key, or None.
+
+    Shared by frame-folder validation (shipped-beta SCHEMA.json shapes) and
+    schema-folder validation (the beta.3 CONTRACT.json shape): an entry only
+    resolves when it has ``kind`` (default ``related``), a non-empty path,
+    and that path resolves to a local page whose type is ``gist``.
+    """
+    if not isinstance(item, dict):
+        return None
+    if str(item.get("kind") or item.get("role") or "").strip().lower() != kind:
+        return None
+    target = str(item.get("path") or "").strip()
+    if not target:
+        return None
+    canon = _canonical_local_target(root, target)
+    lookup_key = canon if canon is not None else target
+    found = by_rel_path.get(lookup_key)
+    if found is None or str(found[1].get("type") or "").strip() != "gist":
+        return None
+    return lookup_key
+
+
 def _ignores_in(text: str) -> set[str]:
     return {m.group(1).lower() for m in IGNORE_RE.finditer(text)}
 
@@ -406,11 +451,18 @@ def _memory_contract(schema: dict | None, contract_name: str = "SCHEMA.json", sh
     return findings
 
 
-def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+def _memory_findings(
+    root: Path, schema: dict | None, staging_name: str, run_frame_rules: bool = True
+) -> list[dict]:
     """Legacy-document and memory-layer (memory/gist/frame) findings.
 
     Markdown files are read once here, independent of the main compile loop, so these
     findings do not depend on iteration order or on other checks succeeding.
+
+    ``run_frame_rules`` gates the frame-folder model (frame_members): it must
+    only run for shipped SCHEMA.json shapes. The beta.3 CONTRACT.json shape
+    uses the schema-folder model instead (``_schema_folder_findings``); the
+    two models must never both run on the same store.
     """
     pages: list[tuple[Path, dict]] = []
     for path in iter_concept_md(root, staging_name):
@@ -438,25 +490,6 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 out.append(item)
         return out
 
-    def _canonical_local_target(target: str) -> str | None:
-        """Resolve a relates_to target to the canonical store-relative key.
-
-        Mirrors the resolution ``_check_relates_to`` uses: remote references
-        (http(s):// or atlas://) are left alone (handled elsewhere), and any
-        local target is resolved against the store root so it matches the
-        page index built from ``rel()``. Targets that resolve outside the
-        store root are not treated as local page keys.
-        """
-        if not target or target.startswith(("http://", "https://", "atlas://")):
-            return None
-        resolved_root = root.resolve()
-        cand = (root / target).resolve()
-        try:
-            cand.relative_to(resolved_root)
-        except ValueError:
-            return None
-        return str(cand.relative_to(resolved_root)).replace("\\", "/")
-
     def _valid_gist_parent(m: dict) -> str | None:
         """Return the canonical parent path for a well-formed gist, else None.
 
@@ -473,7 +506,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
         target = str(parents[0].get("path") or "").strip()
         if not target:
             return None
-        canon = _canonical_local_target(target)
+        canon = _canonical_local_target(root, target)
         found = by_rel_path.get(canon if canon is not None else target)
         if found is None:
             return None
@@ -538,13 +571,14 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
 
     gists_by_folder: dict[str, set[str]] = {}
     frames_by_folder: dict[str, list[tuple[str, dict]]] = {}
-    for p, m in pages:
-        folder = rel(root, p.parent)
-        page_path = rel(root, p)
-        if str(m.get("type") or "").strip() == "gist":
-            gists_by_folder.setdefault(folder, set()).add(page_path)
-        elif str(m.get("type") or "").strip() == "frame":
-            frames_by_folder.setdefault(folder, []).append((page_path, m))
+    if run_frame_rules:
+        for p, m in pages:
+            folder = rel(root, p.parent)
+            page_path = rel(root, p)
+            if str(m.get("type") or "").strip() == "gist":
+                gists_by_folder.setdefault(folder, set()).add(page_path)
+            elif str(m.get("type") or "").strip() == "frame":
+                frames_by_folder.setdefault(folder, []).append((page_path, m))
 
     for folder in sorted(set(gists_by_folder) | set(frames_by_folder)):
         expected_gists = gists_by_folder.get(folder, set())
@@ -568,24 +602,11 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
             if invalid:
                 related = []
             for item in related:
-                if (
-                    not isinstance(item, dict)
-                    or str(item.get("kind") or item.get("role") or "").strip().lower()
-                    != "related"
-                ):
+                resolved = _resolve_related_gist(item, root, by_rel_path)
+                if resolved is None:
                     invalid = True
                     continue
-                target = str(item.get("path") or "").strip()
-                if not target:
-                    invalid = True
-                    continue
-                canon = _canonical_local_target(target)
-                lookup_key = canon if canon is not None else target
-                found = by_rel_path.get(lookup_key)
-                if found is None or str(found[1].get("type") or "").strip() != "gist":
-                    invalid = True
-                    continue
-                listed_paths.append(lookup_key)
+                listed_paths.append(resolved)
             if (
                 not expected_gists
                 or invalid
@@ -614,7 +635,9 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
     zero gists has none (one gist still counts). Unlike frame_members (an
     info-by-default ladder finding on shipped-beta stores), this is a hard
     compile failure: pin 4 says a second schema in a gist-bearing folder
-    "fails", not merely "is flagged".
+    "fails", not merely "is flagged". In addition, that one schema page must
+    itself relate to one or more gists via relates_to kind=related; an empty
+    or non-gist target set fails the same way.
     """
     pages: list[tuple[Path, dict]] = []
     for path in iter_concept_md(root, staging_name):
@@ -627,6 +650,8 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         if not meta:
             continue
         pages.append((path, meta))
+
+    by_rel_path = {rel(root, p): (p, m) for p, m in pages}
 
     gists_by_folder: dict[str, int] = {}
     schemas_by_folder: dict[str, list[str]] = {}
@@ -656,6 +681,29 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
                     ),
                 }
             )
+            continue
+        if schema_paths:
+            schema_path = schema_paths[0]
+            schema_meta = by_rel_path[schema_path][1]
+            related = schema_meta.get("relates_to")
+            related = related if isinstance(related, list) else []
+            valid_targets = [
+                target
+                for item in related
+                if (target := _resolve_related_gist(item, root, by_rel_path)) is not None
+            ]
+            if not valid_targets:
+                findings.append(
+                    {
+                        "id": "schema_folder",
+                        "path": schema_path,
+                        "msg": (
+                            "a type=schema page must relate to one or more gists via "
+                            "relates_to kind=related; found none (empty or non-gist "
+                            "targets do not count)."
+                        ),
+                    }
+                )
     return findings
 
 
@@ -751,7 +799,9 @@ def run(
             allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
-        for finding in _memory_findings(r, schema, staging_name):
+        for finding in _memory_findings(
+            r, schema, staging_name, run_frame_rules=(stamp_shape != "current")
+        ):
             fpath = (r / finding["path"]).resolve()
             directory_scoped = fpath.is_dir()
             if allow_inline_ignores and not directory_scoped:
