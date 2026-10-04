@@ -7,13 +7,15 @@ created:
 description: 
 origin:  # internal | third-party | user | derived
 sensitivity:  # public | internal | restricted
-relates_to: []  # [{path: <gist>, kind: related}, ...] — two or more gists
+relates_to: []  # [{path: <gist>, kind: related}, ...] — every gist in this folder
 ---
 
 <!--
-A frame names a repeated pattern across two or more gists. It lists those
-gists by `relates_to` kind `related`; it does not rewrite them, and its
-members are gists, never pages.
+A folder containing one or more gists has exactly one frame in that same
+folder, listing each gist in that folder exactly once by `relates_to` kind
+`related`. A lone gist still gets a frame. A folder with no gists has no frame.
+The frame does not rewrite its members; its members are gists, never memory
+episodes or other types.
 -->
 
 ## Content

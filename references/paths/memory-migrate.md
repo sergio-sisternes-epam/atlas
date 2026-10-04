@@ -10,7 +10,7 @@ description: Use this path when a store still treats documents as the core recor
 
 A store still treats `document` as the core record, or `atlas compile` is
 mostly reporting `legacy_document` and `missing_gist` noise, and the operator
-wants to move that store toward the memory layers (`page`, `gist`, `frame`).
+wants to move that store toward the memory layers (`frame`, `gist`, `memory`).
 
 Not for relocating a store (use path **migrate**). Not for installing the
 recall index (use path **configure**). Not for hand-editing `SCHEMA.json`.
@@ -84,9 +84,15 @@ not edit `SCHEMA.json`.
 ### inventory
 
 Same facts as assess, plus a short judgement of which named batch of pages
-could reasonably move toward `page`/`gist`/`frame` next. Write nothing. Do
-not create frames automatically — mining the whole store for repeated
-patterns across gists is out of scope for this path.
+could reasonably move toward `memory`/`gist`/`frame` next. Write nothing. Do
+not create or edit files during inventory. When the judgement names a batch
+that would add one or more gists in a folder, plan that folder's single
+deterministic frame: one frame in the same folder grouping exactly the
+gists the folder will contain after the batch, including gists already
+there and gists the batch adds. A lone gist still requires one frame; a
+folder that will have zero gists gets no frame. Planning names the frame;
+it does not write it. Mining the store for repeated patterns across gists
+remains out of scope for this path.
 
 ### apply
 
@@ -94,7 +100,11 @@ Only when the operator asks and names the batch. Refuse an unscoped or
 unattested "migrate everything" request. For that named batch only:
 
 1. Use path **remember** to retype, add a gist, or add a frame as named by
-   the operator. Remember's index-only exception applies here: a first
+   the operator. Whenever the named batch adds a gist, include the planned
+   frame for that folder, creating or updating its single frame to group
+   exactly the gists the folder will contain after the batch. Do not leave
+   a folder with gists and no frame (`frame_members`). Remember's index-only
+   exception applies here: a first
    compile that exits 1 solely for `index_md_present` / missing `index.md`
    may proceed to create or update that folder's hot list, then the second
    compile must exit 0 before the page counts as stored.
@@ -105,7 +115,15 @@ unattested "migrate everything" request. For that named batch only:
    ```
    Focused `--path` / `--type` omit out-of-batch pages, so legacy
    `document` / `missing_gist` findings elsewhere do not block an in-batch
-   finish once the store is at `warn` or `error`. A red focused compile
+   finish once the store is at `warn` or `error`. Folder-level `frame_members`
+   findings follow the same descendant-only path prefix: focus the folder
+   (or an ancestor), not an individual file, to include them. Type focus
+   includes a folder finding when a direct concept page has that type;
+   `--type gist` therefore includes missing-frame findings, while
+   `--type frame` includes multiple-frame findings but not folders with
+   no frame. Both filters apply when combined. Folder findings have no
+   page body for inline ignores and remain on the configured memory rung.
+   A red focused compile
    stops the batch — fix before moving to the next page. There is no
    unattended bulk rewrite and **no** whole-store rewrite authorised here.
 3. **Optional rung-hold** — if the operator explicitly attests a temporary

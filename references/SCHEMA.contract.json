@@ -141,7 +141,7 @@
       "protostar",
       "gist",
       "frame",
-      "page"
+      "memory"
     ],
     "roles": {
       "experience": "episodic \u2014 session / phase / challenge that happened",
@@ -151,18 +151,18 @@
       "work": "task hub \u2014 scope, status, and relates_to cluster for a work_id",
       "document": "legacy durable object. Still valid to read. Reported on the memory rung. Not the core record.",
       "protostar": "forming idea worth chasing later \u2014 linked to origin and work hub; not implement authority",
-      "page": "memory episode. The record a gist may summarise. Not a format contract.",
+      "memory": "memory episode. The record a gist may summarise. Not a format contract.",
       "gist": "short summary of exactly one parent. relates_to that parent, kind derived_from.",
-      "frame": "repeated pattern across two or more gists. relates_to those gists, kind related. Not a summary tree."
+      "frame": "groups every gist in its folder, including a single gist. relates_to those gists, kind related. Not a summary tree."
     },
     "notes": [
       "Types are recommendations, not a closed enum (OKF freedom).",
-      "There is no type id memory; the memory episode type id is page.",
+      "The memory episode type id is memory; page is not a type id.",
       "origin (recommended): internal | third-party | user | derived",
       "sensitivity (recommended): public | internal | restricted"
     ]
   },
-  "memory": {"rung": "info", "layers": ["frame", "gist", "page"], "legacy_types": ["document"], "$comment": "Optional. Absent rung means info. Written only by path schema (atlas schema memory-rung)."},
+  "memory": {"rung": "info", "layers": ["frame", "gist", "memory"], "legacy_types": ["document"], "$comment": "Optional. Absent rung means info. Written only by path schema (atlas schema memory-rung)."},
   "relations": {
     "how_to_link": [
       "AUTHORITATIVE: frontmatter relates_to: [{path, kind}] \u2014 used by visualisers, tools, and compile-time graph consumers.",

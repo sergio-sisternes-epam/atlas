@@ -30,9 +30,9 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
 
-# Memory layers (page / gist / frame) are pinned here, not read from the store.
+# Memory layers (frame / gist / memory) are pinned here, not read from the store.
 GIST_PARENT_TYPES = frozenset(
-    {"experience", "decision", "lesson", "recipe", "document", "page", "protostar"}
+    {"experience", "decision", "lesson", "recipe", "document", "memory", "protostar"}
 )
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
@@ -334,7 +334,7 @@ def _memory_rung(schema: dict | None) -> tuple[str, list[dict]]:
 
 
 _MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
-_MEMORY_LAYERS_FIXED = ["frame", "gist", "page"]
+_MEMORY_LAYERS_FIXED = ["frame", "gist", "memory"]
 _MEMORY_LEGACY_TYPES_FIXED = ["document"]
 
 
@@ -390,9 +390,9 @@ def _memory_contract(schema: dict | None) -> list[dict]:
 
 
 def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
-    """Legacy-document and memory-layer (gist/frame) findings.
+    """Legacy-document and memory-layer (memory/gist/frame) findings.
 
-    Pages are read once here, independent of the main compile loop, so these
+    Markdown files are read once here, independent of the main compile loop, so these
     findings do not depend on iteration order or on other checks succeeding.
     """
     pages: list[tuple[Path, dict]] = []
@@ -490,7 +490,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                     "path": rp,
                     "msg": (
                         "type document is a legacy durable object; consider migrating "
-                        "toward page/gist via path memory-migrate. The page is not "
+                        "toward memory/gist via path memory-migrate. The file is not "
                         "rewritten automatically."
                     ),
                 }
@@ -501,7 +501,7 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 {
                     "id": "missing_gist",
                     "path": rp,
-                    "msg": "no gist is derived_from this page.",
+                    "msg": "no gist is derived_from this memory page.",
                 }
             )
 
@@ -514,15 +514,50 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                         "msg": (
                             "a gist has exactly one parent, and that parent is not "
                             "a gist (parent must be experience, decision, lesson, "
-                            "recipe, document, page, or protostar)."
+                            "recipe, document, memory, or protostar)."
                         ),
                     }
                 )
 
-        if ptype == "frame":
-            gist_paths: set[str] = set()
-            invalid = False
-            for item in _related(m, "related"):
+    gists_by_folder: dict[str, set[str]] = {}
+    frames_by_folder: dict[str, list[tuple[str, dict]]] = {}
+    for p, m in pages:
+        folder = rel(root, p.parent)
+        page_path = rel(root, p)
+        if str(m.get("type") or "").strip() == "gist":
+            gists_by_folder.setdefault(folder, set()).add(page_path)
+        elif str(m.get("type") or "").strip() == "frame":
+            frames_by_folder.setdefault(folder, []).append((page_path, m))
+
+    for folder in sorted(set(gists_by_folder) | set(frames_by_folder)):
+        expected_gists = gists_by_folder.get(folder, set())
+        frames = frames_by_folder.get(folder, [])
+        if expected_gists and len(frames) != 1:
+            findings.append(
+                {
+                    "id": "frame_members",
+                    "path": folder or ".",
+                    "msg": (
+                        "a folder with gists must have exactly one frame grouping "
+                        "exactly those gists."
+                    ),
+                }
+            )
+
+        for frame_path, frame_meta in frames:
+            related = frame_meta.get("relates_to")
+            listed_paths: list[str] = []
+            invalid = not isinstance(related, list)
+            if invalid:
+                related = []
+            for item in related:
+                if (
+                    not isinstance(item, dict)
+                    or str(item.get("kind") or item.get("role") or "").strip().lower()
+                    != "related"
+                ):
+                    invalid = True
+                    continue
                 target = str(item.get("path") or "").strip()
                 if not target:
                     invalid = True
@@ -530,19 +565,25 @@ def _memory_findings(root: Path, schema: dict | None, staging_name: str) -> list
                 canon = _canonical_local_target(target)
                 lookup_key = canon if canon is not None else target
                 found = by_rel_path.get(lookup_key)
-                if found is None:
+                if found is None or str(found[1].get("type") or "").strip() != "gist":
                     invalid = True
                     continue
-                if str(found[1].get("type") or "").strip() != "gist":
-                    invalid = True
-                    continue
-                gist_paths.add(lookup_key)
-            if invalid or len(gist_paths) < 2:
+                listed_paths.append(lookup_key)
+            if (
+                not expected_gists
+                or invalid
+                or len(listed_paths) != len(set(listed_paths))
+                or set(listed_paths) != expected_gists
+                or len(listed_paths) != len(expected_gists)
+            ):
                 findings.append(
                     {
                         "id": "frame_members",
-                        "path": rp,
-                        "msg": "a frame lists at least two gists, not pages.",
+                        "path": frame_path,
+                        "msg": (
+                            "a frame must list each gist in its folder exactly once "
+                            "and no other targets."
+                        ),
                     }
                 )
 
@@ -621,7 +662,7 @@ def run(
             focus_path = None
             skip_pages = True
 
-    # Memory rung (page / gist / frame): absent means info; malformed shapes
+    # Memory rung (memory / gist / frame): absent means info; malformed shapes
     # raise a critical memory_rung issue but still treat the ladder as info.
     memory_rung, memory_shape_issues = _memory_rung(schema)
     critical.extend(memory_shape_issues)
@@ -635,16 +676,32 @@ def run(
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
         for finding in _memory_findings(r, schema, staging_name):
-            if allow_inline_ignores:
-                fpath_ign = (r / finding["path"]).resolve()
+            fpath = (r / finding["path"]).resolve()
+            directory_scoped = fpath.is_dir()
+            if allow_inline_ignores and not directory_scoped:
                 try:
-                    ign_text = fpath_ign.read_text(encoding="utf-8", errors="replace")
+                    ign_text = fpath.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     ign_text = ""
                 if finding["id"] in _ignores_in(ign_text):
                     continue
-            if focused:
-                fpath = (r / finding["path"]).resolve()
+            if focused and directory_scoped:
+                if not _in_focus(fpath, {}, None, focus_path):
+                    continue
+                if want_type:
+                    # Folder findings apply to types present in their direct concept pages.
+                    for page in iter_concept_md(fpath, staging_name):
+                        if page.parent.resolve() != fpath or page.name in RESERVED:
+                            continue
+                        try:
+                            meta, _ = read_page(page, sv)
+                        except FrontmatterError:
+                            continue
+                        if _in_focus(page, meta, want_type, None):
+                            break
+                    else:
+                        continue
+            elif focused:
                 try:
                     meta, _ = read_page(fpath, sv)
                 except FrontmatterError:

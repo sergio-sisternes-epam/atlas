@@ -36,7 +36,7 @@ RESERVED_CORE_TYPES = frozenset(
         "protostar",
         "lesson",
         "recipe",
-        "page",
+        "memory",
         "gist",
         "frame",
     }
