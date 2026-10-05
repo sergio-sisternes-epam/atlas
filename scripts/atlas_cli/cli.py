@@ -223,7 +223,7 @@ def migrate_cmd(
     "--operation",
     required=True,
     type=click.Choice(["assess", "inventory", "apply"]),
-    help="assess/inventory write nothing; apply rewrites a pre-beta contract file",
+    help="assess/inventory write nothing; apply rewrites a pre-beta contract or an empty unstamped full beta.2 init",
 )
 @click.option(
     "--batch",

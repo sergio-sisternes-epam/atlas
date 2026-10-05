@@ -5,7 +5,7 @@ adversarial: true
 smokes:
   - id: in-beta-not-legacy
     source: "pin 5; atlas_release 0.13.0-beta or 0.13.0-beta.2 on SCHEMA.json"
-    expect: "memory-migrate apply refuses an in-beta store (finding id in_beta_not_legacy), exits non-zero, and leaves its bytes unchanged; only a pre-beta store is eligible for apply."
+    expect: "memory-migrate apply refuses an in-beta store (finding id in_beta_not_legacy), exits non-zero, and leaves its bytes unchanged. Stamped 0.13.0-beta / 0.13.0-beta.2, memory.layers frame/gist/page or frame/gist/memory, and an unstamped full beta.2 init that already has frame, gist, page, or memory content pages stay refused. An unstamped full beta.2 init with none of those content pages is eligible: assess reports lineage empty-beta2-init and contract_file_eligible true, and apply writes the current contract shape."
   - id: one-schema-per-gist-folder
     source: "pin 4; schema is the renamed frame on the beta.3 (CONTRACT.json) shape only"
     expect: "A folder with one or more gists has exactly one type=schema page (one gist still counts); a folder with zero gists has none; a second schema in a gist-bearing folder fails compile closed."
