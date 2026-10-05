@@ -986,10 +986,10 @@ def main() -> int:
             )
 
         # === in-beta-refused-unstamped-shipped-beta2 ==============================
-        # The actual shipped 0.13.0-beta.2 init shape: no atlas_release stamp and
-        # no memory key, but the full init document (templates plus
-        # types.recommended including frame) — the same discriminator pin 5 uses
-        # to tell it apart from the minimal pre-beta-eligible fixture above.
+        # Full beta.2 init (templates plus types.recommended including frame, no
+        # atlas_release, no memory key) that already has a beta.2 content page.
+        # An empty store of this contract shape is eligible; content keeps the
+        # in_beta_not_legacy refusal.
         unstamped = tmp / "in-beta-refused-unstamped-shipped-beta2"
         unstamped.mkdir(parents=True)
         unstamped_schema_path = unstamped / "SCHEMA.json"
@@ -1019,7 +1019,9 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+        write_page(unstamped / "episode.md", "page")
         unstamped_before = sha(unstamped_schema_path)
+        unstamped_page_before = sha(unstamped / "episode.md")
         code, payload = run_json(
             [
                 "memory-migrate",
@@ -1046,7 +1048,423 @@ def main() -> int:
         check(
             "in-beta-refused-unstamped-shipped-beta2: leaves SCHEMA.json bytes unchanged",
             sha(unstamped_schema_path) == unstamped_before
+            and sha(unstamped / "episode.md") == unstamped_page_before
             and not (unstamped / "CONTRACT.json").exists(),
+        )
+
+        # === empty-beta2-init-eligible ===========================================
+        # Unstamped full beta.2 init shaped like a real SCHEMA.json: templates
+        # for frame/gist/page, types.recommended containing frame and page, no
+        # atlas_release, no memory key, and no frame/gist/page/memory content.
+        def beta2_type_block(type_name: str, required: list[str] | None = None) -> dict:
+            return {
+                "file": f"templates/{type_name}.md",
+                "frontmatter": {
+                    "required": required or ["type", "title", "created"],
+                    "recommended": [],
+                },
+                "sections": {"required": [], "recommended": []},
+            }
+
+        empty_beta2 = tmp / "empty-beta2-init"
+        empty_beta2.mkdir(parents=True)
+        vendor_block = {
+            "file": "templates/vendor.md",
+            "frontmatter": {
+                "required": ["type", "title", "created", "vendor_id"],
+                "recommended": ["region"],
+            },
+            "sections": {"required": ["Terms"], "recommended": []},
+        }
+        experience_block = beta2_type_block(
+            "experience", ["type", "title", "created", "work_id"]
+        )
+        empty_contract = {
+            "schema_version": "1.0",
+            "atlas_id": "atlas.example/master/atlas",
+            "title": "Master Atlas",
+            "structure": {
+                "free_layout": True,
+                "staging_dir": "staging",
+                "require_index_in_folders": True,
+                "reserved_names": ["index.md", "log.md", "staging", "schema.d"],
+            },
+            "compile": {
+                "hard_fail": True,
+                "allow_inline_ignores": True,
+                "min_body_chars": 40,
+                "core_checks": [
+                    "okf_compliance",
+                    "frontmatter",
+                    "internal_links",
+                    "not_just_links",
+                    "schema_present",
+                    "no_answerable_in_staging",
+                    "index_md_present",
+                    "index_md_listing",
+                ],
+                "simplicity_budget": {
+                    "max_required_frontmatter_keys_per_type": 8,
+                    "max_required_sections_per_type": 6,
+                },
+                "page_contract": {
+                    "when_work_id": {"require_kind": "implements"},
+                    "when_type": {"protostar": {"require_kind": "derived_from"}},
+                    "forming_requires_type": "protostar",
+                },
+            },
+            "templates": {
+                "directory": "templates/",
+                "by_type": {
+                    "experience": experience_block,
+                    "decision": beta2_type_block("decision"),
+                    "work": beta2_type_block("work", ["type", "title", "created", "work_id"]),
+                    "document": beta2_type_block("document"),
+                    "protostar": beta2_type_block("protostar"),
+                    "lesson": beta2_type_block("lesson"),
+                    "recipe": beta2_type_block("recipe"),
+                    "page": beta2_type_block("page"),
+                    "gist": beta2_type_block("gist"),
+                    "frame": beta2_type_block("frame"),
+                    "vendor": vendor_block,
+                },
+            },
+            "types": {
+                "recommended": [
+                    "experience",
+                    "decision",
+                    "lesson",
+                    "recipe",
+                    "work",
+                    "protostar",
+                    "gist",
+                    "frame",
+                    "page",
+                    "vendor",
+                ],
+                "unconstrained": ["scratch", "frame"],
+            },
+            "query": {
+                "default_mode": "local",
+                "search_engine": "grep",
+                "fallback": "rg",
+                "staging_visible": False,
+            },
+        }
+        empty_schema_path = empty_beta2 / "SCHEMA.json"
+        empty_schema_path.write_text(json.dumps(empty_contract, indent=2) + "\n", encoding="utf-8")
+        tmpl = empty_beta2 / "templates"
+        tmpl.mkdir()
+        (tmpl / "frame.md").write_text("beta2 frame template\n", encoding="utf-8")
+        (tmpl / "page.md").write_text("beta2 page template\n", encoding="utf-8")
+        (tmpl / "gist.md").write_text("kept gist template\n", encoding="utf-8")
+        (tmpl / "experience.md").write_text("custom experience template\n", encoding="utf-8")
+        (tmpl / "vendor.md").write_text("custom vendor template\n", encoding="utf-8")
+        (empty_beta2 / "index.md").write_text("# Master Atlas\n\n- items\n", encoding="utf-8")
+        (empty_beta2 / "log.md").write_text("# Log\n\n- init\n", encoding="utf-8")
+        write_page(empty_beta2 / "choice.md", "decision")
+        preserved_paths = [
+            empty_beta2 / "choice.md",
+            empty_beta2 / "index.md",
+            empty_beta2 / "log.md",
+            tmpl / "gist.md",
+            tmpl / "experience.md",
+            tmpl / "vendor.md",
+        ]
+        preserved_hashes = {path: sha(path) for path in preserved_paths}
+        schema_before = sha(empty_schema_path)
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(empty_beta2), "--operation", "assess", "--json"]
+        )
+        check(
+            "empty-beta2-init: assess reports lineage empty-beta2-init and eligible",
+            code == 0
+            and payload.get("ok") is True
+            and payload.get("lineage") == "empty-beta2-init"
+            and payload.get("contract_file_eligible") is True
+            and payload.get("beta_content_pages") == []
+            and not (empty_beta2 / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+        check(
+            "empty-beta2-init: assess writes nothing",
+            sha(empty_schema_path) == schema_before
+            and all(sha(path) == digest for path, digest in preserved_hashes.items())
+            and (tmpl / "frame.md").is_file()
+            and (tmpl / "page.md").is_file(),
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(empty_beta2), "--operation", "inventory", "--json"]
+        )
+        check(
+            "empty-beta2-init: inventory reports the same eligibility and writes nothing",
+            code == 0
+            and payload.get("lineage") == "empty-beta2-init"
+            and payload.get("contract_file_eligible") is True
+            and sha(empty_schema_path) == schema_before
+            and not (empty_beta2 / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(empty_beta2), "--operation", "apply", "--json"]
+        )
+        check(
+            "empty-beta2-init: apply without batch refuses and writes nothing",
+            code == 2
+            and "batch_required" in findings_by_id(payload, "findings")
+            and sha(empty_schema_path) == schema_before
+            and not (empty_beta2 / "CONTRACT.json").exists()
+            and (tmpl / "frame.md").is_file(),
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(empty_beta2),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "empty-beta2-init: apply renames SCHEMA.json to CONTRACT.json",
+            code == 0
+            and payload.get("ok") is True
+            and payload.get("lineage") == "current"
+            and payload.get("contract_file") == "CONTRACT.json"
+            and (empty_beta2 / "CONTRACT.json").is_file()
+            and not empty_schema_path.exists(),
+            f"exit={code} payload={payload}",
+        )
+        migrated = json.loads((empty_beta2 / "CONTRACT.json").read_text(encoding="utf-8"))
+        check(
+            "empty-beta2-init: migrated store stamps beta.7 layers schema/gist/memory",
+            migrated.get("atlas_release") == "0.13.0-beta.7"
+            and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
+            str(migrated.get("atlas_release")),
+        )
+        check(
+            "empty-beta2-init: store-specific settings are preserved",
+            migrated.get("atlas_id") == empty_contract["atlas_id"]
+            and migrated.get("title") == empty_contract["title"]
+            and migrated.get("structure") == empty_contract["structure"]
+            and migrated.get("compile") == empty_contract["compile"]
+            and migrated.get("query") == empty_contract["query"],
+            str({k: migrated.get(k) for k in ("atlas_id", "title", "structure", "compile", "query")}),
+        )
+        check(
+            "empty-beta2-init: recommended types drop frame/page and gain schema/memory",
+            migrated.get("types", {}).get("recommended") == [
+                "experience",
+                "decision",
+                "lesson",
+                "recipe",
+                "work",
+                "protostar",
+                "gist",
+                "schema",
+                "memory",
+                "vendor",
+            ]
+            and migrated.get("types", {}).get("unconstrained") == ["scratch"],
+            str(migrated.get("types")),
+        )
+        by_type = migrated.get("templates", {}).get("by_type", {})
+        check(
+            "empty-beta2-init: by_type drops frame/page, keeps custom blocks, adds init schema/memory",
+            "frame" not in by_type
+            and "page" not in by_type
+            and by_type.get("experience") == experience_block
+            and by_type.get("vendor") == vendor_block
+            and by_type.get("document") == beta2_type_block("document")
+            and by_type.get("schema", {}).get("frontmatter", {}).get("required") == [
+                "type",
+                "title",
+                "created",
+            ]
+            and by_type.get("memory", {}).get("file") == "templates/memory.md"
+            and by_type.get("gist", {}).get("file") == "templates/gist.md",
+            str(sorted(by_type)),
+        )
+        package_templates = ROOT / "references" / "templates"
+        check(
+            "empty-beta2-init: frame/page template files are removed and schema/memory match init",
+            not (tmpl / "frame.md").exists()
+            and not (tmpl / "page.md").exists()
+            and (tmpl / "schema.md").read_bytes() == (package_templates / "schema.md").read_bytes()
+            and (tmpl / "memory.md").read_bytes() == (package_templates / "memory.md").read_bytes(),
+        )
+        check(
+            "empty-beta2-init: content pages and custom templates are byte-identical",
+            all(sha(path) == digest for path, digest in preserved_hashes.items()),
+        )
+        code, payload = run_json(["compile", "--root", str(empty_beta2), "--json"])
+        check(
+            "empty-beta2-init: compile is green after apply",
+            code == 0 and payload.get("ok") is True and not payload.get("critical"),
+            f"exit={code} critical={payload.get('critical')} warnings={payload.get('warnings')}",
+        )
+
+        for content_type in ("frame", "gist", "page", "memory"):
+            bearing = tmp / f"beta2-content-{content_type}"
+            bearing.mkdir()
+            (bearing / "SCHEMA.json").write_text(
+                json.dumps(empty_contract, indent=2) + "\n", encoding="utf-8"
+            )
+            write_page(bearing / "episode.md", content_type)
+            before = {
+                path.relative_to(bearing): sha(path)
+                for path in bearing.rglob("*")
+                if path.is_file()
+            }
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(bearing),
+                    "--operation",
+                    "assess",
+                    "--json",
+                ]
+            )
+            check(
+                f"beta2-content-{content_type}: assess stays in-beta and ineligible",
+                code == 0
+                and payload.get("lineage") == "in-beta"
+                and payload.get("contract_file_eligible") is False
+                and payload.get("beta_content_pages") == ["episode.md"],
+                f"exit={code} payload={payload}",
+            )
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(bearing),
+                    "--operation",
+                    "apply",
+                    "--batch",
+                    "contract-file",
+                    "--json",
+                ]
+            )
+            after = {
+                path.relative_to(bearing): sha(path)
+                for path in bearing.rglob("*")
+                if path.is_file()
+            }
+            check(
+                f"beta2-content-{content_type}: apply refuses with in_beta_not_legacy and no writes",
+                code != 0
+                and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+                and after == before
+                and not (bearing / "CONTRACT.json").exists(),
+                f"exit={code} payload={payload}",
+            )
+
+        for label, extra in (
+            ("stamped-beta", {"atlas_release": "0.13.0-beta"}),
+            ("stamped-beta2", {"atlas_release": "0.13.0-beta.2"}),
+            ("layers-page", {"memory": {"layers": ["frame", "gist", "page"]}}),
+            ("layers-memory", {"memory": {"layers": ["frame", "gist", "memory"]}}),
+        ):
+            refused = tmp / f"beta2-still-refused-{label}"
+            refused.mkdir()
+            stamped_contract = dict(empty_contract)
+            stamped_contract.update(extra)
+            (refused / "SCHEMA.json").write_text(
+                json.dumps(stamped_contract, indent=2) + "\n", encoding="utf-8"
+            )
+            before_hash = sha(refused / "SCHEMA.json")
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(refused),
+                    "--operation",
+                    "apply",
+                    "--batch",
+                    "contract-file",
+                    "--json",
+                ]
+            )
+            check(
+                f"beta2-still-refused-{label}: in_beta_not_legacy and bytes unchanged",
+                code != 0
+                and payload.get("lineage") == "in-beta"
+                and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+                and sha(refused / "SCHEMA.json") == before_hash
+                and not (refused / "CONTRACT.json").exists(),
+                f"exit={code} payload={payload}",
+            )
+
+        ambiguous = tmp / "beta2-non-string-type"
+        ambiguous.mkdir()
+        ambiguous_contract = dict(empty_contract)
+        ambiguous_contract["schema_version"] = "2.0"
+        (ambiguous / "SCHEMA.json").write_text(
+            json.dumps(ambiguous_contract, indent=2) + "\n", encoding="utf-8"
+        )
+        (ambiguous / "odd.md").write_text(
+            "---\ntype:\n  - frame\ntitle: t\ncreated: 2026-10-04\n---\n\n" + PROSE + "\n",
+            encoding="utf-8",
+        )
+        ambiguous_before = sha(ambiguous / "SCHEMA.json")
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(ambiguous),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "beta2-ambiguous-type: non-string type fails closed with no writes",
+            code != 0
+            and "beta2_content_ambiguous" in [f.get("id") for f in payload.get("findings", [])]
+            and sha(ambiguous / "SCHEMA.json") == ambiguous_before
+            and not (ambiguous / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+
+        linked = tmp / "beta2-template-symlink"
+        linked.mkdir()
+        (linked / "SCHEMA.json").write_text(
+            json.dumps(empty_contract, indent=2) + "\n", encoding="utf-8"
+        )
+        link_tmpl = linked / "templates"
+        link_tmpl.mkdir()
+        outside_template = tmp / "outside-frame-template.md"
+        outside_template.write_text("do not follow\n", encoding="utf-8")
+        (link_tmpl / "frame.md").symlink_to(outside_template)
+        linked_before = sha(linked / "SCHEMA.json")
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(linked),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "beta2-template-symlink: frame.md symlink fails closed and the target is untouched",
+            code != 0
+            and "beta2_contract_ambiguous" in [f.get("id") for f in payload.get("findings", [])]
+            and sha(linked / "SCHEMA.json") == linked_before
+            and not (linked / "CONTRACT.json").exists()
+            and (link_tmpl / "frame.md").is_symlink()
+            and outside_template.read_text(encoding="utf-8") == "do not follow\n",
+            f"exit={code} payload={payload}",
         )
 
         # === current-shape schema coverage ======================================

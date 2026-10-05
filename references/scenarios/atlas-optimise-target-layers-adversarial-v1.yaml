@@ -42,4 +42,4 @@ smokes:
   - id: no-stamp-change
     source: "operator pin 7"
     check: "scripts/test_atlas_optimise.py OptimiseTests.test_no_contract_write_and_stamp; scripts/release_readiness.py"
-    expect: "No CONTRACT.json or SCHEMA.json write; CURRENT_RELEASE stays 0.13.0-beta.7; package surfaces read 0.13.0-beta.9."
+    expect: "No CONTRACT.json or SCHEMA.json write; CURRENT_RELEASE stays 0.13.0-beta.7; package surfaces read 0.13.0-beta.10."

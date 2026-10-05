@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.9
+version: 0.13.0-beta.10
 activation_card: on
 ---
 

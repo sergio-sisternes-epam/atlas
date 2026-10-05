@@ -142,7 +142,7 @@ This path does not write `SCHEMA.json` itself. Path **schema** is the only
 writer of `memory.rung`; it edits whichever single contract file the store
 has (`SCHEMA.json` or `CONTRACT.json`), never both.
 
-### Contract-file migration (CLI, pre-beta only)
+### Contract-file migration (CLI)
 
 Distinct from the assess/inventory/apply procedure above (which moves
 *content* toward memory/gist/schema on current shape), `atlas memory-migrate` is a CLI command
@@ -155,29 +155,42 @@ python3 <atlas-skill>/scripts/atlas.py memory-migrate \
 ```
 
 `assess` and `inventory` write nothing here either — the JSON output
-includes a `lineage` field (`pre-beta`, `in-beta`, or `current`) and
-nothing else changes on disk.
+includes a `lineage` field (`pre-beta`, `in-beta`, `empty-beta2-init`, or
+`current`) and a `contract_file_eligible` flag, and nothing else changes
+on disk.
 
 Eligibility (`apply`):
 
 - **pre-beta contract** — contract file is `SCHEMA.json`, there is no
   `memory` object, and `atlas_release` is absent or older than
   `0.13.0-beta` (for example `0.12.0`). This contract shape is eligible
-  for `apply`.
+  for `apply`. An otherwise pre-beta contract whose on-disk pages already
+  include any `frame`, `gist`, or `memory` page is reported as in-beta
+  lineage, not pre-beta lineage, but remains eligible for `apply` because
+  its contract shape is pre-beta.
+- **empty unstamped full beta.2 init** — `SCHEMA.json` has no
+  `atlas_release` key and no `memory` key, and it is a full beta.2 init
+  (`templates` plus `types.recommended` including `frame`), and no concept
+  page has type `frame`, `gist`, `page`, or `memory`. `assess` and
+  `inventory` report lineage `empty-beta2-init`,
+  `contract_file_eligible: true`, and `beta_content_pages: []`, and write
+  nothing. `apply --batch contract-file` is eligible. Concept pages are
+  the same walk the rest of this command uses: `templates/`, staging, and
+  reserved `index.md` / `log.md` are not content pages. A page that cannot
+  be read, a broken or escaping symlink, or a non-string `type` fails
+  closed (finding id `beta2_content_ambiguous`). A template path that is
+  a symlink, escapes the store, or collides with a kept template fails
+  closed (finding id `beta2_contract_ambiguous`). Either finding writes
+  nothing.
 - **in-beta** — `atlas_release` is exactly `0.13.0-beta` or
-  `0.13.0-beta.2`, or `SCHEMA.json` already has `memory.layers`
-  `["frame", "gist", "page"]` or `["frame", "gist", "memory"]`, or
-  `SCHEMA.json` is an unstamped full beta.2 init (the released default
-  that had neither `atlas_release` nor a `memory` object, so
-  `memory.layers` is absent, but the full-init/type shape — templates
-  plus `types.recommended` including `frame` — is beta.2's). An otherwise
-  pre-beta contract whose on-disk pages already include any `frame`, `gist`,
-  or `memory` page is reported as in-beta lineage, not pre-beta lineage, but
-  remains eligible for `apply` because its contract shape is pre-beta. Only
-  the stamped beta releases, the listed `memory.layers` shapes, and the
-  unstamped full beta.2 init refuse `apply` (exit non-zero, finding id
-  `in_beta_not_legacy`) and write nothing. The stamped beta releases and
-  full beta.2 init remain in-beta even without pages.
+  `0.13.0-beta.2`, or `SCHEMA.json` has `memory.layers`
+  `["frame", "gist", "page"]` or `["frame", "gist", "memory"]`, or the
+  unstamped full beta.2 init above already has a `frame`, `gist`, `page`,
+  or `memory` content page. These refuse `apply` (exit non-zero, finding
+  id `in_beta_not_legacy`) and write nothing. The stamped beta releases
+  and the listed `memory.layers` shapes remain in-beta even with zero
+  content pages. `assess` then reports lineage `in-beta` and
+  `contract_file_eligible: false`.
 - **current** — the contract shape written for this cut (`CONTRACT.json`,
   `atlas_release` `0.13.0-beta.7`, `memory.layers`
   `["schema", "gist", "memory"]`). An existing `CONTRACT.json` stamped
@@ -189,10 +202,21 @@ Eligibility (`apply`):
 
 `apply` with no `--batch`, or batch text `"migrate everything"`, refuses
 and writes nothing — same unscoped-batch guard as the content-migration
-procedure above. On a store with an eligible pre-beta contract, passing
-`--batch contract-file` renames `SCHEMA.json` to `CONTRACT.json`, sets
-`atlas_release` to `0.13.0-beta.7` and `memory.layers` to
-`["schema", "gist", "memory"]`, and does not rewrite existing pages.
+procedure above. On an eligible pre-beta contract, or an eligible empty
+unstamped full beta.2 init, passing `--batch contract-file` renames
+`SCHEMA.json` to `CONTRACT.json`, sets `atlas_release` to
+`0.13.0-beta.7` and `memory.layers` to `["schema", "gist", "memory"]`,
+and does not rewrite existing content pages. For that empty beta.2 init
+only, apply also aligns `templates` and `types.recommended` with a fresh
+current `atlas init`: `frame` and `page` are removed from
+`types.recommended`, `types.unconstrained`, and `templates.by_type`;
+`schema` and `memory` are added when missing, using the same by-type
+block `atlas init` writes; `templates/frame.md` and `templates/page.md`
+are removed; missing `templates/schema.md` and `templates/memory.md` are
+copied from the package templates. Store-specific settings (`atlas_id`,
+`title`, `structure`, `compile`, `query`) and custom types and templates
+are kept.
+
 Except for the replaced unsuffixed `frame.md` described below, existing
 `frame`, `gist`, and `memory` pages are preserved byte-for-byte.
 The contract-file batch adds a `type: schema` page named
@@ -216,9 +240,11 @@ reader round-trips, then re-run
 Migration remains operator-chosen: install, compile, and schema upgrade do
 not invoke apply.
 
-Stamps `0.13.0-beta` and `0.13.0-beta.2`, and the unstamped
-full beta.2 init, and the specified `memory.layers` shapes return
-`in_beta_not_legacy` and are not rewritten.
+Stamps `0.13.0-beta` and `0.13.0-beta.2`, `memory.layers` of
+`["frame", "gist", "page"]` or `["frame", "gist", "memory"]`, and an
+unstamped full beta.2 init that already has `frame`, `gist`, `page`, or
+`memory` content pages return `in_beta_not_legacy` and are not rewritten.
+An empty unstamped full beta.2 init is the eligible exception above.
 
 ### Out of scope
 

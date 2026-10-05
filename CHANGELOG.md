@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.0-beta.10 - 2026-10-05
+
+- `memory-migrate apply --batch contract-file` now accepts an unstamped full
+  beta.2 init (`SCHEMA.json` with `templates` and `types.recommended`
+  including `frame`, no `atlas_release` key, no `memory` key) when the store
+  has no content page of type `frame`, `gist`, `page`, or `memory`. Assess
+  and inventory report lineage `empty-beta2-init`, `contract_file_eligible:
+  true`, and `beta_content_pages: []`. Apply writes the current contract
+  shape (`CONTRACT.json`, `atlas_release` `0.13.0-beta.7`, `memory.layers`
+  `["schema", "gist", "memory"]`) and aligns templates and
+  `types.recommended` with a fresh `atlas init` (`frame` and `page` removed,
+  `schema` and `memory` added) while keeping store-specific settings and
+  custom types. Existing content pages are not rewritten.
+- Stamped `0.13.0-beta` / `0.13.0-beta.2` stores, stores with `memory.layers`
+  `frame`/`gist`/`page` or `frame`/`gist`/`memory`, and full beta.2 inits
+  that already contain those content pages still refuse with
+  `in_beta_not_legacy` and are left byte-for-byte unchanged. An unreadable
+  page, a non-string type, or an ambiguous template path fails closed with
+  no partial write. The store write stamp stays `0.13.0-beta.7`.
+
 ## 0.13.0-beta.9 - 2026-10-05
 
 - Path `atlas-optimise` now takes an explicit target (one folder or the store

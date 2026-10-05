@@ -110,6 +110,23 @@ def _is_full_beta2_init(schema: dict) -> bool:
     )
 
 
+def is_unstamped_full_beta2_init(contract_name: str, schema: dict) -> bool:
+    """True for a released beta.2 init document with no stamp and no memory key.
+
+    ``classify_lineage`` still reports this document as ``in-beta`` so it
+    keeps agreeing with ``compute_stamp_shape``. ``memory-migrate`` is the
+    caller that may treat the same document as contract-file eligible, and
+    only when the store also has no frame, gist, page, or memory content
+    pages. A present ``atlas_release`` or ``memory`` key — even null — is
+    not this document.
+    """
+    if contract_name != SCHEMA_NAME:
+        return False
+    if "atlas_release" in schema or "memory" in schema:
+        return False
+    return _is_full_beta2_init(schema)
+
+
 def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, str | None]:
     """Return (shape, error). shape in {'shipped_beta', 'in_beta', 'current'}.
 
@@ -351,7 +368,11 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
       SCHEMA.json already has memory.layers ["frame", "gist", "page"], OR
       SCHEMA.json is a full shipped-beta.2 init document (templates plus
       types.recommended including "frame") even though it has no memory key
-      and no atlas_release stamp.
+      and no atlas_release stamp. ``memory-migrate`` may still apply that
+      last document when the store has no frame, gist, page, or memory
+      content pages; this function stays ``in-beta`` either way so it keeps
+      agreeing with ``compute_stamp_shape``. The command reports that empty
+      store as lineage ``empty-beta2-init``.
     - pre-beta: contract file is SCHEMA.json, the `memory` key is absent
       (not merely present-but-invalid), it is not the full shipped-beta.2
       init document above, and atlas_release is absent or semantically
