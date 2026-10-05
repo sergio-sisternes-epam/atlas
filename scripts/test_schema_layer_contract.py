@@ -20,6 +20,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.commands.init import _by_type_block
 from atlas_cli.core.frontmatter import read_page
 from atlas_cli.core.schema import classify_lineage, compute_stamp_shape
 
@@ -92,6 +93,145 @@ def write_index(folder: Path) -> None:
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _beta2_template_block(name: str, required: list[str] | None = None) -> dict:
+    return {
+        "file": f"templates/{name}.md",
+        "frontmatter": {
+            "required": required or ["type", "title", "created"],
+            "recommended": [],
+        },
+        "sections": {"required": [], "recommended": []},
+    }
+
+
+def unstamped_beta2_schema() -> dict:
+    """SCHEMA.json shaped like an unstamped full beta.2 init.
+
+    Matches the fleet store that carried templates plus types.recommended
+    including frame and page, with no atlas_release and no memory key.
+    ``vendor`` is an extra store-specific type so the migration must keep it.
+    """
+
+    def required_for(name: str) -> list[str]:
+        if name in ("experience", "work"):
+            return ["type", "title", "created", "work_id"]
+        if name == "vendor":
+            return ["type", "title", "created", "vendor_id"]
+        return ["type", "title", "created"]
+
+    by_type_names = [
+        "experience",
+        "decision",
+        "work",
+        "document",
+        "protostar",
+        "lesson",
+        "recipe",
+        "page",
+        "gist",
+        "frame",
+        "vendor",
+    ]
+    return {
+        "schema_version": "1.0",
+        "atlas_id": "atlas.sesispla.net/master-of-purchases/atlas",
+        "title": "Master of Purchases Atlas",
+        "structure": {
+            "free_layout": True,
+            "staging_dir": "staging",
+            "require_index_in_folders": True,
+            "reserved_names": ["index.md", "log.md", "staging", "schema.d"],
+        },
+        "compile": {
+            "hard_fail": True,
+            "allow_inline_ignores": True,
+            "min_body_chars": 40,
+            "core_checks": [
+                "okf_compliance",
+                "frontmatter",
+                "internal_links",
+                "not_just_links",
+                "schema_present",
+                "no_answerable_in_staging",
+                "index_md_present",
+                "index_md_listing",
+            ],
+            "simplicity_budget": {
+                "max_required_frontmatter_keys_per_type": 8,
+                "max_required_sections_per_type": 6,
+            },
+            "page_contract": {
+                "when_work_id": {"require_kind": "implements"},
+                "when_type": {"protostar": {"require_kind": "derived_from"}},
+                "forming_requires_type": "protostar",
+            },
+        },
+        "templates": {
+            "directory": "templates/",
+            "by_type": {
+                name: _beta2_template_block(name, required_for(name)) for name in by_type_names
+            },
+        },
+        "types": {
+            "recommended": [
+                "experience",
+                "decision",
+                "lesson",
+                "recipe",
+                "work",
+                "protostar",
+                "gist",
+                "frame",
+                "page",
+                "vendor",
+            ],
+            "unconstrained": [],
+        },
+        "query": {
+            "default_mode": "local",
+            "search_engine": "grep",
+            "fallback": "rg",
+            "staging_visible": False,
+        },
+    }
+
+
+def write_unstamped_beta2_store(store: Path, layer_page: str | None = None) -> None:
+    store.mkdir(parents=True, exist_ok=True)
+    (store / "SCHEMA.json").write_text(
+        json.dumps(unstamped_beta2_schema(), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (store / "index.md").write_text(
+        "# Master of Purchases Atlas\n\n- notes\n",
+        encoding="utf-8",
+    )
+    write_page(store / "decision.md", "decision")
+    templates = store / "templates"
+    templates.mkdir()
+    frame_src = ROOT / "references" / "templates" / "frame.md"
+    (templates / "frame.md").write_text(frame_src.read_text(encoding="utf-8"), encoding="utf-8")
+    (templates / "page.md").write_text(
+        "---\ntype: page\ntitle: Page template\ncreated: 2026-10-04\n---\n\nPage template body.\n",
+        encoding="utf-8",
+    )
+    (templates / "gist.md").write_text("gist template bytes\n", encoding="utf-8")
+    (templates / "experience.md").write_text("experience template bytes\n", encoding="utf-8")
+    (templates / "vendor.md").write_text("vendor template bytes\n", encoding="utf-8")
+    if layer_page:
+        write_page(store / "episode.md", layer_page)
+
+
+def tree_hashes(root: Path) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            found[str(path.relative_to(root))] = "symlink:" + str(path.readlink())
+        elif path.is_file():
+            found[str(path.relative_to(root))] = sha(path)
+    return found
 
 
 def write_page_shaped_store(store: Path, stamp: str | None = None) -> list[Path]:
@@ -985,12 +1125,12 @@ def main() -> int:
                 sha(schema_path) == before and not (store / "CONTRACT.json").exists(),
             )
 
-        # === in-beta-refused-unstamped-shipped-beta2 ==============================
-        # The actual shipped 0.13.0-beta.2 init shape: no atlas_release stamp and
-        # no memory key, but the full init document (templates plus
-        # types.recommended including frame) — the same discriminator pin 5 uses
-        # to tell it apart from the minimal pre-beta-eligible fixture above.
-        unstamped = tmp / "in-beta-refused-unstamped-shipped-beta2"
+        # === unstamped-beta2-empty-minimal ========================================
+        # The shipped 0.13.0-beta.2 init discriminator (templates plus
+        # types.recommended including frame, no atlas_release, no memory key)
+        # with zero content pages is eligible. memory is already recommended;
+        # frame is the leftover type id.
+        unstamped = tmp / "unstamped-beta2-empty-minimal"
         unstamped.mkdir(parents=True)
         unstamped_schema_path = unstamped / "SCHEMA.json"
         unstamped_schema_path.write_text(
@@ -1013,13 +1153,23 @@ def main() -> int:
                             "frame",
                             "memory",
                         ],
-                        "unconstrained": [],
+                        "unconstrained": ["frame"],
                     },
                 }
             ),
             encoding="utf-8",
         )
-        unstamped_before = sha(unstamped_schema_path)
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(unstamped), "--operation", "assess", "--json"]
+        )
+        check(
+            "unstamped-beta2-empty-minimal: assess reports lineage unstamped-beta2",
+            code == 0
+            and payload.get("lineage") == "unstamped-beta2"
+            and payload.get("beta2_init") == "eligible"
+            and not (unstamped / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
         code, payload = run_json(
             [
                 "memory-migrate",
@@ -1032,21 +1182,383 @@ def main() -> int:
                 "--json",
             ]
         )
-        findings = [f.get("id") for f in payload.get("findings", [])]
+        minimal_migrated = json.loads((unstamped / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "in-beta-refused-unstamped-shipped-beta2: apply exits non-zero",
-            code != 0,
+            "unstamped-beta2-empty-minimal: apply writes the current contract shape",
+            code == 0
+            and payload.get("ok") is True
+            and not (unstamped / "SCHEMA.json").exists()
+            and minimal_migrated.get("atlas_id") == "ib2"
+            and minimal_migrated.get("atlas_release") == "0.13.0-beta.7"
+            and minimal_migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"]
+            and minimal_migrated.get("types", {}).get("recommended")
+            == [
+                "experience",
+                "decision",
+                "lesson",
+                "recipe",
+                "work",
+                "protostar",
+                "gist",
+                "schema",
+                "memory",
+            ]
+            and minimal_migrated.get("types", {}).get("unconstrained") == []
+            and "frame" not in minimal_migrated.get("templates", {}).get("by_type", {})
+            and "page" not in minimal_migrated.get("templates", {}).get("by_type", {})
+            and (unstamped / "templates" / "schema.md").is_file()
+            and (unstamped / "templates" / "memory.md").is_file()
+            and not (unstamped / "templates" / "frame.md").exists()
+            and not (unstamped / "templates" / "page.md").exists(),
+            f"exit={code} payload={payload} contract={minimal_migrated}",
+        )
+
+        # === unstamped-beta2-fleet-shape ==========================================
+        fleet = tmp / "unstamped-beta2-fleet-shape"
+        write_unstamped_beta2_store(fleet)
+        fleet_before = tree_hashes(fleet)
+        preserved_keys = ("atlas_id", "title", "structure", "compile", "query")
+        original_contract = json.loads((fleet / "SCHEMA.json").read_text(encoding="utf-8"))
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(fleet), "--operation", "assess", "--json"]
+        )
+        check(
+            "unstamped-beta2-fleet-shape: assess reports unstamped-beta2 and writes nothing",
+            code == 0
+            and payload.get("lineage") == "unstamped-beta2"
+            and payload.get("beta2_init") == "eligible"
+            and payload.get("contract_file") == "SCHEMA.json"
+            and tree_hashes(fleet) == fleet_before,
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(fleet), "--operation", "inventory", "--json"]
+        )
+        check(
+            "unstamped-beta2-fleet-shape: inventory reports the same lineage and writes nothing",
+            code == 0
+            and payload.get("lineage") == "unstamped-beta2"
+            and payload.get("beta2_init") == "eligible"
+            and tree_hashes(fleet) == fleet_before,
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(fleet), "--operation", "apply", "--json"]
+        )
+        check(
+            "unstamped-beta2-fleet-shape: apply without a batch writes nothing",
+            code == 2
+            and "batch_required" in findings_by_id(payload, "findings")
+            and tree_hashes(fleet) == fleet_before,
+            f"exit={code} payload={payload}",
+        )
+        code, before_compile = run_json(["compile", "--root", str(fleet), "--json"])
+        check(
+            "unstamped-beta2-fleet-shape: in-beta compile is green before apply",
+            code == 0 and not before_compile.get("critical"),
+            f"exit={code} critical={before_compile.get('critical')} warnings={before_compile.get('warnings')}",
+        )
+        check(
+            "unstamped-beta2-fleet-shape: compile does not migrate the contract",
+            tree_hashes(fleet) == fleet_before,
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(fleet),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        migrated = json.loads((fleet / "CONTRACT.json").read_text(encoding="utf-8"))
+        by_type = migrated.get("templates", {}).get("by_type", {})
+        check(
+            "unstamped-beta2-fleet-shape: apply writes CONTRACT.json at beta.7",
+            code == 0
+            and payload.get("lineage") == "current"
+            and payload.get("contract_file") == "CONTRACT.json"
+            and not (fleet / "SCHEMA.json").exists()
+            and migrated.get("atlas_release") == "0.13.0-beta.7"
+            and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             f"exit={code} payload={payload}",
         )
         check(
-            "in-beta-refused-unstamped-shipped-beta2: finding id in_beta_not_legacy",
-            "in_beta_not_legacy" in findings,
-            f"findings={findings}",
+            "unstamped-beta2-fleet-shape: store-specific settings and custom types survive",
+            all(migrated.get(key) == original_contract.get(key) for key in preserved_keys)
+            and migrated.get("types", {}).get("recommended")
+            == [
+                "experience",
+                "decision",
+                "lesson",
+                "recipe",
+                "work",
+                "protostar",
+                "gist",
+                "schema",
+                "memory",
+                "vendor",
+            ]
+            and by_type.get("vendor") == original_contract["templates"]["by_type"]["vendor"]
+            and by_type.get("document") == original_contract["templates"]["by_type"]["document"]
+            and by_type.get("gist") == original_contract["templates"]["by_type"]["gist"]
+            and "frame" not in by_type
+            and "page" not in by_type
+            and "frame" not in migrated["types"]["recommended"]
+            and "page" not in migrated["types"]["recommended"],
+            str({key: migrated.get(key) for key in ("types", "templates")}),
         )
         check(
-            "in-beta-refused-unstamped-shipped-beta2: leaves SCHEMA.json bytes unchanged",
-            sha(unstamped_schema_path) == unstamped_before
-            and not (unstamped / "CONTRACT.json").exists(),
+            "unstamped-beta2-fleet-shape: schema and memory blocks match atlas init",
+            by_type.get("schema") == _by_type_block("schema")
+            and by_type.get("memory") == _by_type_block("memory"),
+            str({"schema": by_type.get("schema"), "memory": by_type.get("memory")}),
+        )
+        check(
+            "unstamped-beta2-fleet-shape: content pages stay byte-identical",
+            sha(fleet / "decision.md") == fleet_before["decision.md"]
+            and sha(fleet / "index.md") == fleet_before["index.md"],
+        )
+        check(
+            "unstamped-beta2-fleet-shape: leftover frame and page templates are removed",
+            not (fleet / "templates" / "frame.md").exists()
+            and not (fleet / "templates" / "page.md").exists()
+            and sha(fleet / "templates" / "gist.md") == fleet_before["templates/gist.md"]
+            and sha(fleet / "templates" / "experience.md") == fleet_before["templates/experience.md"]
+            and sha(fleet / "templates" / "vendor.md") == fleet_before["templates/vendor.md"]
+            and (fleet / "templates" / "schema.md").read_text(encoding="utf-8")
+            == (ROOT / "references" / "templates" / "schema.md").read_text(encoding="utf-8")
+            and (fleet / "templates" / "memory.md").read_text(encoding="utf-8")
+            == (ROOT / "references" / "templates" / "memory.md").read_text(encoding="utf-8"),
+        )
+        code, after_compile = run_json(["compile", "--root", str(fleet), "--json"])
+        check(
+            "unstamped-beta2-fleet-shape: compile is green after apply",
+            code == 0 and not after_compile.get("critical") and not after_compile.get("warnings"),
+            f"exit={code} critical={after_compile.get('critical')} warnings={after_compile.get('warnings')}",
+        )
+
+        # === unstamped-beta2-layer-content-refused ===============================
+        for layer_type in ("frame", "gist", "page", "memory"):
+            bearing = tmp / f"unstamped-beta2-layer-{layer_type}"
+            write_unstamped_beta2_store(bearing, layer_page=layer_type)
+            before_bearing = tree_hashes(bearing)
+            code, payload = run_json(
+                ["memory-migrate", "--root", str(bearing), "--operation", "assess", "--json"]
+            )
+            check(
+                f"unstamped-beta2-layer-{layer_type}: assess stays in-beta and reports layer_content",
+                code == 0
+                and payload.get("lineage") == "in-beta"
+                and payload.get("beta2_init") == "layer_content"
+                and tree_hashes(bearing) == before_bearing,
+                f"exit={code} payload={payload}",
+            )
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(bearing),
+                    "--operation",
+                    "apply",
+                    "--batch",
+                    "contract-file",
+                    "--json",
+                ]
+            )
+            check(
+                f"unstamped-beta2-layer-{layer_type}: apply refuses with in_beta_not_legacy",
+                code != 0
+                and payload.get("beta2_init") == "layer_content"
+                and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+                and tree_hashes(bearing) == before_bearing
+                and not (bearing / "CONTRACT.json").exists(),
+                f"exit={code} payload={payload}",
+            )
+
+        staged_layer = tmp / "unstamped-beta2-staging-frame"
+        write_unstamped_beta2_store(staged_layer)
+        write_page(staged_layer / "staging" / "draft.md", "frame")
+        staged_before = tree_hashes(staged_layer)
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(staged_layer),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "unstamped-beta2-staging-frame: a staging frame page still refuses",
+            code != 0
+            and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+            and tree_hashes(staged_layer) == staged_before
+            and not (staged_layer / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+
+        for layers in (["frame", "gist", "page"], ["frame", "gist", "memory"]):
+            layered = tmp / ("unstamped-beta2-layers-" + "-".join(layers))
+            layered.mkdir()
+            layered_schema = unstamped_beta2_schema()
+            layered_schema["memory"] = {"layers": layers}
+            (layered / "SCHEMA.json").write_text(
+                json.dumps(layered_schema, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            layered_before = sha(layered / "SCHEMA.json")
+            code, payload = run_json(
+                ["memory-migrate", "--root", str(layered), "--operation", "assess", "--json"]
+            )
+            check(
+                f"unstamped-beta2-layers-{layers}: assess stays in-beta without beta2_init",
+                code == 0 and payload.get("lineage") == "in-beta" and "beta2_init" not in payload,
+                f"exit={code} payload={payload}",
+            )
+            code, payload = run_json(
+                [
+                    "memory-migrate",
+                    "--root",
+                    str(layered),
+                    "--operation",
+                    "apply",
+                    "--batch",
+                    "contract-file",
+                    "--json",
+                ]
+            )
+            check(
+                f"unstamped-beta2-layers-{layers}: apply refuses with in_beta_not_legacy",
+                code != 0
+                and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+                and sha(layered / "SCHEMA.json") == layered_before
+                and not (layered / "CONTRACT.json").exists(),
+                f"exit={code} payload={payload}",
+            )
+
+        stamped_empty = tmp / "unstamped-beta2-stamped-beta-empty"
+        stamped_empty.mkdir()
+        stamped_schema = unstamped_beta2_schema()
+        stamped_schema["atlas_release"] = "0.13.0-beta"
+        (stamped_empty / "SCHEMA.json").write_text(
+            json.dumps(stamped_schema, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        stamped_empty_before = sha(stamped_empty / "SCHEMA.json")
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(stamped_empty),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "unstamped-beta2-stamped-beta-empty: a 0.13.0-beta stamp still refuses with no layer pages",
+            code != 0
+            and "beta2_init" not in payload
+            and "in_beta_not_legacy" in [f.get("id") for f in payload.get("findings", [])]
+            and sha(stamped_empty / "SCHEMA.json") == stamped_empty_before
+            and not (stamped_empty / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+
+        ambiguous = tmp / "unstamped-beta2-ambiguous-symlink"
+        write_unstamped_beta2_store(ambiguous)
+        (ambiguous / "linked.md").symlink_to(ambiguous / "decision.md")
+        ambiguous_before = tree_hashes(ambiguous)
+        code, payload = run_json(
+            ["memory-migrate", "--root", str(ambiguous), "--operation", "assess", "--json"]
+        )
+        check(
+            "unstamped-beta2-ambiguous-symlink: assess reports ambiguous and writes nothing",
+            code == 0
+            and payload.get("lineage") == "in-beta"
+            and payload.get("beta2_init") == "ambiguous"
+            and tree_hashes(ambiguous) == ambiguous_before,
+            f"exit={code} payload={payload}",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(ambiguous),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        check(
+            "unstamped-beta2-ambiguous-symlink: apply fails closed and writes nothing",
+            code != 0
+            and payload.get("beta2_init") == "ambiguous"
+            and "beta2_init_ambiguous" in [f.get("id") for f in payload.get("findings", [])]
+            and tree_hashes(ambiguous) == ambiguous_before
+            and not (ambiguous / "CONTRACT.json").exists(),
+            f"exit={code} payload={payload}",
+        )
+
+        # A pre-beta contract may mention frame in a template block without the
+        # full-init recommended list. That store stays on the pre-beta path and
+        # does not get the beta.2 template normalisation.
+        pre_beta_frame_template = tmp / "pre-beta-frame-template-unchanged"
+        pre_beta_frame_template.mkdir()
+        (pre_beta_frame_template / "SCHEMA.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "atlas_id": "pre-beta-frame-template",
+                    "title": "Keep me",
+                    "structure": {},
+                    "compile": {},
+                    "templates": {
+                        "directory": "templates/",
+                        "by_type": {"frame": _beta2_template_block("frame")},
+                    },
+                    "types": {"recommended": ["experience"], "unconstrained": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        code, payload = run_json(
+            [
+                "memory-migrate",
+                "--root",
+                str(pre_beta_frame_template),
+                "--operation",
+                "apply",
+                "--batch",
+                "contract-file",
+                "--json",
+            ]
+        )
+        pre_beta_migrated = json.loads(
+            (pre_beta_frame_template / "CONTRACT.json").read_text(encoding="utf-8")
+        )
+        check(
+            "pre-beta-frame-template: apply still migrates without normalising templates",
+            code == 0
+            and payload.get("lineage") == "current"
+            and pre_beta_migrated.get("atlas_id") == "pre-beta-frame-template"
+            and pre_beta_migrated.get("title") == "Keep me"
+            and pre_beta_migrated.get("types", {}).get("recommended") == ["experience"]
+            and "frame" in pre_beta_migrated.get("templates", {}).get("by_type", {})
+            and "schema" not in pre_beta_migrated.get("templates", {}).get("by_type", {})
+            and not (pre_beta_frame_template / "templates").exists(),
+            f"exit={code} payload={payload} contract={pre_beta_migrated}",
         )
 
         # === current-shape schema coverage ======================================

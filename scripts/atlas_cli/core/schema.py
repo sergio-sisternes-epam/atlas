@@ -351,7 +351,11 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
       SCHEMA.json already has memory.layers ["frame", "gist", "page"], OR
       SCHEMA.json is a full shipped-beta.2 init document (templates plus
       types.recommended including "frame") even though it has no memory key
-      and no atlas_release stamp.
+      and no atlas_release stamp. Content pages are not visible here.
+      ``memory-migrate`` reports lineage ``unstamped-beta2`` and allows the
+      contract-file batch only when that init has no frame/gist/page/memory
+      content pages. This function still returns ``in-beta`` for the contract
+      shape so it stays aligned with ``compute_stamp_shape``.
     - pre-beta: contract file is SCHEMA.json, the `memory` key is absent
       (not merely present-but-invalid), it is not the full shipped-beta.2
       init document above, and atlas_release is absent or semantically

@@ -4,8 +4,11 @@ work_id: 2026-10-04-schema-layer-contract
 adversarial: true
 smokes:
   - id: in-beta-not-legacy
-    source: "pin 5; atlas_release 0.13.0-beta or 0.13.0-beta.2 on SCHEMA.json"
-    expect: "memory-migrate apply refuses an in-beta store (finding id in_beta_not_legacy), exits non-zero, and leaves its bytes unchanged; only a pre-beta store is eligible for apply."
+    source: "pin 5; atlas_release 0.13.0-beta or 0.13.0-beta.2 on SCHEMA.json; memory.layers frame/gist/page or frame/gist/memory; unstamped full beta.2 init that already has frame, gist, page, or memory content"
+    expect: "memory-migrate apply refuses these in-beta stores (finding id in_beta_not_legacy), exits non-zero, and leaves bytes unchanged. An unstamped full beta.2 init whose pages cannot be classified fails closed with beta2_init_ambiguous and writes nothing."
+  - id: unstamped-beta2-empty-eligible
+    source: "unstamped full beta.2 init SCHEMA.json (templates plus types.recommended including frame, no atlas_release, no memory key) with no frame/gist/page/memory content pages"
+    expect: "assess and inventory report lineage unstamped-beta2 and beta2_init eligible, and write nothing. apply --batch contract-file writes CONTRACT.json, atlas_release 0.13.0-beta.7, memory.layers [schema, gist, memory], drops leftover frame and page templates and recommended types, adds schema and memory the way atlas init does, and keeps store-specific settings and existing content pages. compile is green afterwards."
   - id: one-schema-per-gist-folder
     source: "pin 4; schema is the renamed frame on the beta.3 (CONTRACT.json) shape only"
     expect: "A folder with one or more gists has exactly one type=schema page (one gist still counts); a folder with zero gists has none; a second schema in a gist-bearing folder fails compile closed."
