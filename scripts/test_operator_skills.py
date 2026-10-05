@@ -28,6 +28,20 @@ class OperatorSkillsTests(unittest.TestCase):
         self.assertIn("Not on install", optimise)
         self.assertIn("Not on compile", optimise)
         self.assertIn("Do not invent gist text", optimise)
+        for phrase in (
+            "names a target",
+            "A missing target",
+            "Plan (dry-run, always first)",
+            "migration task list per top-level folder",
+            "Do not stop early",
+            "dead-index-cue",
+            "stale-gist-description",
+            "Subject clustering",
+            "stale plan",
+            "scripts/atlas_optimise.py",
+            "Do not run memory-migrate from here",
+        ):
+            self.assertIn(phrase, optimise)
 
         for content in (memorise, recall, forget, optimise):
             self.assertIn("Not a memory layer", content)

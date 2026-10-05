@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.8
+version: 0.13.0-beta.9
 activation_card: on
 ---
 
@@ -148,7 +148,7 @@ still copies into staging; do not use it for strategy moves.
 | **atlas-memorise** | Choose the four-layer write target, then load path remember | `references/paths/atlas-memorise.md` |
 | **atlas-recall** | Navigate the four-layer model by loading path recall | `references/paths/atlas-recall.md` |
 | **atlas-forget** | Drop memory with keep, vary, or abandon | `references/paths/atlas-forget.md` |
-| **atlas-optimise** | Operator-chosen folder consolidation; not on install or compile | `references/paths/atlas-optimise.md` |
+| **atlas-optimise** | Operator-chosen optimise of a named target: four-layer repair, subject clustering, per-folder task list, dry-run first; not on install or compile | `references/paths/atlas-optimise.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
@@ -209,6 +209,8 @@ python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atl
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch <token>]
+python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--out-dir <dir>] [--plan <plan.json>]
+                       # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile
 ```
 
 Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.

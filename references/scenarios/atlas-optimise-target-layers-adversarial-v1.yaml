@@ -1,0 +1,45 @@
+id: atlas-optimise-target-layers-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-05-atlas-optimise-target-layers
+adversarial: true
+smokes:
+  - id: shared-parent-no-early-stop
+    source: "observed beta.8 early stop on the Master of Packages atlas; operator pin 5"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_shared_parent_does_not_stop_early"
+    expect: "With pages already in one folder, dead frame.md cues and stale gist descriptions are still listed and repaired."
+  - id: invent-gist-forbidden
+    source: "Maynez et al. ACL 2020, abstractive summary hallucination"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_no_invented_gist_text"
+    expect: "Gist descriptions after apply are exact substrings of their memory page; no memory page is edited; missing source text hands off to remember."
+  - id: install-compile-never-select
+    source: "2026-10-04 operator-skills pin; helper-as-hook risk"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_not_wired_into_install_or_compile; scripts/test_operator_skills.py"
+    expect: "atlas.py has no optimise command; atlas_cli, init, compile and memory-migrate never import or call atlas_optimise."
+  - id: target-required
+    source: "operator pin 1"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_target_required"
+    expect: "plan and apply without --target exit 2 and write nothing."
+  - id: dry-run-read-only
+    source: "operator pin 6; dry-run first"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_shared_parent_does_not_stop_early; OptimiseTests.test_out_dir_inside_store_refused"
+    expect: "plan leaves the store byte-identical and refuses an out-dir inside the store."
+  - id: stale-plan-refused
+    source: "Terraform saved plan is stale guard"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_stale_plan_refused"
+    expect: "apply exits 2 and writes nothing when HEAD or any planned file hash changed."
+  - id: moves-rewrite-links
+    source: "XWiki XWIKI-12987; Wiki.js discussion 7412; Hill and Shaw redirects"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_suffix_rename_is_opt_in_and_rewrites_links; OptimiseTests.test_atlas_uri_mention_blocks_rename"
+    expect: "Renames and moves rewrite every inbound relates_to and relative link; atlas:// mentions block the move."
+  - id: cluster-confirm-only
+    source: "Whittaker et al. CHI 2011, folder filing does not improve refinding"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_cluster_moves_only_on_confirm"
+    expect: "Subject cluster moves happen only for ids passed with --confirm; overlaps without a safe target are report-only."
+  - id: precondition-not-run
+    source: "operator pin 3; memory-migrate stays operator-chosen"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_precondition_blocks_and_does_not_migrate"
+    expect: "On a SCHEMA.json store optimise lists a contract-precondition handoff, apply refuses, and memory-migrate is not run."
+  - id: no-stamp-change
+    source: "operator pin 7"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_no_contract_write_and_stamp; scripts/release_readiness.py"
+    expect: "No CONTRACT.json or SCHEMA.json write; CURRENT_RELEASE stays 0.13.0-beta.7; package surfaces read 0.13.0-beta.9."
