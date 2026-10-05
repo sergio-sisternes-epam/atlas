@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0-beta.9 - 2026-10-05
+
+- Path `atlas-optimise` now takes an explicit target (one folder or the store
+  root) and runs a dry-run plan first. It writes one migration task list per
+  top-level folder outside the store, then applies only what the operator
+  approves. Pages that already share a parent no longer end the run.
+- Four-layer repair with existing page text only: remove index cues to
+  missing pages (such as a deleted `frame.md`), cue schema pages from
+  `index.md`, add a gist to its folder's only schema, drop dead schema
+  members, and copy the memory description verbatim up into a stale gist.
+  Memory text is never edited; anything without source text hands off to path
+  remember. Direct gist and memory cues in `index.md` are removed only on
+  confirm. Suffix renames are opt-in and rewrite every inbound link.
+- Subject clustering by naming (shared filename stems, operator-named subject
+  folders, `work_id` folders). Moves need confirm, a free filename, a
+  non-layer page, and no `atlas://` mention; links are rewritten.
+- New standalone helper `scripts/atlas_optimise.py` (`plan`, `apply`). apply
+  refuses a stale plan (HEAD or file hash changed) and refuses while a store
+  still needs memory-migrate. It is not an `atlas.py` command and install,
+  init, compile, and memory-migrate never call it. It writes no contract file:
+  the store write stamp stays `0.13.0-beta.7`.
+
 ## 0.13.0-beta.8 - 2026-10-04
 
 - Four operator paths help agents use the locked four-layer model:

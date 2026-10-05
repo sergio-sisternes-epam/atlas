@@ -1,5 +1,5 @@
 name: atlas
-version: 0.13.0-beta.8
+version: 0.13.0-beta.9
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains."
 author: Sergio Sisternes
 license: Apache-2.0
