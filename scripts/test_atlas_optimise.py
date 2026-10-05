@@ -196,6 +196,13 @@ created: 2026-10-04
         self.assertEqual(code, 1)
         self.assertIsNotNone(p["precondition"])
         self.assertEqual(p["precondition"]["class"], "handoff")
+        page(root / "other" / "frame.md", """
+type: frame
+title: Other frame
+created: 2026-10-04
+""", "## Content\n\nA second legacy frame in another folder; not a subject cluster.")
+        code, p = plan(root, self.base / "out")
+        self.assertNotIn("subject-cluster:frame", {t["id"] for t in tasks(p)})
         others = [t for t in tasks(p) if t["kind"] != "contract-precondition"]
         self.assertTrue(others, "other findings are still listed")
         self.assertTrue(all(t["class"] in ("blocked", "handoff", "report") for t in others))

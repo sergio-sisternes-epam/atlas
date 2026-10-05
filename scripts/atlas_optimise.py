@@ -533,7 +533,7 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
     groups: dict[str, list[str]] = {}
     for k in keys:
         t = store.ptype(k)
-        if t in ("schema", "gist", "work") or store.in_claimed(k) or Path(k).name == "hub.md":
+        if t in ("schema", "gist", "frame", "work") or store.in_claimed(k) or Path(k).name == "hub.md":
             continue
         stem = Path(k).name[:-3]
         for suf in (".memory", ".gist", ".schema"):
