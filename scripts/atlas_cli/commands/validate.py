@@ -586,43 +586,58 @@ def _memory_findings(
                 out.append(item)
         return out
 
-    def _valid_gist_parent(m: dict) -> str | None:
-        """Return the canonical parent path for a well-formed gist, else None.
+    def _page_folder(path: Path) -> str:
+        folder = rel(root, path.parent)
+        return "." if folder in ("", ".") else folder
 
-        A gist only counts toward ``gist_parent`` coverage when it has
-        exactly one ``derived_from`` parent, that parent resolves to a page
-        inside the store, and the parent's type is a valid gist-parent type
-        (not itself a gist). This mirrors the ``gist_parent`` ok check below
-        so a malformed gist (zero/two+ parents, gist-of-gist, outside the
-        store, wrong type) never suppresses ``missing_gist`` for its target.
+    def _valid_gist_parents(m: dict) -> list[str] | None:
+        """Return canonical parent paths for a well-formed gist, else None.
+
+        A gist counts toward coverage when it has N>=1 ``derived_from``
+        parents, every parent resolves inside the store to a gist-parent
+        type (not itself a gist), and every parent lives in the same folder
+        (Cut 2). A shared cluster gist lists all of those parents. Zero
+        parents, a duplicate parent, a gist-of-gist, an unresolved target,
+        or parents in different folders never suppress ``missing_gist``.
+        Index membership itself does not require a gist or a schema.
         """
         parents = _related(m, "derived_from")
-        if len(parents) != 1:
+        if not parents:
             return None
-        target = str(parents[0].get("path") or "").strip()
-        if not target:
+        canons: list[str] = []
+        folders: list[str] = []
+        for item in parents:
+            target = str(item.get("path") or "").strip()
+            if not target:
+                return None
+            canon = _canonical_local_target(root, target)
+            key = canon if canon is not None else target
+            found = by_rel_path.get(key)
+            if found is None:
+                return None
+            tpath, tmeta = found
+            ttype = str(tmeta.get("type") or "").strip()
+            if ttype not in GIST_PARENT_TYPES:
+                return None
+            if key in canons:
+                return None
+            canons.append(key)
+            folders.append(_page_folder(tpath))
+        if len(set(folders)) != 1:
             return None
-        canon = _canonical_local_target(root, target)
-        found = by_rel_path.get(canon if canon is not None else target)
-        if found is None:
-            return None
-        _, tmeta = found
-        ttype = str(tmeta.get("type") or "").strip()
-        if ttype not in GIST_PARENT_TYPES:
-            return None
-        return canon if canon is not None else target
+        return canons
 
-    # Index gists by the path of the parent they are derived_from — only for
-    # valid single-parent gists; a malformed gist must not suppress the
-    # target's missing_gist finding.
+    # Index gists by each same-folder parent they derive from. A malformed
+    # gist must not suppress missing_gist for any of its targets.
     gists_by_parent: dict[str, list[str]] = {}
     for p, m in pages:
         if str(m.get("type") or "").strip() != "gist":
             continue
         gp = rel(root, p)
-        canon = _valid_gist_parent(m)
-        if canon is not None:
-            gists_by_parent.setdefault(canon, []).append(gp)
+        canons = _valid_gist_parents(m)
+        if canons:
+            for canon in canons:
+                gists_by_parent.setdefault(canon, []).append(gp)
 
     findings: list[dict] = []
     for p, m in pages:
@@ -652,15 +667,16 @@ def _memory_findings(
             )
 
         if ptype == "gist":
-            if _valid_gist_parent(m) is None:
+            if _valid_gist_parents(m) is None:
                 findings.append(
                     {
                         "id": "gist_parent",
                         "path": rp,
                         "msg": (
-                            "a gist has exactly one parent, and that parent is not "
-                            "a gist (parent must be experience, decision, lesson, "
-                            "recipe, document, memory, page, or protostar)."
+                            "a gist has one or more same-folder parents, and no "
+                            "parent is a gist (each parent must be experience, "
+                            "decision, lesson, recipe, document, memory, page, "
+                            "or protostar)."
                         ),
                     }
                 )
@@ -815,6 +831,7 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         relates = gist_meta.get("relates_to")
         if not isinstance(relates, list):
             continue
+        memory_parents: list[tuple] = []
         for item in relates:
             if not isinstance(item, dict):
                 continue
@@ -825,22 +842,34 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
             found = by_rel_path.get(canonical if canonical is not None else target)
             if found is None or str(found[1].get("type") or "").strip() != "memory":
                 continue
+            memory_parents.append(found)
+        if not memory_parents:
+            continue
+        # N=1: the description must be a substring of that parent.
+        # N>1: union pack — a substring of at least one derived_from parent.
+        def _holds(found: tuple) -> bool:
             memory_meta, memory_body = found[1], found[2]
             memory_description = memory_meta.get("description")
-            if description not in memory_body and not (
+            return description in memory_body or (
                 isinstance(memory_description, str) and description in memory_description
-            ):
-                findings.append(
-                    {
-                        "id": "stale_upper_page",
-                        "path": gist_path,
-                        "msg": (
-                            f"gist description is not present in its memory parent "
-                            f"{rel(root, found[0])}"
-                        ),
-                    }
-                )
-                break
+            )
+
+        if any(_holds(found) for found in memory_parents):
+            continue
+        if len(memory_parents) == 1:
+            msg = (
+                "gist description is not present in its memory parent "
+                f"{rel(root, memory_parents[0][0])}"
+            )
+        else:
+            msg = "gist description is not present in any derived_from memory parent"
+        findings.append(
+            {
+                "id": "stale_upper_page",
+                "path": gist_path,
+                "msg": msg,
+            }
+        )
     return findings
 
 

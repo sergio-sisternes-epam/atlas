@@ -418,8 +418,9 @@ def main() -> int:
             str(info_paths),
         )
         check(
-            "two-parent gist flagged gist_parent (info)",
-            ("gist_parent", "concepts/two_parent_gist.md") in info_paths,
+            "same-folder two-parent gist is a shared cluster gist",
+            ("gist_parent", "concepts/two_parent_gist.md") not in info_paths,
+            str(info_paths),
         )
         check(
             "gist-of-gist flagged gist_parent (info)",
@@ -435,9 +436,38 @@ def main() -> int:
             str(info_paths),
         )
         check(
-            "parent2.md is only 'covered' by the malformed two-parent gist, "
-            "so it still reports missing_gist",
-            ("missing_gist", "concepts/parent2.md") in info_paths,
+            "parent2.md is covered by the same-folder shared gist",
+            ("missing_gist", "concepts/parent2.md") not in info_paths,
+            str(info_paths),
+        )
+        write_index(store3 / "other", "Other")
+        write_page(
+            store3 / "other" / "foreign.md",
+            "decision",
+            "Foreign parent",
+            "2026-10-01",
+        )
+        write_page(
+            store3 / "concepts" / "cross_folder_gist.md",
+            "gist",
+            "Cross folder gist",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/parent.md", "kind": "derived_from"},
+                {"path": "other/foreign.md", "kind": "derived_from"},
+            ],
+        )
+        code, payload = run_json(["compile", "--root", str(store3), "--json"])
+        check("cross-folder gist fixture still exits 0 at info rung", code == 0, f"exit={code}")
+        info_paths = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
+        check(
+            "cross-folder derived_from does not make a valid gist",
+            ("gist_parent", "concepts/cross_folder_gist.md") in info_paths,
+            str(info_paths),
+        )
+        check(
+            "cross-folder gist does not clear missing_gist on the foreign parent",
+            ("missing_gist", "other/foreign.md") in info_paths,
             str(info_paths),
         )
 

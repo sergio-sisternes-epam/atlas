@@ -1,0 +1,71 @@
+id: atlas-force-gist-compile-green-adversarial-v1
+work_id: 2026-10-06-atlas-force-gist-compile-green
+packages: [atlas]
+adversarial: true
+design_tip: 720c6ed
+smokes:
+  - id: invent-forbidden
+    source: "GM1 / E1 / KG-note"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_empty_parent_is_handoff_and_residual_does_not_fail"
+    expect: "insufficient evidence yields optional enrich or skip/handoff — never titled stub, never invented claim lines, never force-all"
+  - id: no-stub-clearance
+    source: "W3 superseded"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_multicluster_optional_enrich_and_no_stub"
+    expect: "titled stub / gist_kind stub / title-only shell must not clear missing_gist"
+  - id: residual-ok-default
+    source: "Sergio redesign / CSoft1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_residual_missing_gist_is_not_a_fleet_bar"
+    expect: "default posture allows residual missing_gist (beta.11 evidence-gated); force-all compile-green exit not required"
+  - id: no-force-all
+    source: "ForceAll SUPERSEDED"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_residual_missing_gist_is_not_a_fleet_bar"
+    expect: "indexed in-scope pages without gists must not hard-fail a fleet completeness bar under this pin"
+  - id: progressive-disclosure
+    source: "Soft1-Soft3 LOCKED"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_non_memory_page_is_index_first_class"
+    expect: "index without schema legal; memory without gist legal; no forced middle rung"
+  - id: useful-gist-only-when-filling
+    source: "Soft4 / W1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_shared_same_folder_gist_and_cut2_refusal"
+    expect: "when optimise creates a gist it has an evidence-grade useful body"
+  - id: shared-cluster-n-to-1
+    source: "Cut2 / Cluster1-2 / MultiCluster / DerivedN"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_multicluster_optional_enrich_and_no_stub"
+    expect: "same-folder peers share one useful gist per filled cluster; MultiCluster allowed; cross-folder relates_to does not join"
+  - id: cut2-same-folder-only
+    source: "Cut2 LOCKED"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_shared_same_folder_gist_and_cut2_refusal"
+    expect: "cross-folder relates_to chains must not join a cluster; membership after location only"
+  - id: no-private-cluster-ontology
+    source: "Cluster1 / Cut2"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_shared_same_folder_gist_and_cut2_refusal"
+    expect: "membership = same-folder relates_to or shared work_id only; no embedding or private topology"
+  - id: scan-gate-creates
+    source: "KG2 Sec2"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_booking_manage_reference_is_handoff_not_promoted"
+    expect: "Crit/High on gist create refuses; Medium booking_manage_reference is handoff"
+  - id: sensitivity-no-invent-through
+    source: "KG3 Sec4"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_security_scan_blocks_secret_and_restricted"
+    expect: "restricted/confidential/booking/secret-shaped parents never invent/stub into index/schema"
+  - id: cut1b-optional-only
+    source: "Cut1bForce SUPERSEDED"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_multicluster_optional_enrich_and_no_stub"
+    expect: "enrich-before-migrate is optional when operator chooses to fill — not a fleet-wide mandatory gate"
+  - id: remember-soft
+    source: "RemSoft1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_non_memory_page_is_index_first_class"
+    expect: "remember without middle-rung gist may accept; invent/stub still refuses"
+  - id: no-silent-full
+    source: "GM6 / GM10 Cost2-3"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_modes_and_cost_ceiling"
+    expect: "Full without ceiling or operator confirm refuses"
+  - id: receipt-guard-rows
+    source: "KG4 Rec1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_shared_same_folder_gist_and_cut2_refusal"
+    expect: "receipt includes scan_gate_refuse_count, body_fills, shared_gist_count when fills happen; force-green residual-must-be-0 not required"
+  - id: empty-hits-not-vocab
+    source: "MoP5 / KG4 Vocab1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_booking_manage_reference_is_handoff_not_promoted"
+    expect: "empty scan hits do not claim full detector vocab coverage"
+filename_contract: atlas/references/scenarios/atlas-force-gist-compile-green-adversarial-v1.yaml

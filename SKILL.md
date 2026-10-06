@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.11
+version: 0.13.0-beta.12
 activation_card: on
 ---
 
@@ -209,7 +209,7 @@ python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atl
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch <token>]
-python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>] [--tidy-only] [--auto-verbatim] [--cost-ceiling <pages>] [--pilot] [--out-dir <dir>] [--plan <plan.json>]
+python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>] [--tidy-only] [--auto-verbatim] [--fill-sensible] [--cost-ceiling <pages>] [--pilot] [--out-dir <dir>] [--plan <plan.json>]
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
 
@@ -221,7 +221,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 |-------|------|
 | Structure | Free layout; mandatory single root contract file (`CONTRACT.json` on new stores, `SCHEMA.json` on shipped 0.13.0-beta and 0.13.0-beta.2 stores — never both); short-lived `staging/`; `index.md` / `log.md` per OKF |
 | Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
-| Memory layers | A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
+| Memory layers | Optional progressive disclosure. Index membership does not require a schema, and a page may skip the gist. A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. A gist may list N≥1 same-folder `derived_from` parents. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind}]` - kinds: follows, records, supersedes, implements, derived_from, related |
 | Composition | Optional mesh; consolidated in compile |

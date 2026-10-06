@@ -33,6 +33,7 @@ since_hours: <positive int>          # incremental default 24; committer clock
 custom_tree: <path>|…                # required when optimise_mode=custom
 tidy_only: true | false              # true = tidy repairs only
 auto_verbatim: true | false          # opt-in; confirm stays the default
+fill_sensible: true                  # default posture; not a force-all completeness mode
 phase: plan | apply
 pilot: true | false                  # receipt only; does not authorize fleet
 cost_ceiling: <pages>                # default 200 pages examined
@@ -53,18 +54,25 @@ with path or full is a refusal.
 
 ## Locked model this path enforces
 
-Recall walks index, then schema, then gist, then memory. `index.md` is a cue
-list, not content. One gist forces one schema. A second schema is legal when
-the subject changes. A folder with zero gists needs no schema. `hub.md` is not
-a memory layer. Suffixes `.schema.md`, `.gist.md`, `.memory.md` are search
-handles; frontmatter `type` is authoritative. Compile fails only on a gist
-with no schema, a schema missing from index, or a stale upper page. This path
-adds no compile check.
+The four-layer walk is optional progressive disclosure. Recall may walk index,
+then schema, then gist, then memory, and it may stop early. `index.md` is a
+cue list, not content. An index may exist with or without a schema. A memory
+or any other type may sit in the index with no gist and no typed middle
+extension. Non-memory types stay index-first-class: this path does not force
+them through a gist or a schema.
+
+When a gist is created, that gist forces one same-folder schema. A second
+schema is legal when the subject changes. A folder with zero gists needs no
+schema. `hub.md` is not a memory layer. Suffixes `.schema.md`, `.gist.md`,
+`.memory.md` are search handles; frontmatter `type` is authoritative. Compile
+fails only on a gist with no schema, a schema missing from index, or a stale
+upper page. A residual `missing_gist` is info by default and is not a fleet
+completeness bar. This path adds no compile check.
 
 ## Helper
 
 ```bash
-python3 <atlas-skill>/scripts/atlas_optimise.py plan  --root <root> --target <folder|.> --out-dir <dir outside the store> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>]... [--tidy-only] [--auto-verbatim] [--cost-ceiling <pages>] [--pilot] [--subject-folder <folder>:<stem>]...
+python3 <atlas-skill>/scripts/atlas_optimise.py plan  --root <root> --target <folder|.> --out-dir <dir outside the store> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>]... [--tidy-only] [--auto-verbatim] [--fill-sensible] [--cost-ceiling <pages>] [--pilot] [--subject-folder <folder>:<stem>]...
 python3 <atlas-skill>/scripts/atlas_optimise.py apply --root <root> --target <folder|.> --plan <out-dir>/plan.json [--include-opt-in] [--confirm <task-id>]...
 ```
 
@@ -98,11 +106,18 @@ not a refusal and does not fail the run.
 6. **Fill tasks** (evidence-gated; skipped entirely with `--tidy-only`):
    - `missing-gist-fill`: an eligible parent has no gist. Eligible parents are
      every compile missing-gist type (`experience`, `decision`, `lesson`,
-     `recipe`, `document`, `memory`, `page`), not memory alone. Confirm by
-     default. Auto only when `--auto-verbatim` is set and the description is a
-     verbatim parent description or the first claim line. Insufficient
-     evidence is handoff. Restricted sensitivity and secret-class text are
-     blocked and are not copied into the plan.
+     `recipe`, `document`, `memory`, `page`), not memory alone. Fill is
+     evidence-gated (`--fill-sensible` names this default). It does not force
+     a gist onto every indexed page. Same-folder peers that already
+     `relates_to` each other, or that share a `work_id`, get one shared useful
+     gist whose `derived_from` lists all of them. Cross-folder `relates_to`
+     does not join a cluster. Unrelated pages in one folder stay separate
+     clusters. Confirm by default. Auto only when `--auto-verbatim` is set and
+     the description is a verbatim parent description or the first claim line.
+     Insufficient evidence is handoff, including a thin peer covered only
+     because a same-folder neighbour had evidence. No titled stub. Restricted
+     sensitivity and secret-class text are blocked and are not copied into the
+     plan. A medium `booking_manage_reference` is handoff, not an applied gist.
    - `gist-body-enrich`: a gist description is missing or is not a substring
      of its parent, and the parent has an evidence pack. Same confirm / auto
      rule. The tidy `stale-gist-description` copy stays in place when it
@@ -158,12 +173,16 @@ not a refusal and does not fail the run.
 
 ## Do not invent gist text
 
-A gist description must remain an exact substring of the derived parent body
-or description. Fill writes a description only when the evidence pack names
-that substring (the parent description, or the first claim line). Schema prose
-cites gist titles and descriptions already on disk. If no such text exists,
-hand off. Do not write a new parent claim. Do not promote secrets, payment or
-identity numbers, or `sensitivity: restricted` text into an upper page.
+A gist description must remain an exact substring of a derived parent body
+or description. For one parent, that parent must contain it. For a shared
+gist, at least one `derived_from` parent must contain it. Fill writes a
+description only when the evidence pack names that substring (the parent
+description, or the first claim line). Schema prose cites gist titles and
+descriptions already on disk, and only once a gist exists. If no such text
+exists, hand off. Do not write a new parent claim. Do not write a title-only
+stub to clear `missing_gist`. Do not promote secrets, payment or identity
+numbers, a `booking_manage_reference`, or `sensitivity: restricted` text into
+an upper page.
 
 ## Pilot before any fleet claim
 
@@ -212,11 +231,15 @@ The helper writes the same fields to `receipt.json` (plan) and
 
 ## Done when (day one)
 
-Day one is fill plus tidy for the locked scope: gists for every compile
-missing-gist type, schema pages as minimal prose, Path fill by default,
-Incremental on a 24 hour committer window, a security scan on plan and apply,
-a cost ceiling, and a durable receipt with fetch OK and tip. Residual
-`missing_gist` after a handoff is still done. Sleep is not done.
+Day one is fill-when-sensible plus tidy for the locked scope: useful gists
+for compile missing-gist types when evidence supports them, schema pages as
+minimal prose when a gist is created, Path fill by default, Incremental on a
+24 hour committer window, a security scan on plan and apply, a cost ceiling,
+and a durable receipt with fetch OK and tip. Receipt rows for fills that
+happen include `scan_gate_refuse_count`, `body_fills`, `shared_gist_count`,
+`cluster_size_hist`, `enrich_optional_count`, and `zero_crit_high_promoted`.
+Hits are `{path, type, severity}` only. Residual `missing_gist` after a
+handoff is still done. Sleep is not done.
 
 ## Non-goals
 

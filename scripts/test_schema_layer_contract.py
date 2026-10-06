@@ -1620,8 +1620,9 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
-        # A non-empty gist description must remain as an exact substring in
-        # the body or description of each memory parent.
+        # A non-empty gist description must be an exact substring of its memory
+        # parent. N>1 shared gists pass when at least one derived_from parent
+        # still contains that substring.
         d = beta3_store("stale-upper-page")
         write_index(d / "notes")
         write_page(d / "notes" / "memory.memory.md", "memory", body="The underlying claim was changed.")
@@ -1647,6 +1648,44 @@ def main() -> int:
         check(
             "stale_upper_page: exact claim in memory body passes",
             code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
+        # Shared gist: union membership. The description may live in only one parent.
+        d = beta3_store("stale-upper-page-shared")
+        write_index(d / "notes")
+        claim = "The shared exact claim lives in one parent only."
+        write_page(
+            d / "notes" / "left.memory.md",
+            "memory",
+            body="Left parent has other wording entirely. " + PROSE,
+        )
+        write_page(d / "notes" / "right.memory.md", "memory", body=claim + " " + PROSE)
+        write_page(
+            d / "notes" / "shared.gist.md",
+            "gist",
+            [
+                {"path": "notes/left.memory.md", "kind": "derived_from"},
+                {"path": "notes/right.memory.md", "kind": "derived_from"},
+            ],
+            description=claim,
+        )
+        write_page(d / "notes" / "s.schema.md", "schema", [{"path": "notes/shared.gist.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "stale_upper_page: N>1 passes when one parent still holds the description",
+            code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        (d / "notes" / "right.memory.md").write_text(
+            "---\ntype: memory\ntitle: t\ncreated: 2026-10-04\n---\n\n"
+            "Neither parent keeps the old shared wording.\n" + PROSE + "\n",
+            encoding="utf-8",
+        )
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "stale_upper_page: N>1 fails when no derived_from parent holds the description",
+            code != 0 and "stale_upper_page" in findings_by_id(payload, "critical"),
             f"exit={code} critical={payload.get('critical')}",
         )
 

@@ -5,12 +5,15 @@ Operator-chosen only. Never called by install, init, compile, or memory-migrate.
 It writes no contract file and invents no text.
 
 Tidy repairs copy text that already exists (beta.10). Fill creates or enriches
-gist and schema pages only from an evidence pack. Full mode is serial only:
-do not run Full on two stores at once.
+gist and schema pages only from an evidence pack, when that pack is useful.
+Same-folder peers that already relate (or share a work_id) can share one gist.
+Cross-folder relates_to does not join them. A residual missing_gist is OK.
+Full mode is serial only: do not run Full on two stores at once.
 
   plan  --root <store> --target <folder|.> [--optimise-mode path|full|custom|incremental]
         [--since-hours N] [--custom-tree PREFIX]... [--tidy-only] [--auto-verbatim]
-        [--cost-ceiling PAGES] [--pilot] [--out-dir DIR] [--subject-folder F:stem]... [--json]
+        [--fill-sensible] [--cost-ceiling PAGES] [--pilot] [--out-dir DIR]
+        [--subject-folder F:stem]... [--json]
   apply --root <store> --target <folder|.> --plan plan.json [--include-opt-in] [--confirm ID]... [--json]
 
 plan exit: 0 no tasks, 1 tasks listed, 2 refused.
@@ -75,6 +78,7 @@ DEFAULT_COST_CEILING = 200
 MIN_CLAIM_CHARS = 12
 MIN_PROSE_CHARS = 40
 WORK_ID = "2026-10-06-atlas-optimise-vnext"
+FOLLOW_ON_WORK_ID = "2026-10-06-atlas-force-gist-compile-green"
 BOILERPLATE_SECTIONS = frozenset({"provenance", "related", "see also"})
 SECRET_RULES = (
     ("private-key", re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----")),
@@ -93,6 +97,14 @@ PII_RULES = (
     (
         "credit-card",
         re.compile(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b"),
+    ),
+)
+# Gate 7: medium booking/manage references are a handoff, not a refuse and
+# not an auto-applied gist. Crit/High rules above still refuse promotion.
+MEDIUM_RULES = (
+    (
+        "booking_manage_reference",
+        re.compile(r"(?i)(?<![A-Za-z0-9])booking_manage_reference(?![A-Za-z0-9])|\bBMR-\d{4,}\b"),
     ),
 )
 
@@ -563,7 +575,7 @@ def _build_scope(
                     continue
                 if store.ptype(key) == "schema":
                     page_keys.add(key)
-                elif store.ptype(key) == "gist" and _gist_parent_key(store, key) == parent:
+                elif store.ptype(key) == "gist" and parent in (_gist_parent_keys(store, key) or []):
                     page_keys.add(key)
             index_key = "index.md" if folder == "." else f"{folder}/index.md"
             if index_key in indexes or (store.root / index_key).is_file():
@@ -585,24 +597,37 @@ def _build_scope(
     )
 
 
-def _gist_parent_key(store: Store, gist_key: str) -> str | None:
-    """Canonical parent of a well-formed gist, matching compile's missing_gist rule."""
+def _gist_parent_keys(store: Store, gist_key: str) -> list[str] | None:
+    """Canonical parents of a well-formed gist, matching compile's coverage rule.
+
+    N>=1 derived_from parents, each a gist-parent type in the same folder.
+    Cross-folder parents, duplicates, and gist-of-gist return None so they
+    do not clear missing_gist.
+    """
     if gist_key not in store.pages or store.ptype(gist_key) != "gist":
         return None
     parents = [item for item in _relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
-    if len(parents) != 1:
+    if not parents:
         return None
-    canonical = store.canonical(str(parents[0].get("path") or ""))
-    if canonical not in store.pages or store.ptype(canonical) not in GIST_PARENT_TYPES:
+    canons: list[str] = []
+    folders: list[str] = []
+    for item in parents:
+        canonical = store.canonical(str(item.get("path") or ""))
+        if canonical not in store.pages or store.ptype(canonical) not in GIST_PARENT_TYPES:
+            return None
+        if canonical in canons:
+            return None
+        canons.append(canonical)
+        folders.append(store.folder(canonical))
+    if len(set(folders)) != 1:
         return None
-    return canonical
+    return canons
 
 
 def _parents_with_gist(store: Store) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for key in store.pages:
-        parent = _gist_parent_key(store, key)
-        if parent:
+        for parent in _gist_parent_keys(store, key) or []:
             found.setdefault(parent, []).append(key)
     return found
 
@@ -611,10 +636,18 @@ def _scan_findings(text: str) -> list[dict]:
     findings = []
     for rule, pattern in SECRET_RULES:
         if text and pattern.search(text):
-            findings.append({"class": "secret", "severity": "high", "rule": rule})
+            findings.append({"class": "secret", "severity": "high", "rule": rule, "type": "secret"})
     for rule, pattern in PII_RULES:
         if text and pattern.search(text):
-            findings.append({"class": "pii", "severity": "high", "rule": rule})
+            findings.append({"class": "pii", "severity": "high", "rule": rule, "type": "pii"})
+    for rule, pattern in MEDIUM_RULES:
+        if text and pattern.search(text):
+            findings.append({
+                "class": "booking",
+                "severity": "medium",
+                "rule": rule,
+                "type": "booking_manage_reference",
+            })
     return findings
 
 
@@ -690,8 +723,12 @@ def _evidence_pack(store: Store, parent_key: str) -> dict:
     live = "\n".join(part for part in (description or "", body, str(meta.get("title") or "")) if part)
     findings = _scan_findings(live)
     if sensitivity == "restricted":
-        findings.append({"class": "sensitivity", "severity": "high", "rule": "restricted"})
+        findings.append({"class": "sensitivity", "severity": "high", "rule": "restricted", "type": "sensitivity"})
+    for item in findings:
+        item.setdefault("path", parent_key)
+        item.setdefault("page_type", store.ptype(parent_key))
     blocked = any(item["severity"] in ("critical", "high") for item in findings)
+    medium = any(item.get("rule") == "booking_manage_reference" for item in findings)
     extract = None
     extract_kind = None
     excerpt_rule = None
@@ -730,6 +767,22 @@ def _evidence_pack(store: Store, parent_key: str) -> dict:
             "body": None,
             "auto_eligible": False,
             "security_blocked": True,
+            "findings": findings,
+            "sources": [{"path": parent_key, "sha256": _sha(store.root / parent_key), "redacted": True}],
+        }
+    if medium:
+        return {
+            "parent": parent_key,
+            "parent_type": store.ptype(parent_key),
+            "sensitivity": sensitivity,
+            "sufficient": False,
+            "reason": "booking_manage_reference handoff",
+            "extract": None,
+            "extract_kind": None,
+            "excerpt_rule": None,
+            "body": None,
+            "auto_eligible": False,
+            "security_blocked": False,
             "findings": findings,
             "sources": [{"path": parent_key, "sha256": _sha(store.root / parent_key), "redacted": True}],
         }
@@ -839,31 +892,49 @@ def _gate_security(tasks: list[dict]) -> None:
         findings = list(evidence.get("findings") or [])
         findings.extend(_scan_findings(_promotion_blob(task)))
         if str(evidence.get("sensitivity") or "") == "restricted":
-            findings.append({"class": "sensitivity", "severity": "high", "rule": "restricted"})
+            findings.append({
+                "class": "sensitivity",
+                "severity": "high",
+                "rule": "restricted",
+                "type": "sensitivity",
+                "path": evidence.get("parent") or "",
+                "page_type": evidence.get("parent_type") or "",
+            })
+        for item in findings:
+            item.setdefault("path", evidence.get("parent") or "")
+            item.setdefault("page_type", evidence.get("parent_type") or "")
         dedup = []
         seen = set()
         for item in findings:
-            key = (item.get("class"), item.get("rule"))
+            key = (item.get("path"), item.get("class"), item.get("rule"))
             if key in seen:
                 continue
             seen.add(key)
             dedup.append(item)
         blocked = any(item.get("severity") in ("critical", "high") for item in dedup)
+        medium = any(
+            item.get("rule") == "booking_manage_reference" and item.get("severity") == "medium"
+            for item in dedup
+        )
         evidence["security"] = {
-            "status": "blocked" if blocked else "pass",
+            "status": "blocked" if blocked else ("handoff" if medium else "pass"),
             "findings": dedup,
             "promoted": False,
         }
-        if blocked:
-            if task["class"] in ("auto", "opt-in", "confirm", "handoff"):
+        if blocked or medium:
+            if blocked and task["class"] in ("auto", "opt-in", "confirm", "handoff"):
                 task["class"] = "blocked"
+            elif medium and task["class"] in ("auto", "opt-in", "confirm"):
+                task["class"] = "handoff"
             evidence["extract"] = None
             evidence["body"] = None
             evidence["proposed"] = None
             evidence["gist_description"] = None
             evidence["memory_description"] = None
             evidence["sufficient"] = False
-            evidence["reason"] = "security scan blocked promotion"
+            evidence["reason"] = (
+                "security scan blocked promotion" if blocked else "booking_manage_reference handoff"
+            )
             for member in evidence.get("members") or []:
                 member["title"] = None
                 member["description"] = None
@@ -879,8 +950,15 @@ def _security_summary(tasks: list[dict]) -> dict:
         for item in ((task.get("evidence") or {}).get("security") or {}).get("findings") or []:
             findings.append({"task": task["id"], **item})
     high = [item for item in findings if item.get("severity") in ("critical", "high")]
+    medium = [item for item in findings if item.get("severity") == "medium"]
+    if high:
+        status = "blocked"
+    elif medium:
+        status = "handoff"
+    else:
+        status = "pass"
     return {
-        "status": "blocked" if high else "pass",
+        "status": status,
         "findings": findings,
         "new_critical_or_high": len(high),
         "secrets_promoted": False,
@@ -907,12 +985,70 @@ def _residuals(store: Store, scope: Scope, tasks: list[dict]) -> dict:
     }
 
 
+def _plan_tasks(plan: dict) -> list[dict]:
+    return [task for tasks in (plan.get("folders") or {}).values() for task in tasks]
+
+
+def _fill_guard(plan: dict) -> dict:
+    """Additive receipt rows for fills that happen. Residual missing_gist stays OK."""
+    tasks = _plan_tasks(plan)
+    useful = [
+        task for task in tasks
+        if task["kind"] in ("missing-gist-fill", "gist-body-enrich") and task["class"] in ("auto", "confirm")
+    ]
+    shared = [
+        task for task in useful
+        if task["kind"] == "missing-gist-fill" and len((task.get("evidence") or {}).get("parents") or []) > 1
+    ]
+    hist: dict[str, int] = {}
+    for task in shared:
+        size = str(len(task["evidence"]["parents"]))
+        hist[size] = hist.get(size, 0) + 1
+    enrich = sum(1 for task in useful if (task.get("evidence") or {}).get("enrich_optional"))
+    refuse = 0
+    promoted_high = False
+    hits = []
+    seen = set()
+    for task in tasks:
+        evidence = task.get("evidence") or {}
+        findings = ((evidence.get("security") or {}).get("findings")) or evidence.get("findings") or []
+        high = [item for item in findings if item.get("severity") in ("critical", "high")]
+        if task["kind"] in PROMOTION_KINDS and task["class"] == "blocked" and high:
+            refuse += 1
+        if task["kind"] in PROMOTION_KINDS and task["class"] in ("auto", "confirm") and high:
+            promoted_high = True
+        for item in findings:
+            if item.get("severity") not in ("critical", "high", "medium"):
+                continue
+            hit = {
+                "path": item.get("path") or evidence.get("parent") or (task["paths"][0] if task.get("paths") else ""),
+                "type": item.get("page_type") or evidence.get("parent_type") or "",
+                "severity": item["severity"],
+            }
+            key = (hit["path"], hit["type"], hit["severity"])
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(hit)
+    return {
+        "scan_gate_refuse_count": refuse,
+        "body_fills": len(useful),
+        "shared_gist_count": len(shared),
+        "cluster_size_hist": hist,
+        "enrich_optional_count": enrich,
+        "zero_crit_high_promoted": not promoted_high,
+        "scan_hits": hits,
+    }
+
+
 def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent_edits: int = 0) -> dict:
     source = plan["source"]
     security = plan["security_summary"]
+    guard = _fill_guard(plan)
     return {
         "schema": "atlas-optimise-receipt/v1",
         "work_id": WORK_ID,
+        "follow_on_work_id": FOLLOW_ON_WORK_ID,
         "phase": phase,
         "fetch_ok": bool(source.get("fetch_ok")),
         "tip": source.get("head"),
@@ -923,6 +1059,7 @@ def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent
         "tidy_only": bool(source.get("tidy_only")),
         "auto_verbatim": bool(source.get("auto_verbatim")),
         "pilot": bool(source.get("pilot")),
+        "fill_sensible": not bool(source.get("tidy_only")),
         "serial_full_only": True,
         "fleet_ready": False,
         "package_version": PACKAGE_VERSION,
@@ -931,6 +1068,7 @@ def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent
         "residuals": plan["residuals"],
         "security": security,
         "cost": plan["cost"],
+        **guard,
         "gates": {
             "auto_text_is_verbatim_substring": True,
             "parent_edits": parent_edits,
@@ -943,6 +1081,7 @@ def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent
             "new_critical_or_high_secret_class": security["new_critical_or_high"],
             "disagreement_rate": "informational",
             "residual_missing_gist_fails_run": False,
+            "zero_crit_high_promoted": guard["zero_crit_high_promoted"],
             "run_failed": False,
             "pilot_before_fleet": True,
             "serial_full_only": True,
@@ -959,105 +1098,254 @@ def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent
     }
 
 
+def _fill_clusters(store: Store, parents: list[str]) -> list[list[str]]:
+    """Same-folder clusters among parents chosen for fill.
+
+    Join only when co-located peers already have a relates_to edge or share
+    a work_id. Cross-folder relates_to does not join. Unrelated neighbours
+    stay separate clusters, including singletons.
+    """
+    by_folder: dict[str, list[str]] = {}
+    for parent in parents:
+        by_folder.setdefault(store.folder(parent), []).append(parent)
+    clusters: list[list[str]] = []
+    for folder, members in by_folder.items():
+        member_set = set(members)
+        link = {member: member for member in members}
+
+        def find(key: str) -> str:
+            while link[key] != key:
+                link[key] = link[link[key]]
+                key = link[key]
+            return key
+
+        def union(left: str, right: str) -> None:
+            root_left, root_right = find(left), find(right)
+            if root_left != root_right:
+                link[root_right] = root_left
+
+        for member in members:
+            for item in _relates(store.pages[member][1]):
+                target = store.canonical(str(item.get("path") or ""))
+                if target in member_set and target != member and store.folder(target) == folder:
+                    union(member, target)
+        by_work: dict[str, list[str]] = {}
+        for member in members:
+            work_id = str(store.pages[member][1].get("work_id") or "").strip()
+            if work_id:
+                by_work.setdefault(work_id, []).append(member)
+        for group in by_work.values():
+            if len(group) < 2:
+                continue
+            head = group[0]
+            for other in group[1:]:
+                union(head, other)
+        grouped: dict[str, list[str]] = {}
+        for member in members:
+            grouped.setdefault(find(member), []).append(member)
+        for group in grouped.values():
+            clusters.append(sorted(group))
+    clusters.sort(key=lambda group: group[0])
+    return clusters
+
+
+def _cluster_pack(store: Store, parents: list[str]) -> dict:
+    """Union evidence pack. The written gist stays verbatim from at least one parent."""
+    packs = [_evidence_pack(store, parent) for parent in parents]
+    findings: list[dict] = []
+    seen = set()
+    for pack in packs:
+        for item in pack.get("findings") or []:
+            key = (item.get("path"), item.get("class"), item.get("rule"))
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(item)
+    blocked = any(pack["security_blocked"] for pack in packs)
+    medium = any(item.get("rule") == "booking_manage_reference" for item in findings)
+    sensitivity = next(
+        (pack["sensitivity"] for pack in packs if pack["sensitivity"] == "restricted"),
+        packs[0]["sensitivity"],
+    )
+    base = {
+        "parents": list(parents),
+        "parent": parents[0],
+        "parent_type": store.ptype(parents[0]),
+        "sensitivity": sensitivity,
+        "findings": findings,
+        "security_blocked": blocked,
+        "cluster_size": len(parents),
+        "enrich_optional": False,
+        "extract_parent": None,
+    }
+
+    def redacted() -> list[dict]:
+        return [
+            {"path": pack["parent"], "sha256": _sha(store.root / pack["parent"]), "redacted": True}
+            for pack in packs
+        ]
+
+    def empty(reason: str, *, sources: list[dict] | None = None) -> dict:
+        return {
+            **base,
+            "sufficient": False,
+            "reason": reason,
+            "extract": None,
+            "extract_kind": None,
+            "excerpt_rule": None,
+            "body": None,
+            "auto_eligible": False,
+            "sources": sources if sources is not None else redacted(),
+        }
+
+    if blocked:
+        return empty("security scan blocked promotion")
+    if medium:
+        return empty("booking_manage_reference handoff")
+    sufficient = [pack for pack in packs if pack["sufficient"]]
+    if not sufficient:
+        reason = packs[0]["reason"]
+        if len(packs) > 1:
+            reason = "insufficient evidence: no plain description and no claim sentences"
+        sources = []
+        for pack in packs:
+            sources.extend(pack.get("sources") or [])
+        return empty(reason, sources=sources)
+    chosen = sufficient[0]
+    claim_texts: list[str] = []
+    for pack in sufficient:
+        for source in pack.get("sources") or []:
+            for span in source.get("spans") or []:
+                text = span.get("text")
+                if text and text not in claim_texts:
+                    claim_texts.append(text)
+    prose = _gist_body_prose(chosen["extract"], claim_texts)
+    if prose is None or _yaml_scalar(chosen["extract"] or "") is None:
+        return empty("evidence cannot be written as minimal prose without invention")
+    sources = []
+    for pack in packs:
+        sources.extend(pack.get("sources") or [])
+    reason = chosen["reason"] if len(parents) == 1 else f"shared cluster evidence ({chosen['reason']})"
+    return {
+        **base,
+        "parent": chosen["parent"],
+        "parent_type": chosen["parent_type"],
+        "sufficient": True,
+        "reason": reason,
+        "extract": chosen["extract"],
+        "extract_kind": chosen["extract_kind"],
+        "excerpt_rule": chosen["excerpt_rule"],
+        "body": prose,
+        "auto_eligible": bool(chosen["auto_eligible"]),
+        "sources": sources,
+        "extract_parent": chosen["parent"],
+        "enrich_optional": len(parents) > 1 and any(not pack["sufficient"] for pack in packs),
+    }
+
+
+def _fill_evidence(pack: dict, cls: str, *, proposed: dict | None, new_path: str | None) -> dict:
+    keep = cls in ("auto", "confirm")
+    return {
+        "parent": pack["parent"],
+        "parents": list(pack.get("parents") or [pack["parent"]]),
+        "parent_type": pack["parent_type"],
+        "new_path": new_path,
+        "sensitivity": pack["sensitivity"],
+        "sufficient": bool(pack["sufficient"] and keep),
+        "reason": pack["reason"],
+        "extract": pack.get("extract") if keep else None,
+        "extract_kind": pack.get("extract_kind") if keep else None,
+        "excerpt_rule": pack.get("excerpt_rule") if keep else None,
+        "body": pack.get("body") if keep else None,
+        "auto_eligible": pack.get("auto_eligible", False),
+        "findings": pack.get("findings") or [],
+        "sources": pack.get("sources") or [],
+        "proposed": proposed,
+        "cluster_size": pack.get("cluster_size") or 1,
+        "enrich_optional": bool(pack.get("enrich_optional")),
+        "extract_parent": pack.get("extract_parent"),
+    }
+
+
 def _plan_fills(store: Store, scope: Scope, tasks: list[dict], auto_verbatim: bool, tidy_only: bool) -> None:
     if tidy_only:
         return
     covered = _parents_with_gist(store)
-    for parent in sorted(scope.fill_parents):
-        if store.ptype(parent) not in MISSING_GIST_TYPES or covered.get(parent):
-            continue
-        pack = _evidence_pack(store, parent)
-        new_key = _new_gist_key(store, parent)
+    uncovered = [
+        parent for parent in sorted(scope.fill_parents)
+        if store.ptype(parent) in MISSING_GIST_TYPES and not covered.get(parent)
+    ]
+    for parents in _fill_clusters(store, uncovered):
+        pack = _cluster_pack(store, parents)
+        anchor = pack.get("extract_parent") or parents[0]
+        new_key = _new_gist_key(store, anchor)
         cls = _fill_class(pack, auto_verbatim)
         if new_key is None and cls in ("auto", "confirm"):
             cls = "handoff"
             pack = {**pack, "sufficient": False, "reason": "gist filename is already taken"}
-        _path, meta, _body = store.pages[parent]
+        _path, meta, _body = store.pages[anchor]
         proposed = None
         if cls in ("auto", "confirm") and new_key and pack.get("extract") and pack.get("body"):
             proposed = {
                 "path": new_key,
-                "title": _gist_title(meta, parent),
+                "title": _gist_title(meta, anchor),
                 "created": _created_day(meta),
                 "description": pack["extract"],
                 "body": pack["body"],
                 "sensitivity": pack["sensitivity"] if pack["sensitivity"] in ("public", "internal") else "internal",
+                "parents": parents,
             }
+        label = parents[0] if len(parents) == 1 else ", ".join(parents)
         action = (
-            f"create gist for {parent} from the evidence pack ({pack['reason']})"
+            f"create gist for {label} from the evidence pack ({pack['reason']})"
             if cls in ("auto", "confirm")
-            else f"no gist written for {parent}: {pack['reason']}"
+            else f"no gist written for {label}: {pack['reason']}"
         )
+        tid = f"missing-gist-fill:{parents[0]}" if len(parents) == 1 else "missing-gist-fill:" + "+".join(parents)
         tasks.append(_task(
-            "missing-gist-fill", cls, [new_key or parent, parent], action,
-            {
-                "parent": parent,
-                "parent_type": store.ptype(parent),
-                "new_path": new_key,
-                "sensitivity": pack["sensitivity"],
-                "sufficient": pack["sufficient"] and cls in ("auto", "confirm"),
-                "reason": pack["reason"],
-                "extract": pack.get("extract") if cls in ("auto", "confirm") else None,
-                "extract_kind": pack.get("extract_kind") if cls in ("auto", "confirm") else None,
-                "excerpt_rule": pack.get("excerpt_rule") if cls in ("auto", "confirm") else None,
-                "body": pack.get("body") if cls in ("auto", "confirm") else None,
-                "auto_eligible": pack.get("auto_eligible", False),
-                "findings": pack.get("findings") or [],
-                "sources": pack.get("sources") or [],
-                "proposed": proposed,
-            },
-            store, tid=f"missing-gist-fill:{parent}",
+            "missing-gist-fill", cls, [new_key or parents[0], *parents], action,
+            _fill_evidence(pack, cls, proposed=proposed, new_path=new_key),
+            store, tid=tid,
         ))
 
     for gist in sorted(key for key in scope.page_keys if store.ptype(key) == "gist"):
-        parent = _gist_parent_key(store, gist)
-        if parent is None or parent not in scope.fill_parents:
+        parents = _gist_parent_keys(store, gist)
+        if not parents or not any(parent in scope.fill_parents for parent in parents):
             continue
-        if store.ptype(parent) not in MISSING_GIST_TYPES:
+        if not any(store.ptype(parent) in MISSING_GIST_TYPES for parent in parents):
             continue
         _gpath, gmeta, _gbody = store.pages[gist]
         desc = gmeta.get("description")
-        _ppath, pmeta, pbody = store.pages[parent]
-        if isinstance(desc, str) and desc and _grounded(desc, pmeta, pbody):
+        if isinstance(desc, str) and desc and any(
+            _grounded(desc, store.pages[parent][1], store.pages[parent][2]) for parent in parents
+        ):
             continue
         if any(
             task["kind"] == "stale-gist-description" and task["class"] == "auto" and gist in task["paths"]
             for task in tasks
         ):
             continue
-        pack = _evidence_pack(store, parent)
+        pack = _cluster_pack(store, parents)
         cls = _fill_class(pack, auto_verbatim)
+        anchor = pack.get("extract_parent") or parents[0]
+        _ppath, pmeta, _pbody = store.pages[anchor]
         proposed = None
         if cls in ("auto", "confirm") and pack.get("extract") and pack.get("body"):
             proposed = {
                 "path": gist,
-                "title": str(gmeta.get("title") or _gist_title(pmeta, parent)),
+                "title": str(gmeta.get("title") or _gist_title(pmeta, anchor)),
                 "description": pack["extract"],
                 "body": pack["body"],
+                "parents": parents,
             }
         tasks.append(_task(
-            "gist-body-enrich", cls, [gist, parent],
+            "gist-body-enrich", cls, [gist, *parents],
             (
                 f"rewrite {gist} description from the evidence pack ({pack['reason']}); parent text is not edited"
                 if cls in ("auto", "confirm")
                 else f"no gist rewrite for {gist}: {pack['reason']}"
             ),
-            {
-                "parent": parent,
-                "parent_type": store.ptype(parent),
-                "new_path": gist,
-                "sensitivity": pack["sensitivity"],
-                "sufficient": pack["sufficient"] and cls in ("auto", "confirm"),
-                "reason": pack["reason"],
-                "extract": pack.get("extract") if cls in ("auto", "confirm") else None,
-                "extract_kind": pack.get("extract_kind") if cls in ("auto", "confirm") else None,
-                "excerpt_rule": pack.get("excerpt_rule") if cls in ("auto", "confirm") else None,
-                "body": pack.get("body") if cls in ("auto", "confirm") else None,
-                "auto_eligible": pack.get("auto_eligible", False),
-                "findings": pack.get("findings") or [],
-                "sources": pack.get("sources") or [],
-                "proposed": proposed,
-            },
+            _fill_evidence(pack, cls, proposed=proposed, new_path=gist),
             store, tid=f"gist-body-enrich:{gist}",
         ))
 
@@ -1215,14 +1503,13 @@ def _live_promotion_text(store: Store, task: dict) -> str:
     kind = task["kind"]
     if kind == "stale-gist-description" and len(task["paths"]) > 1 and task["paths"][1] in store.pages:
         return str(store.pages[task["paths"][1]][1].get("description") or "")
-    parent = evidence.get("parent")
-    if parent and parent in store.pages:
-        meta, body = store.pages[parent][1], store.pages[parent][2]
-        return "\n".join([
-            str(meta.get("title") or ""),
-            str(meta.get("description") or ""),
-            body,
-        ])
+    parts = []
+    for parent in _task_parents(task):
+        if parent in store.pages:
+            meta, body = store.pages[parent][1], store.pages[parent][2]
+            parts.extend([str(meta.get("title") or ""), str(meta.get("description") or ""), body])
+    if parts:
+        return "\n".join(parts)
     parts = []
     for member in evidence.get("members") or []:
         path = member.get("path")
@@ -1238,9 +1525,8 @@ def _live_promotion_text(store: Store, task: dict) -> str:
 
 def _live_restricted(store: Store, task: dict) -> bool:
     evidence = task.get("evidence") or {}
-    parent = evidence.get("parent")
-    if parent and parent in store.pages:
-        if str(store.pages[parent][1].get("sensitivity") or "").strip().lower() == "restricted":
+    for parent in _task_parents(task):
+        if parent in store.pages and str(store.pages[parent][1].get("sensitivity") or "").strip().lower() == "restricted":
             return True
     if len(task["paths"]) > 1 and task["paths"][1] in store.pages:
         if str(store.pages[task["paths"][1]][1].get("sensitivity") or "").strip().lower() == "restricted":
@@ -1401,33 +1687,49 @@ def plan_store(
         desc = meta.get("description")
         if not isinstance(desc, str) or not desc:
             continue
+        memory_parents = []
         for item in _relates(meta):
             if _kind(item) != "derived_from":
                 continue
             mk = store.canonical(str(item.get("path") or ""))
             if mk not in store.pages or store.ptype(mk) != "memory":
                 continue
-            mpath, mmeta, mbody = store.pages[mk]
-            mdesc = mmeta.get("description")
-            if desc in mbody or (isinstance(mdesc, str) and desc in mdesc):
-                break
-            mlines = _fm_lines(mpath.read_text(encoding="utf-8", errors="replace"))
-            glines = _fm_lines(path.read_text(encoding="utf-8", errors="replace"))
-            raw = _single_line_value(mlines[0], "description") if mlines else None
-            graw = _single_line_value(glines[0], "description") if glines else None
-            if isinstance(mdesc, str) and mdesc.strip() and raw and graw:
-                tasks.append(_task(
-                    "stale-gist-description", "auto", [k, mk],
-                    f"set gist description of {k} to the memory description of {mk} verbatim "
-                    "(copy up; the memory page is not edited)",
-                    {"gist_description": desc, "memory_description": mdesc}, store))
-            else:
-                tasks.append(_task(
-                    "stale-gist-description", "handoff", [k, mk],
-                    "memory has no plain one-line description to copy up; path remember chooses "
-                    "an exact sentence of the memory body. Optimise writes nothing here.",
-                    {"gist_description": desc}, store))
-            break
+            memory_parents.append(mk)
+        if not memory_parents:
+            continue
+        if any(
+            desc in store.pages[mk][2]
+            or (isinstance(store.pages[mk][1].get("description"), str) and desc in store.pages[mk][1]["description"])
+            for mk in memory_parents
+        ):
+            continue
+        mk = memory_parents[0]
+        if len(memory_parents) > 1:
+            tasks.append(_task(
+                "stale-gist-description", "handoff", [k, *memory_parents],
+                "shared gist description is not a substring of any derived_from memory parent; "
+                "path remember chooses an exact sentence. Optimise writes nothing here.",
+                {"gist_description": desc, "parents": memory_parents}, store,
+                tid=f"stale-gist-description:{k}"))
+            continue
+        mpath, mmeta, _mbody = store.pages[mk]
+        mdesc = mmeta.get("description")
+        mlines = _fm_lines(mpath.read_text(encoding="utf-8", errors="replace"))
+        glines = _fm_lines(path.read_text(encoding="utf-8", errors="replace"))
+        raw = _single_line_value(mlines[0], "description") if mlines else None
+        graw = _single_line_value(glines[0], "description") if glines else None
+        if isinstance(mdesc, str) and mdesc.strip() and raw and graw:
+            tasks.append(_task(
+                "stale-gist-description", "auto", [k, mk],
+                f"set gist description of {k} to the memory description of {mk} verbatim "
+                "(copy up; the memory page is not edited)",
+                {"gist_description": desc, "memory_description": mdesc}, store))
+        else:
+            tasks.append(_task(
+                "stale-gist-description", "handoff", [k, mk],
+                "memory has no plain one-line description to copy up; path remember chooses "
+                "an exact sentence of the memory body. Optimise writes nothing here.",
+                {"gist_description": desc}, store))
 
     # --- suffixes (opt-in)
     for k in keys:
@@ -1545,6 +1847,7 @@ def plan_store(
             "custom_tree": list(scope.custom_trees),
             "tidy_only": tidy_only,
             "auto_verbatim": auto_verbatim,
+            "fill_sensible": not tidy_only,
             "cost_ceiling": cost_ceiling,
             "pilot": pilot,
             "serial_full_only": True,
@@ -1789,15 +2092,20 @@ def _apply_move(store: Store, t: dict) -> None:
     old_path.unlink()
 
 
-def _render_gist(proposed: dict, parent_key: str) -> str:
+def _render_gist(proposed: dict, parent_keys: list[str]) -> str:
     description = _yaml_scalar(proposed["description"])
     title = _yaml_scalar(proposed["title"])
     if description is None or title is None:
         raise Refusal("gist text cannot be written as a one-line scalar")
+    if not parent_keys:
+        raise Refusal("gist has no derived_from parent")
+    if len(set(parent_keys)) != len(parent_keys):
+        raise Refusal("gist derived_from parents must be unique")
     sensitivity = proposed.get("sensitivity") or "internal"
     if sensitivity not in ("public", "internal"):
         sensitivity = "internal"
     body = str(proposed["body"]).rstrip() + "\n"
+    relates = "".join(f"  - path: {parent_key}\n    kind: derived_from\n" for parent_key in parent_keys)
     return (
         "---\n"
         "type: gist\n"
@@ -1807,8 +2115,7 @@ def _render_gist(proposed: dict, parent_key: str) -> str:
         "origin: derived\n"
         f"sensitivity: {sensitivity}\n"
         "relates_to:\n"
-        f"  - path: {parent_key}\n"
-        "    kind: derived_from\n"
+        f"{relates}"
         "---\n"
         "\n"
         "## Content\n"
@@ -1850,20 +2157,33 @@ def _render_schema(proposed: dict, members: list[dict]) -> str:
     )
 
 
+def _task_parents(task: dict) -> list[str]:
+    evidence = task.get("evidence") or {}
+    parents = list(evidence.get("parents") or [])
+    if not parents and evidence.get("parent"):
+        parents = [evidence["parent"]]
+    return parents
+
+
 def _assert_extract_matches(store: Store, task: dict) -> dict:
-    parent = task["evidence"]["parent"]
-    if parent not in store.pages:
+    parents = _task_parents(task)
+    if not parents or any(parent not in store.pages for parent in parents):
         raise Refusal(f"{task['id']}: evidence parent missing")
-    pack = _evidence_pack(store, parent)
+    if len({store.folder(parent) for parent in parents}) != 1:
+        raise Refusal(f"{task['id']}: shared gist parents must stay in one folder")
+    pack = _cluster_pack(store, parents)
     if pack["security_blocked"] or not pack["sufficient"]:
         raise Refusal(f"{task['id']}: evidence insufficient or blocked at apply")
     if task["evidence"].get("extract") != pack["extract"]:
         raise Refusal(
             f"{task['id']}: proposed gist text is not the evidence-pack extract"
         )
-    meta, body = store.pages[parent][1], store.pages[parent][2]
+    anchor = pack.get("extract_parent") or parents[0]
+    meta, body = store.pages[anchor][1], store.pages[anchor][2]
     if not _grounded(pack["extract"], meta, body):
         raise Refusal(f"{task['id']}: extract is not a verbatim substring of the parent")
+    if len(_claim_prose(str(pack.get("body") or ""))) < MIN_PROSE_CHARS:
+        raise Refusal(f"{task['id']}: gist body is not evidence-grade")
     return pack
 
 
@@ -1871,17 +2191,15 @@ def _apply_missing_gist(store: Store, task: dict) -> None:
     pack = _assert_extract_matches(store, task)
     proposed = task["evidence"].get("proposed") or {}
     new_key = task["evidence"].get("new_path")
-    parent = task["evidence"]["parent"]
+    parents = _task_parents(task)
     if not new_key or proposed.get("description") != pack["extract"]:
         raise Refusal(f"{task['id']}: proposed gist text is not the evidence-pack extract")
     dest = store.root / new_key
     if dest.exists():
         raise Refusal(f"{new_key} appeared after plan")
-    _path, meta, body = store.pages[parent]
-    prose = _gist_body_prose(pack["extract"], [item["text"] for item in _claim_lines(body)])
-    if prose is None or prose != proposed.get("body"):
+    if pack.get("body") != proposed.get("body"):
         raise Refusal(f"{task['id']}: proposed gist body is not the evidence pack")
-    text = _render_gist({**proposed, "description": pack["extract"], "body": prose}, parent)
+    text = _render_gist({**proposed, "description": pack["extract"], "body": pack["body"]}, parents)
     dest.parent.mkdir(parents=True, exist_ok=True)
     _write(dest, text)
     try:
@@ -1889,7 +2207,9 @@ def _apply_missing_gist(store: Store, task: dict) -> None:
     except FrontmatterError as e:
         dest.unlink(missing_ok=True)
         raise Refusal(f"{new_key}: gist did not round-trip") from e
-    if gmeta.get("description") != pack["extract"] or not _grounded(pack["extract"], meta, body):
+    anchor = pack.get("extract_parent") or parents[0]
+    ameta, abody = store.pages[anchor][1], store.pages[anchor][2]
+    if gmeta.get("description") != pack["extract"] or not _grounded(pack["extract"], ameta, abody):
         dest.unlink(missing_ok=True)
         raise Refusal(f"{new_key}: copied description did not round-trip; removed")
     if pack["extract"] not in gbody and pack["extract"] not in str(gmeta.get("description") or ""):
@@ -1920,7 +2240,6 @@ def _apply_gist_enrich(store: Store, task: dict) -> None:
     pack = _assert_extract_matches(store, task)
     proposed = task["evidence"].get("proposed") or {}
     gist_key = task["paths"][0]
-    parent = task["evidence"]["parent"]
     if proposed.get("description") != pack["extract"]:
         raise Refusal(f"{task['id']}: proposed gist text is not the evidence-pack extract")
     gpath = store.root / gist_key
@@ -1929,12 +2248,10 @@ def _apply_gist_enrich(store: Store, task: dict) -> None:
     if parsed is None:
         raise Refusal(f"{gist_key}: missing frontmatter")
     lines, _rest = parsed
-    _pmeta, pbody = store.pages[parent][1], store.pages[parent][2]
-    prose = _gist_body_prose(pack["extract"], [item["text"] for item in _claim_lines(pbody)])
-    if prose is None or prose != proposed.get("body"):
+    if pack.get("body") != proposed.get("body"):
         raise Refusal(f"{task['id']}: proposed gist body is not the evidence pack")
     _set_description_line(lines, pack["extract"])
-    _write(gpath, "".join(lines) + "---\n\n## Content\n\n" + prose.rstrip() + "\n")
+    _write(gpath, "".join(lines) + "---\n\n## Content\n\n" + str(pack["body"]).rstrip() + "\n")
     try:
         gmeta, gbody = read_page(gpath, store.version)
     except FrontmatterError as e:
@@ -2014,8 +2331,7 @@ def _parent_snapshot(root: Path, store: Store, selected: list[dict]) -> dict[str
     parents: set[str] = set()
     for task in selected:
         evidence = task.get("evidence") or {}
-        parent = evidence.get("parent")
-        if isinstance(parent, str):
+        for parent in _task_parents(task):
             parents.add(parent)
         if task["kind"] == "stale-gist-description" and len(task["paths"]) > 1:
             parents.add(task["paths"][1])
@@ -2196,6 +2512,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="tidy repairs only; do not plan fill tasks")
     p_plan.add_argument("--auto-verbatim", action="store_true",
                         help="opt in: verbatim evidence-pack fill may be auto. Confirm stays the default.")
+    p_plan.add_argument("--fill-sensible", action="store_true",
+                        help="name the default posture: useful same-folder gists when evidence supports; "
+                             "residual missing_gist stays OK. Does not force every indexed page.")
     p_plan.add_argument("--cost-ceiling", type=int, default=DEFAULT_COST_CEILING,
                         help=f"max pages examined in the resolved scope (default {DEFAULT_COST_CEILING})")
     p_plan.add_argument("--pilot", action="store_true",

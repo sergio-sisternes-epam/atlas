@@ -11,7 +11,9 @@ description: Use this path when a store still treats documents as the core recor
 A store still treats `document` as the core record, or `atlas compile` is
 mostly reporting `legacy_document` and `missing_gist` noise, and the operator
 wants to move that store toward the memory layers (`frame`/`schema`, `gist`,
-`memory`).
+`memory`). A residual `missing_gist` is not a completeness failure. This
+path does not create gists; do not invent gist text or a title-only stub to
+clear that finding.
 
 Not for relocating a store (use path **migrate**). Not for installing the
 recall index (use path **configure**). Not for hand-editing `SCHEMA.json`.
