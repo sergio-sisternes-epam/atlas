@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.13.0-beta.12 - 2026-10-06
+
+- The four-layer model stays optional progressive disclosure. An index may
+  exist with or without a schema. Memory and other types may omit a gist.
+  Non-memory types are not forced through a typed middle extension. A
+  residual `missing_gist` stays expected and does not fail optimise
+  (`missing_gist_fails_run: false`).
+- When optimise fills, same-folder peers that already `relates_to` each
+  other, or that share a `work_id`, get one useful gist. `derived_from`
+  lists every parent (N≥1). Cross-folder `relates_to` does not join a
+  cluster. A folder may hold more than one cluster. A gist description is
+  still a verbatim substring of at least one memory parent. Schema is
+  required when a gist is created, not for bare index membership.
+- Thin evidence, titled stubs, and invented bodies still do not clear
+  `missing_gist`. Critical or high scan hits refuse promotion. A medium
+  `booking_manage_reference` is a handoff. Receipts for fills that happen
+  add `scan_gate_refuse_count`, `body_fills`, `shared_gist_count`,
+  `cluster_size_hist`, `enrich_optional_count`, `zero_crit_high_promoted`,
+  and `{path, type, severity}` hits. The store write stamp stays
+  `0.13.0-beta.7`. Sleep and consolidate remain unimplemented.
+
 ## 0.13.0-beta.11 - 2026-10-06
 
 - Path `atlas-optimise` now fills upper layers from an evidence pack and still
