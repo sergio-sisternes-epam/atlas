@@ -1,0 +1,65 @@
+id: atlas-optimise-vnext-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-06-atlas-optimise-vnext
+adversarial: true
+smokes:
+  - id: no-invent-empty-parent
+    source: "Maynez et al. 2020 faithfulness; DRM/gist false memory"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_empty_parent_is_handoff_and_residual_does_not_fail"
+    expect: "empty/thin parent yields refuse or handoff; no new gist/schema body bytes"
+  - id: verbatim-auto-only-opt-in
+    source: "Pin E1 / P5"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_verbatim_fill_is_confirm_unless_auto_verbatim"
+    expect: "auto fill copies parent description verbatim only with --auto-verbatim; confirm remains default; paraphrase is confirm and pack-checked"
+  - id: no-parent-rewrite
+    source: "reconsolidation gated; Pin E3"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_verbatim_fill_is_confirm_unless_auto_verbatim"
+    expect: "parent page bytes unchanged by optimise apply"
+  - id: stale-evidence-refuse
+    source: "Terraform stale plan analogy; Pin B1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_paraphrase_and_stale_evidence_refuse"
+    expect: "changed evidence source after plan => apply exit 2, nothing written"
+  - id: mode-full-requires-root-target
+    source: "Pin M2"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_modes_and_cost_ceiling"
+    expect: "optimise_mode=full with target not . refuses"
+  - id: incremental-committer-24h
+    source: "Pin I1 / I2 / I6"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_incremental_uses_committer_clock_and_skips_dirty"
+    expect: "default last 24h committer commits; dirty/uncommitted parents excluded from fill; only git-touched fill neighbours appear"
+  - id: path-fill-default-tidy-only
+    source: "Pin P7"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_path_fills_by_default_and_tidy_only_skips_fill"
+    expect: "path mode plans fill kinds by default; --tidy-only suppresses fill kinds"
+  - id: all-missing-gist-types
+    source: "Pin M3"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_all_missing_gist_types_and_not_protostar"
+    expect: "fill candidates include all compile MISSING_GIST_TYPES, not memory-only"
+  - id: schema-minimal-prose
+    source: "Pin S8"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_schema_fill_is_minimal_prose"
+    expect: "day-one schema-fill writes minimal prose + relates_to, not title-only and not rich body"
+  - id: security-scan-gate
+    source: "Pin Sec1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_security_scan_blocks_secret_and_restricted"
+    expect: "planted Crit/High secret-class on touched path blocks promotion; plan+apply gated"
+  - id: residual-missing-gist-not-fail
+    source: "Pin P3"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_empty_parent_is_handoff_and_residual_does_not_fail"
+    expect: "insufficient-evidence residual missing_gist does not mark run failed"
+  - id: no-install-compile-hook
+    source: "baseline non-goal; Pin B2"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_not_wired_into_install_or_compile"
+    expect: "install/compile/init/memory-migrate sources do not call atlas_optimise"
+  - id: pilot-before-fleet-language
+    source: "Pin P1 / CLS overwrite risk"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_receipt_and_docs_carry_the_locked_gates"
+    expect: "path/help text requires pilot+eval before fleet claims; receipt requires fetch OK + tip"
+  - id: sleep-boundary-stated
+    source: "Pin S1"
+    check: "scripts/test_atlas_optimise.py OptimiseVNextTests.test_receipt_and_docs_carry_the_locked_gates"
+    expect: "path states optimise is interim; sleep/consolidate not implemented"
+  - id: tidy-regression
+    source: "2026-10-05 baseline"
+    check: "scripts/test_atlas_optimise.py OptimiseTests.test_shared_parent_does_not_stop_early; OptimiseTests.test_no_invented_gist_text"
+    expect: "dead-index-cue and stale-gist-description still plan/apply as before"

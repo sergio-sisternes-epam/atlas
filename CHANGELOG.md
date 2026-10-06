@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.13.0-beta.11 - 2026-10-06
+
+- Path `atlas-optimise` now fills upper layers from an evidence pack and still
+  tidies the beta.10 repairs. Fill can create a gist for every compile
+  missing-gist type and a minimal-prose schema when a folder has gists and no
+  schema. The gist description is a verbatim parent description or the first
+  claim line. Thin evidence is a handoff. A leftover `missing_gist` is
+  expected and does not fail the run. Optimise never invents prose and never
+  edits parent claim text.
+- Modes are `path` (default, fill on), `full` (`--target .` only, serial
+  only), `custom` (`--custom-tree` path prefixes), and `incremental` (git
+  commit history, committer clock, default `--since-hours 24`). Dirty and
+  uncommitted parents are excluded from incremental fill. `--tidy-only` skips
+  fill. `--auto-verbatim` is required before a verbatim fill is `auto`;
+  confirm stays the default.
+- Plan and apply still refuse a stale HEAD or file hash, including every
+  evidence source. A security scan blocks secret-class text and
+  `sensitivity: restricted` pages. The default cost ceiling is 200 pages
+  examined. The receipt records fetch OK, the git tip, counts, residuals,
+  the scan, and cost against the ceiling.
+- The helper stays standalone. `atlas.py` has no optimise command, and
+  install, init, compile, and memory-migrate never call it. The store write
+  stamp stays `0.13.0-beta.7`. Sleep and consolidate remain unimplemented.
+
 ## 0.13.0-beta.10 - 2026-10-05
 
 - `memory-migrate apply --batch contract-file` now accepts an unstamped full

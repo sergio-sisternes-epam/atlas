@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -320,6 +322,352 @@ relates_to:
         for src in (ROOT / "scripts" / "atlas_cli").rglob("*.py"):
             self.assertNotIn("atlas_optimise", src.read_text(encoding="utf-8"), str(src))
         self.assertNotIn("atlas_optimise", (ROOT / "scripts" / "atlas.py").read_text())
+
+
+SECRET = "AKIAIOSFODNN7EXAMPLE"
+LONG = "Topic memory holds the durable claim about the topic."
+
+
+def init_store(base: Path) -> Path:
+    root = base / "store"
+    root.mkdir()
+    assert run(ATLAS, "init", "--root", str(root)).returncode == 0
+    return root
+
+
+def git_commit(root: Path, hours_ago: int, message: str, *, author_hours_ago: int | None = None) -> None:
+    author_hours = hours_ago if author_hours_ago is None else author_hours_ago
+    now = datetime.now(timezone.utc)
+    env = os.environ.copy()
+    env["GIT_COMMITTER_DATE"] = (now - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    env["GIT_AUTHOR_DATE"] = (now - timedelta(hours=author_hours)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-m", message],
+        check=True, env=env, capture_output=True, text=True,
+    )
+
+
+def ensure_git(root: Path) -> None:
+    subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
+    git_commit(root, 200, "init")
+
+
+def memory_page(folder: Path, name: str, *, ptype: str = "memory", description: str | None = LONG,
+                body: str | None = None, sensitivity: str | None = None) -> None:
+    extra = f"sensitivity: {sensitivity}\n" if sensitivity else ""
+    desc = f"description: {description}\n" if description else ""
+    page(folder / name, f"""
+type: {ptype}
+title: {name}
+created: 2026-10-06
+{desc}{extra}""", body or "## Content\n\nThe parent page states one durable claim with enough body text to pass compile.")
+
+
+class OptimiseVNextTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_path_fills_by_default_and_tidy_only_skips_fill(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "topic.md")
+        direct = run(OPT, "plan", "--root", str(root), "--target", "notes", "--json")
+        self.assertEqual(direct.returncode, 1, direct.stdout + direct.stderr)
+        kinds = {t["kind"] for t in tasks(json.loads(direct.stdout))}
+        self.assertIn("missing-gist-fill", kinds)
+        tidy = run(OPT, "plan", "--root", str(root), "--target", "notes", "--tidy-only", "--json")
+        self.assertNotIn("missing-gist-fill", {t["kind"] for t in tasks(json.loads(tidy.stdout))})
+        self.assertNotIn("schema-fill", {t["kind"] for t in tasks(json.loads(tidy.stdout))})
+
+    def test_verbatim_fill_is_confirm_unless_auto_verbatim(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "topic.md")
+        parent = (root / "notes" / "topic.md").read_bytes()
+        planned = run(OPT, "plan", "--root", str(root), "--target", "notes", "--out-dir", str(self.base / "out"), "--json")
+        data = json.loads(planned.stdout)
+        fill = next(t for t in tasks(data) if t["kind"] == "missing-gist-fill")
+        self.assertEqual(fill["class"], "confirm")
+        self.assertEqual(fill["evidence"]["extract"], LONG)
+        self.assertEqual(fill["evidence"]["excerpt_rule"], "parent-description")
+        applied = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out" / "plan.json"))
+        self.assertFalse((root / "notes" / "topic.gist.md").exists())
+        self.assertEqual((root / "notes" / "topic.md").read_bytes(), parent)
+        opted = run(OPT, "plan", "--root", str(root), "--target", "notes", "--auto-verbatim",
+                    "--out-dir", str(self.base / "out2"), "--json")
+        opted_data = json.loads(opted.stdout)
+        self.assertEqual(next(t["class"] for t in tasks(opted_data) if t["kind"] == "missing-gist-fill"), "auto")
+        applied = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out2" / "plan.json"))
+        self.assertIn(applied.returncode, (0, 1), applied.stdout + applied.stderr)
+        gist = (root / "notes" / "topic.gist.md").read_text()
+        self.assertIn(f"description: {LONG}\n", gist)
+        self.assertEqual((root / "notes" / "topic.md").read_bytes(), parent)
+        info = json.loads(run(ATLAS, "compile", "--root", str(root), "--dry-run", "--json").stdout)
+        missing = [item["path"] for item in info.get("info", []) if item["id"] == "missing_gist"]
+        self.assertNotIn("notes/topic.md", missing)
+
+    def test_gist_body_enrich_copies_the_claim_line(self) -> None:
+        root = init_store(self.base)
+        notes = root / "notes"
+        claim = "The bare memory states one durable claim long enough to copy up verbatim."
+        memory_page(notes, "bare.md", description=None, body=f"## Content\n\n{claim}")
+        page(notes / "bare.gist.md", """
+type: gist
+title: Bare gist
+created: 2026-10-06
+description: Words that the bare memory never says.
+relates_to:
+  - path: notes/bare.md
+    kind: derived_from
+""", "## Content\n\nGist of the bare memory with enough words for the body check.")
+        parent = (notes / "bare.md").read_bytes()
+        planned = run(OPT, "plan", "--root", str(root), "--target", "notes", "--out-dir", str(self.base / "out"), "--json")
+        data = json.loads(planned.stdout)
+        enrich = next(t for t in tasks(data) if t["kind"] == "gist-body-enrich")
+        stale = next(t for t in tasks(data) if t["id"] == "stale-gist-description:notes/bare.gist.md")
+        self.assertEqual(enrich["class"], "confirm")
+        self.assertEqual(enrich["evidence"]["extract"], claim)
+        self.assertEqual(stale["class"], "handoff")
+        applied = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out" / "plan.json"),
+                      "--confirm", enrich["id"])
+        self.assertIn(applied.returncode, (0, 1), applied.stdout + applied.stderr)
+        gist = (notes / "bare.gist.md").read_text()
+        self.assertIn(f"description: {claim}\n", gist)
+        self.assertIn(claim, gist.split("---", 2)[-1])
+        self.assertNotIn("Words that the bare memory never says", gist)
+        self.assertEqual((notes / "bare.md").read_bytes(), parent)
+
+    def test_empty_parent_is_handoff_and_residual_does_not_fail(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "empty.md", description=None, body="## Content\n\n")
+        before = tree_hash(root)
+        planned = run(OPT, "plan", "--root", str(root), "--target", "notes", "--out-dir", str(self.base / "out"), "--json")
+        self.assertEqual(planned.returncode, 1, planned.stdout + planned.stderr)
+        data = json.loads(planned.stdout)
+        fill = next(t for t in tasks(data) if t["id"] == "missing-gist-fill:notes/empty.md")
+        self.assertEqual(fill["class"], "handoff")
+        self.assertFalse(fill["evidence"]["sufficient"])
+        receipt = data["receipt"]
+        self.assertFalse(receipt["gates"]["run_failed"])
+        self.assertFalse(receipt["residuals"]["missing_gist_fails_run"])
+        self.assertGreaterEqual(receipt["residuals"]["missing_gist"], 1)
+        self.assertIn("fetch_ok", receipt)
+        self.assertIn("tip", receipt)
+        applied = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out" / "plan.json"))
+        self.assertNotEqual(applied.returncode, 2, applied.stdout + applied.stderr)
+        self.assertFalse((root / "notes" / "empty.gist.md").exists())
+        self.assertEqual(tree_hash(root), before)
+
+    def test_paraphrase_and_stale_evidence_refuse(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "topic.md")
+        before = tree_hash(root)
+        run(OPT, "plan", "--root", str(root), "--target", "notes", "--out-dir", str(self.base / "out"), "--json")
+        plan_path = self.base / "out" / "plan.json"
+        plan_data = json.loads(plan_path.read_text())
+        for folder_tasks in plan_data["folders"].values():
+            for task in folder_tasks:
+                if task["kind"] == "missing-gist-fill":
+                    task["evidence"]["extract"] = "Invented wording that the parent never used."
+                    task["evidence"]["proposed"]["description"] = task["evidence"]["extract"]
+        plan_path.write_text(json.dumps(plan_data), encoding="utf-8")
+        refused = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(plan_path),
+                      "--confirm", "missing-gist-fill:notes/topic.md")
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertEqual(tree_hash(root), before)
+        run(OPT, "plan", "--root", str(root), "--target", "notes", "--auto-verbatim", "--out-dir", str(self.base / "out2"))
+        topic = root / "notes" / "topic.md"
+        topic.write_text(topic.read_text() + "\nEdited after plan.\n", encoding="utf-8")
+        stale = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out2" / "plan.json"))
+        self.assertEqual(stale.returncode, 2)
+        self.assertFalse((root / "notes" / "topic.gist.md").exists())
+
+    def test_all_missing_gist_types_and_not_protostar(self) -> None:
+        root = init_store(self.base)
+        types = ["experience", "decision", "lesson", "recipe", "document", "memory", "page", "protostar"]
+        for ptype in types:
+            memory_page(root / "notes", f"{ptype}.md", ptype=ptype)
+        data = json.loads(run(OPT, "plan", "--root", str(root), "--target", "notes", "--json").stdout)
+        filled = {t["evidence"]["parent_type"] for t in tasks(data) if t["kind"] == "missing-gist-fill"}
+        self.assertEqual(filled, {"experience", "decision", "lesson", "recipe", "document", "memory", "page"})
+        self.assertNotIn("protostar", filled)
+
+    def test_schema_fill_is_minimal_prose(self) -> None:
+        root = init_store(self.base)
+        notes = root / "notes"
+        memory_page(notes, "topic.md")
+        page(notes / "topic.gist.md", f"""
+type: gist
+title: Topic gist
+created: 2026-10-06
+description: {LONG}
+relates_to:
+  - path: notes/topic.md
+    kind: derived_from
+""", f"## Content\n\n{LONG}")
+        (notes / "index.md").write_text("# Notes\n", encoding="utf-8")
+        thin = notes / "thin"
+        page(thin / "tiny.gist.md", """
+type: gist
+title: Hi
+created: 2026-10-06
+description: Hi
+relates_to:
+  - path: notes/topic.md
+    kind: derived_from
+""", "## Content\n\nHi is too short to be a schema blurb on its own here.")
+        planned = run(OPT, "plan", "--root", str(root), "--target", ".", "--out-dir", str(self.base / "out"), "--json")
+        data = json.loads(planned.stdout)
+        schema = next(t for t in tasks(data) if t["id"] == "schema-fill:notes")
+        thin_schema = next(t for t in tasks(data) if t["id"] == "schema-fill:notes/thin")
+        self.assertEqual(schema["class"], "confirm")
+        self.assertEqual(thin_schema["class"], "handoff")
+        body = schema["evidence"]["proposed"]["body"]
+        self.assertIn(LONG, body)
+        self.assertNotIn("## Provenance", body)
+        self.assertLess(body.count("\n"), 3)
+        applied = run(OPT, "apply", "--root", str(root), "--target", ".", "--plan", str(self.base / "out" / "plan.json"),
+                      "--confirm", "schema-fill:notes")
+        self.assertIn(applied.returncode, (0, 1), applied.stdout + applied.stderr)
+        text = (notes / "schema.schema.md").read_text()
+        self.assertIn("kind: related", text)
+        self.assertIn("path: notes/topic.gist.md", text)
+        self.assertIn(LONG, text)
+        self.assertEqual(text.count("## "), 1)
+        self.assertFalse((thin / "schema.schema.md").exists())
+        compiled = json.loads(run(ATLAS, "compile", "--root", str(root), "--dry-run", "--json").stdout)
+        uncovered = [item["path"] for item in compiled.get("critical", []) if item["id"] == "schema_folder"]
+        missing_cue = [item["path"] for item in compiled.get("critical", []) if item["id"] == "schema_missing_from_index"]
+        self.assertNotIn("notes/topic.gist.md", uncovered)
+        self.assertFalse(any(path.startswith("notes/") for path in missing_cue))
+
+    def test_security_scan_blocks_secret_and_restricted(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "secret.md", description=f"{LONG} {SECRET}")
+        memory_page(root / "notes", "restricted.md", sensitivity="restricted")
+        before = tree_hash(root)
+        planned = run(OPT, "plan", "--root", str(root), "--target", "notes", "--out-dir", str(self.base / "out"), "--json")
+        self.assertNotIn(SECRET, planned.stdout)
+        data = json.loads(planned.stdout)
+        by_id = {t["id"]: t for t in tasks(data)}
+        self.assertEqual(by_id["missing-gist-fill:notes/secret.md"]["class"], "blocked")
+        self.assertEqual(by_id["missing-gist-fill:notes/restricted.md"]["class"], "blocked")
+        self.assertEqual(data["receipt"]["security"]["status"], "blocked")
+        self.assertGreater(data["receipt"]["security"]["new_critical_or_high"], 0)
+        self.assertFalse(data["receipt"]["security"]["secrets_promoted"])
+        applied = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out" / "plan.json"))
+        self.assertNotEqual(applied.returncode, 2)
+        self.assertFalse((root / "notes" / "secret.gist.md").exists())
+        self.assertEqual(tree_hash(root), before)
+        plan_data = json.loads((self.base / "out" / "plan.json").read_text())
+        for folder_tasks in plan_data["folders"].values():
+            for task in folder_tasks:
+                if task["id"] == "missing-gist-fill:notes/secret.md":
+                    task["class"] = "auto"
+        (self.base / "out" / "plan.json").write_text(json.dumps(plan_data), encoding="utf-8")
+        forced = run(OPT, "apply", "--root", str(root), "--target", "notes", "--plan", str(self.base / "out" / "plan.json"))
+        self.assertEqual(forced.returncode, 2)
+        self.assertFalse((root / "notes" / "secret.gist.md").exists())
+
+    def test_modes_and_cost_ceiling(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "topic.md")
+        memory_page(root / "other", "topic.md")
+        full = run(OPT, "plan", "--root", str(root), "--target", "notes", "--optimise-mode", "full")
+        self.assertEqual(full.returncode, 2)
+        self.assertIn("serial only", full.stderr)
+        custom_missing = run(OPT, "plan", "--root", str(root), "--target", ".", "--optimise-mode", "custom")
+        self.assertEqual(custom_missing.returncode, 2)
+        conflict = run(OPT, "plan", "--root", str(root), "--target", ".", "--custom-tree", "notes")
+        self.assertEqual(conflict.returncode, 2)
+        hours = run(OPT, "plan", "--root", str(root), "--target", ".", "--since-hours", "12")
+        self.assertEqual(hours.returncode, 2)
+        custom = json.loads(run(
+            OPT, "plan", "--root", str(root), "--target", ".", "--optimise-mode", "custom",
+            "--custom-tree", "notes", "--json",
+        ).stdout)
+        parents = {t["evidence"].get("parent") for t in tasks(custom) if t["kind"] == "missing-gist-fill"}
+        self.assertEqual(parents, {"notes/topic.md"})
+        ceiling = run(OPT, "plan", "--root", str(root), "--target", ".", "--cost-ceiling", "0")
+        self.assertEqual(ceiling.returncode, 2)
+        self.assertIn("cost ceiling", ceiling.stdout)
+
+    def test_incremental_uses_committer_clock_and_skips_dirty(self) -> None:
+        root = init_store(self.base)
+        ensure_git(root)
+        memory_page(root / "notes", "old.md")
+        git_commit(root, 72, "old")
+        memory_page(root / "notes", "recent.md")
+        memory_page(root / "other", "other.md")
+        memory_page(root / "notes", "dirty.md")
+        git_commit(root, 2, "recent")
+        memory_page(root / "notes", "author.md")
+        git_commit(root, 72, "author-recent-committer-old", author_hours_ago=1)
+        dirty = root / "notes" / "dirty.md"
+        dirty.write_text(dirty.read_text() + "\nDirty edit.\n", encoding="utf-8")
+        memory_page(root / "notes", "untracked.md")
+        data = json.loads(run(
+            OPT, "plan", "--root", str(root), "--target", ".", "--optimise-mode", "incremental", "--json",
+        ).stdout)
+        fills = {t["id"] for t in tasks(data) if t["kind"] == "missing-gist-fill"}
+        self.assertIn("missing-gist-fill:notes/recent.md", fills)
+        self.assertIn("missing-gist-fill:other/other.md", fills)
+        self.assertNotIn("missing-gist-fill:notes/old.md", fills)
+        self.assertNotIn("missing-gist-fill:notes/dirty.md", fills)
+        self.assertNotIn("missing-gist-fill:notes/untracked.md", fills)
+        self.assertNotIn("missing-gist-fill:notes/author.md", fills)
+        self.assertEqual(data["source"]["since_hours"], 24)
+        self.assertTrue(data["receipt"]["fetch_ok"])
+        self.assertTrue(data["receipt"]["tip"])
+        wider = json.loads(run(
+            OPT, "plan", "--root", str(root), "--target", ".", "--optimise-mode", "incremental",
+            "--since-hours", "96", "--custom-tree", "notes", "--json",
+        ).stdout)
+        wider_fills = {t["id"] for t in tasks(wider) if t["kind"] == "missing-gist-fill"}
+        self.assertIn("missing-gist-fill:notes/old.md", wider_fills)
+        self.assertIn("missing-gist-fill:notes/recent.md", wider_fills)
+        self.assertNotIn("missing-gist-fill:other/other.md", wider_fills)
+        self.assertNotIn("missing-gist-fill:notes/dirty.md", wider_fills)
+
+    def test_receipt_and_docs_carry_the_locked_gates(self) -> None:
+        root = init_store(self.base)
+        memory_page(root / "notes", "topic.md")
+        data = json.loads(run(
+            OPT, "plan", "--root", str(root), "--target", "notes", "--pilot", "--out-dir", str(self.base / "out"), "--json",
+        ).stdout)
+        receipt = data["receipt"]
+        self.assertEqual(receipt["schema"], "atlas-optimise-receipt/v1")
+        self.assertEqual(receipt["gates"]["spot_check_n"], 10)
+        self.assertEqual(receipt["gates"]["disagreement_rate"], "informational")
+        self.assertFalse(receipt["fleet_ready"])
+        self.assertTrue(receipt["serial_full_only"])
+        self.assertIn("cost", receipt)
+        self.assertTrue((self.base / "out" / "receipt.json").is_file())
+        help_text = run(OPT, "plan", "--help").stdout
+        for flag in ("--optimise-mode", "--since-hours", "--custom-tree", "--tidy-only", "--auto-verbatim", "--cost-ceiling"):
+            self.assertIn(flag, help_text)
+        self.assertNotIn("cascade-fill", help_text)
+        path = (ROOT / "references" / "paths" / "atlas-optimise.md").read_text()
+        scenario = (ROOT / "references" / "scenarios" / "atlas-optimise-vnext-adversarial-v1.yaml").read_text()
+        for phrase in (
+            "fill", "tidy", "sleep", "interim", "serial", "pilot", "N=10",
+            "fetch", "Disagreement", "missing_gist", "--auto-verbatim", "--tidy-only",
+        ):
+            self.assertIn(phrase, path)
+        self.assertNotIn("cascade-fill", path.lower())
+        self.assertNotIn("plumbing", path.lower())
+        for smoke in (
+            "no-invent-empty-parent", "verbatim-auto-only-opt-in", "no-parent-rewrite",
+            "stale-evidence-refuse", "mode-full-requires-root-target", "incremental-committer-24h",
+            "path-fill-default-tidy-only", "all-missing-gist-types", "schema-minimal-prose",
+            "security-scan-gate", "residual-missing-gist-not-fail", "no-install-compile-hook",
+            "pilot-before-fleet-language", "sleep-boundary-stated", "tidy-regression",
+        ):
+            self.assertIn(smoke, scenario)
 
 
 if __name__ == "__main__":
