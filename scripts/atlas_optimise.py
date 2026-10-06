@@ -2,14 +2,20 @@
 """atlas-optimise helper: plan (dry-run) and apply for one operator-named target.
 
 Operator-chosen only. Never called by install, init, compile, or memory-migrate.
-It writes no contract file and invents no text: every repair copies text that
-already exists in a store page.
+It writes no contract file and invents no text.
 
-  plan  --root <store> --target <folder|.> [--out-dir DIR] [--subject-folder F:stem]... [--json]
+Tidy repairs copy text that already exists (beta.10). Fill creates or enriches
+gist and schema pages only from an evidence pack. Full mode is serial only:
+do not run Full on two stores at once.
+
+  plan  --root <store> --target <folder|.> [--optimise-mode path|full|custom|incremental]
+        [--since-hours N] [--custom-tree PREFIX]... [--tidy-only] [--auto-verbatim]
+        [--cost-ceiling PAGES] [--pilot] [--out-dir DIR] [--subject-folder F:stem]... [--json]
   apply --root <store> --target <folder|.> --plan plan.json [--include-opt-in] [--confirm ID]... [--json]
 
 plan exit: 0 no tasks, 1 tasks listed, 2 refused.
 apply exit: 0 applied with no residual tasks, 1 applied with residual tasks, 2 refused.
+Residual missing_gist after an evidence handoff is not a refusal.
 Structured JSON goes to stdout; diagnostics go to stderr.
 """
 
@@ -22,11 +28,13 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas_cli import __version__ as PACKAGE_VERSION  # noqa: E402
+from atlas_cli.commands.validate import GIST_PARENT_TYPES, MISSING_GIST_TYPES  # noqa: E402
 from atlas_cli.core.frontmatter import FrontmatterError, read_page  # noqa: E402
 from atlas_cli.core.paths import CONTRACT_FILENAMES, CONTRACT_NAME, RESERVED  # noqa: E402
 from atlas_cli.core.recall_config import schema_version  # noqa: E402
@@ -46,6 +54,9 @@ LAYER_TYPES = frozenset(LAYER_SUFFIX)
 NON_CONCEPT_DIRS = frozenset({".git", "staging", "templates", "schema.d", "mesh", ".atlas-index"})
 CLASS_ORDER = ("blocked", "handoff", "auto", "opt-in", "confirm", "report")
 APPLY_ORDER = (
+    "missing-gist-fill",
+    "gist-body-enrich",
+    "schema-fill",
     "dead-index-cue",
     "layer-skip-cue",
     "dead-schema-member",
@@ -55,6 +66,34 @@ APPLY_ORDER = (
     "layer-suffix",
     "subject-cluster",
     "work-cluster",
+)
+OPTIMISE_MODES = ("full", "custom", "incremental", "path")
+FILL_KINDS = ("missing-gist-fill", "gist-body-enrich", "schema-fill")
+PROMOTION_KINDS = FILL_KINDS + ("stale-gist-description",)
+DEFAULT_SINCE_HOURS = 24
+DEFAULT_COST_CEILING = 200
+MIN_CLAIM_CHARS = 12
+MIN_PROSE_CHARS = 40
+WORK_ID = "2026-10-06-atlas-optimise-vnext"
+BOILERPLATE_SECTIONS = frozenset({"provenance", "related", "see also"})
+SECRET_RULES = (
+    ("private-key", re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----")),
+    ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
+    ("slack-token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    (
+        "assigned-secret",
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|secret|password|passwd|token)\b\s*[=:]\s*['\"]?[A-Za-z0-9/+=_\-]{8,}"
+        ),
+    ),
+)
+PII_RULES = (
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+    (
+        "credit-card",
+        re.compile(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b"),
+    ),
 )
 
 
@@ -353,10 +392,890 @@ def _move_gates(store: Store, key: str, new_key: str) -> list[str]:
     return reasons
 
 
-def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) -> dict:
+# ---------------------------------------------------------------------------
+# fill scope, evidence, security, receipt
+
+
+def _git_text(root: Path, *args: str) -> str | None:
+    """Git stdout without stripping leading spaces (status lines need them)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out.stdout.replace("\r\n", "\n")
+
+
+def _repo_root(root: Path) -> Path | None:
+    top = _git(root, "rev-parse", "--show-toplevel")
+    return Path(top) if top else None
+
+
+def _store_rel_paths(root: Path, repo_paths: set[str]) -> set[str]:
+    repo = _repo_root(root)
+    if repo is None:
+        return set()
+    out: set[str] = set()
+    for rel_repo in repo_paths:
+        try:
+            out.add(_rel(root, (repo / rel_repo).resolve()))
+        except ValueError:
+            continue
+    return out
+
+
+def _dirty_paths(root: Path) -> set[str]:
+    text = _git_text(root, "status", "--porcelain")
+    if text is None:
+        return set()
+    repo_paths: set[str] = set()
+    for line in text.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if path:
+            repo_paths.add(path)
+    return _store_rel_paths(root, repo_paths)
+
+
+def _committed_paths(root: Path, since_hours: int) -> set[str] | None:
+    """Paths touched by commits whose committer timestamp is inside the window.
+
+    Committer timestamps are read from ``git log`` and compared here. A date
+    filter inside git stops walking at an older commit, which hides a newer
+    parent when committer dates are not monotonic. Returns None when git
+    history cannot be read.
+    """
+    text = _git_text(
+        root,
+        "log",
+        "--pretty=format:COMMIT %cI",
+        "--name-only",
+        "--diff-filter=ACMR",
+    )
+    if text is None:
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    include = False
+    repo_paths: set[str] = set()
+    for line in text.splitlines():
+        if line.startswith("COMMIT "):
+            stamp = line[len("COMMIT "):].strip()
+            try:
+                when = datetime.fromisoformat(stamp)
+            except ValueError:
+                include = False
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            include = when >= cutoff
+            continue
+        if include and line.strip():
+            repo_paths.add(line.strip())
+    return _store_rel_paths(root, repo_paths)
+
+
+def _under_prefixes(key: str, prefixes: list[str]) -> bool:
+    if not prefixes:
+        return True
+    return any(key == prefix or key.startswith(prefix + "/") for prefix in prefixes)
+
+
+def _normalize_prefix(root: Path, raw: str) -> str:
+    text = raw.strip().strip("/")
+    if not text or text == ".":
+        raise Refusal("--custom-tree must name a path prefix inside the store, not the root")
+    if text.startswith(("/", "\\")) or ".." in Path(text).parts:
+        raise Refusal(f"--custom-tree {raw!r} is not a store-relative path prefix")
+    try:
+        return _rel(root, (root / text).resolve())
+    except ValueError as e:
+        raise Refusal(f"--custom-tree {raw!r} escapes the store root") from e
+
+
+def _index_keys(store: Store) -> list[str]:
+    keys = []
+    for path in store.md_files:
+        if path.name != "index.md" or not _is_index_scope(store.root, path):
+            continue
+        keys.append(_rel(store.root, path))
+    return keys
+
+
+class Scope:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def _build_scope(
+    store: Store,
+    target: str,
+    mode: str,
+    custom_trees: list[str],
+    since_hours: int | None,
+    cost_ceiling: int,
+) -> Scope:
+    if mode not in OPTIMISE_MODES:
+        raise Refusal(f"unknown optimise_mode {mode!r}")
+    if mode == "incremental" and since_hours is None:
+        since_hours = DEFAULT_SINCE_HOURS
+    use_git = mode == "incremental" or (mode == "custom" and since_hours is not None)
+    if use_git and (since_hours is None or since_hours < 1):
+        raise Refusal("--since-hours must be a positive integer")
+    prefixes = [_normalize_prefix(store.root, item) for item in custom_trees]
+    committed: set[str] = set()
+    dirty: set[str] = set()
+    if use_git:
+        committed_paths = _committed_paths(store.root, since_hours or DEFAULT_SINCE_HOURS)
+        if committed_paths is None:
+            raise Refusal(
+                "incremental window reads git commit history (committer clock); "
+                "this store has no usable git history"
+            )
+        committed = committed_paths
+        dirty = _dirty_paths(store.root)
+
+    def selected(key: str) -> bool:
+        if not _in_target(key, target) or not _under_prefixes(key, prefixes):
+            return False
+        if use_git and key not in committed:
+            return False
+        return True
+
+    page_keys = {key for key in store.pages if selected(key)}
+    indexes = set(_index_keys(store))
+    index_keys = {key for key in indexes if selected(key)}
+    eligible = {key for key in page_keys if store.ptype(key) in MISSING_GIST_TYPES}
+    if use_git:
+        fill_parents = {key for key in eligible if key not in dirty}
+    else:
+        fill_parents = set(eligible)
+    if use_git:
+        for parent in list(fill_parents):
+            page_keys.add(parent)
+            folder = store.folder(parent)
+            for key in store.pages:
+                if store.folder(key) != folder:
+                    continue
+                if store.ptype(key) == "schema":
+                    page_keys.add(key)
+                elif store.ptype(key) == "gist" and _gist_parent_key(store, key) == parent:
+                    page_keys.add(key)
+            index_key = "index.md" if folder == "." else f"{folder}/index.md"
+            if index_key in indexes or (store.root / index_key).is_file():
+                index_keys.add(index_key)
+    projected = len(page_keys) + len(index_keys)
+    return Scope(
+        mode=mode,
+        target=target,
+        custom_trees=prefixes,
+        since_hours=since_hours if use_git else None,
+        use_git=use_git,
+        page_keys=page_keys,
+        index_keys=index_keys,
+        fill_parents=fill_parents,
+        committed=sorted(committed),
+        dirty=sorted(dirty),
+        projected=projected,
+        cost_ceiling=cost_ceiling,
+    )
+
+
+def _gist_parent_key(store: Store, gist_key: str) -> str | None:
+    """Canonical parent of a well-formed gist, matching compile's missing_gist rule."""
+    if gist_key not in store.pages or store.ptype(gist_key) != "gist":
+        return None
+    parents = [item for item in _relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
+    if len(parents) != 1:
+        return None
+    canonical = store.canonical(str(parents[0].get("path") or ""))
+    if canonical not in store.pages or store.ptype(canonical) not in GIST_PARENT_TYPES:
+        return None
+    return canonical
+
+
+def _parents_with_gist(store: Store) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for key in store.pages:
+        parent = _gist_parent_key(store, key)
+        if parent:
+            found.setdefault(parent, []).append(key)
+    return found
+
+
+def _scan_findings(text: str) -> list[dict]:
+    findings = []
+    for rule, pattern in SECRET_RULES:
+        if text and pattern.search(text):
+            findings.append({"class": "secret", "severity": "high", "rule": rule})
+    for rule, pattern in PII_RULES:
+        if text and pattern.search(text):
+            findings.append({"class": "pii", "severity": "high", "rule": rule})
+    return findings
+
+
+def _claim_prose(line: str) -> str:
+    text = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", line.strip())
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[\[[^\]]+\]\]", "", text)
+    text = re.sub(r"`[^`]+`", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _claim_lines(body: str) -> list[dict]:
+    """Deterministic claim lines. Link-only, heading, and boilerplate lines are skipped."""
+    content: list[dict] = []
+    other: list[dict] = []
+    section = ""
+    for number, line in enumerate(body.splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            section = re.sub(r"^#+\s*", "", line.strip()).strip().lower()
+            continue
+        raw = line.strip()
+        if not raw or raw.startswith("<!--"):
+            continue
+        if section in BOILERPLATE_SECTIONS:
+            continue
+        prose = _claim_prose(raw)
+        if len(prose) < MIN_CLAIM_CHARS:
+            continue
+        item = {"line": number, "text": raw, "section": section}
+        (content if section == "content" else other).append(item)
+    return content or other
+
+
+def _plain_description(store: Store, key: str) -> str | None:
+    path, meta, _ = store.pages[key]
+    desc = meta.get("description")
+    if not isinstance(desc, str) or not desc.strip() or "\n" in desc:
+        return None
+    parsed = _fm_lines(path.read_text(encoding="utf-8", errors="replace"))
+    if parsed is None or _single_line_value(parsed[0], "description") is None:
+        return None
+    return desc.strip()
+
+
+def _yaml_scalar(value: str) -> str | None:
+    """One-line YAML scalar that the package reader round-trips without escapes."""
+    if not value or value != value.strip() or "\n" in value or "\r" in value:
+        return None
+    if any(ch in value for ch in "\"'\\"):
+        return None
+    if re.match(r"^[A-Za-z0-9]", value) and not re.search(r"[:#\[\]\{\},&*!|>%@`]", value):
+        if value.lower() not in {"true", "false", "null", "yes", "no"}:
+            return value
+    if any(ch in value for ch in ":#[]{},&*!|>%@"):
+        return None
+    return f'"{value}"'
+
+
+def _grounded(text: str, meta: dict, body: str) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    desc = meta.get("description")
+    return text in body or (isinstance(desc, str) and text in desc)
+
+
+def _evidence_pack(store: Store, parent_key: str) -> dict:
+    """Extractive pack for one parent. Secret text is not copied into the pack."""
+    _path, meta, body = store.pages[parent_key]
+    sensitivity = str(meta.get("sensitivity") or "").strip().lower()
+    description = _plain_description(store, parent_key)
+    claims = _claim_lines(body)
+    live = "\n".join(part for part in (description or "", body, str(meta.get("title") or "")) if part)
+    findings = _scan_findings(live)
+    if sensitivity == "restricted":
+        findings.append({"class": "sensitivity", "severity": "high", "rule": "restricted"})
+    blocked = any(item["severity"] in ("critical", "high") for item in findings)
+    extract = None
+    extract_kind = None
+    excerpt_rule = None
+    sufficient = False
+    reason = "insufficient evidence: no plain description and no claim sentences"
+    if description:
+        extract = description
+        extract_kind = "description"
+        excerpt_rule = "parent-description"
+        sufficient = True
+        reason = "plain parent description"
+    elif claims:
+        extract = claims[0]["text"]
+        extract_kind = "excerpt"
+        excerpt_rule = "first-claim-line"
+        sufficient = True
+        reason = "first claim line"
+    prose = _gist_body_prose(extract, [item["text"] for item in claims]) if extract else None
+    if sufficient and (prose is None or _yaml_scalar(extract or "") is None):
+        sufficient = False
+        reason = "evidence cannot be written as minimal prose without invention"
+        extract_out = None
+        prose = None
+    else:
+        extract_out = extract
+    if blocked:
+        return {
+            "parent": parent_key,
+            "parent_type": store.ptype(parent_key),
+            "sensitivity": sensitivity,
+            "sufficient": False,
+            "reason": "security scan blocked promotion",
+            "extract": None,
+            "extract_kind": None,
+            "excerpt_rule": None,
+            "body": None,
+            "auto_eligible": False,
+            "security_blocked": True,
+            "findings": findings,
+            "sources": [{"path": parent_key, "sha256": _sha(store.root / parent_key), "redacted": True}],
+        }
+    spans = [{"line": item["line"], "text": item["text"]} for item in claims] if not blocked else []
+    fields = {"description": description} if description else {}
+    return {
+        "parent": parent_key,
+        "parent_type": store.ptype(parent_key),
+        "sensitivity": sensitivity,
+        "sufficient": sufficient,
+        "reason": reason,
+        "extract": extract_out,
+        "extract_kind": extract_kind if sufficient else None,
+        "excerpt_rule": excerpt_rule if sufficient else None,
+        "body": prose,
+        "auto_eligible": bool(sufficient and extract_kind in ("description", "excerpt")),
+        "security_blocked": False,
+        "findings": findings,
+        "sources": [{
+            "path": parent_key,
+            "sha256": _sha(store.root / parent_key),
+            "fields": fields,
+            "spans": spans,
+        }],
+    }
+
+
+def _gist_body_prose(extract: str | None, claim_texts: list[str]) -> str | None:
+    if not extract:
+        return None
+    parts = [extract]
+    if len(_claim_prose(extract)) < MIN_PROSE_CHARS:
+        for text in claim_texts:
+            if text not in parts:
+                parts.append(text)
+            if len(_claim_prose("\n\n".join(parts))) >= MIN_PROSE_CHARS:
+                break
+    prose = "\n\n".join(parts)
+    if len(_claim_prose(prose)) < MIN_PROSE_CHARS:
+        return None
+    return prose
+
+
+def _fill_class(pack: dict, auto_verbatim: bool) -> str:
+    if pack["security_blocked"]:
+        return "blocked"
+    if not pack["sufficient"]:
+        return "handoff"
+    if pack["auto_eligible"] and auto_verbatim:
+        return "auto"
+    return "confirm"
+
+
+def _gist_title(meta: dict, parent_key: str) -> str:
+    title = str(meta.get("title") or "").strip()
+    if not title:
+        title = Path(parent_key).stem
+    return f"{title} gist"
+
+
+def _new_gist_key(store: Store, parent_key: str) -> str | None:
+    folder = store.folder(parent_key)
+    stem = Path(parent_key).name[:-3] if parent_key.endswith(".md") else Path(parent_key).name
+    for suffix in (".memory", ".gist", ".schema"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    name = f"{stem}.gist.md"
+    rel = name if folder == "." else f"{folder}/{name}"
+    if rel == parent_key or rel in store.pages or (store.root / rel).exists():
+        return None
+    return rel
+
+
+def _created_day(meta: dict) -> str:
+    created = str(meta.get("created") or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", created):
+        return created
+    return date.today().isoformat()
+
+
+def _promotion_blob(task: dict) -> str:
+    evidence = task.get("evidence") or {}
+    parts = [
+        str(evidence.get("extract") or ""),
+        str(evidence.get("body") or ""),
+        str((evidence.get("proposed") or {}).get("description") or ""),
+        str((evidence.get("proposed") or {}).get("body") or ""),
+        str((evidence.get("proposed") or {}).get("title") or ""),
+    ]
+    for source in evidence.get("sources") or []:
+        fields = source.get("fields") or {}
+        if isinstance(fields, dict):
+            parts.extend(str(value) for value in fields.values())
+        for span in source.get("spans") or []:
+            parts.append(str(span.get("text") or ""))
+    for member in evidence.get("members") or []:
+        parts.append(str(member.get("title") or ""))
+        parts.append(str(member.get("description") or ""))
+    return "\n".join(parts)
+
+
+def _gate_security(tasks: list[dict]) -> None:
+    for task in tasks:
+        if task["kind"] not in PROMOTION_KINDS:
+            continue
+        evidence = task.setdefault("evidence", {})
+        findings = list(evidence.get("findings") or [])
+        findings.extend(_scan_findings(_promotion_blob(task)))
+        if str(evidence.get("sensitivity") or "") == "restricted":
+            findings.append({"class": "sensitivity", "severity": "high", "rule": "restricted"})
+        dedup = []
+        seen = set()
+        for item in findings:
+            key = (item.get("class"), item.get("rule"))
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append(item)
+        blocked = any(item.get("severity") in ("critical", "high") for item in dedup)
+        evidence["security"] = {
+            "status": "blocked" if blocked else "pass",
+            "findings": dedup,
+            "promoted": False,
+        }
+        if blocked:
+            if task["class"] in ("auto", "opt-in", "confirm", "handoff"):
+                task["class"] = "blocked"
+            evidence["extract"] = None
+            evidence["body"] = None
+            evidence["proposed"] = None
+            evidence["gist_description"] = None
+            evidence["memory_description"] = None
+            evidence["sufficient"] = False
+            evidence["reason"] = "security scan blocked promotion"
+            for member in evidence.get("members") or []:
+                member["title"] = None
+                member["description"] = None
+            for source in evidence.get("sources") or []:
+                source.pop("fields", None)
+                source.pop("spans", None)
+                source["redacted"] = True
+
+
+def _security_summary(tasks: list[dict]) -> dict:
+    findings = []
+    for task in tasks:
+        for item in ((task.get("evidence") or {}).get("security") or {}).get("findings") or []:
+            findings.append({"task": task["id"], **item})
+    high = [item for item in findings if item.get("severity") in ("critical", "high")]
+    return {
+        "status": "blocked" if high else "pass",
+        "findings": findings,
+        "new_critical_or_high": len(high),
+        "secrets_promoted": False,
+    }
+
+
+def _residuals(store: Store, scope: Scope, tasks: list[dict]) -> dict:
+    covered = set(_parents_with_gist(store))
+    missing = [
+        key for key in sorted(scope.fill_parents)
+        if store.ptype(key) in MISSING_GIST_TYPES and key not in covered
+    ]
+    insufficient = [
+        task for task in tasks
+        if task["kind"] in ("missing-gist-fill", "gist-body-enrich")
+        and task["class"] in ("handoff", "blocked")
+    ]
+    return {
+        "missing_gist": len(missing),
+        "insufficient_evidence": len(insufficient),
+        "handoff": sum(1 for task in tasks if task["class"] == "handoff"),
+        "stale_upper_page_tasks": sum(1 for task in tasks if task["kind"] == "stale-gist-description"),
+        "missing_gist_fails_run": False,
+    }
+
+
+def _receipt(plan: dict, *, phase: str, applied: list[str] | None = None, parent_edits: int = 0) -> dict:
+    source = plan["source"]
+    security = plan["security_summary"]
+    return {
+        "schema": "atlas-optimise-receipt/v1",
+        "work_id": WORK_ID,
+        "phase": phase,
+        "fetch_ok": bool(source.get("fetch_ok")),
+        "tip": source.get("head"),
+        "optimise_mode": source.get("optimise_mode"),
+        "target": source.get("target"),
+        "since_hours": source.get("since_hours"),
+        "custom_tree": list(source.get("custom_tree") or []),
+        "tidy_only": bool(source.get("tidy_only")),
+        "auto_verbatim": bool(source.get("auto_verbatim")),
+        "pilot": bool(source.get("pilot")),
+        "serial_full_only": True,
+        "fleet_ready": False,
+        "package_version": PACKAGE_VERSION,
+        "counts": plan["counts"],
+        "applied": list(applied or []),
+        "residuals": plan["residuals"],
+        "security": security,
+        "cost": plan["cost"],
+        "gates": {
+            "auto_text_is_verbatim_substring": True,
+            "parent_edits": parent_edits,
+            "zero_parent_edits": parent_edits == 0,
+            "writes_limited_to_selected_task_paths": True,
+            "missing_gist_drop_only_via_evidence": True,
+            "spot_check_n": 10,
+            "spot_check": "operator",
+            "security_scan": security["status"],
+            "new_critical_or_high_secret_class": security["new_critical_or_high"],
+            "disagreement_rate": "informational",
+            "residual_missing_gist_fails_run": False,
+            "run_failed": False,
+            "pilot_before_fleet": True,
+            "serial_full_only": True,
+            "day_one_scope": [
+                "all MISSING_GIST_TYPES",
+                "schema minimal prose",
+                "path fill by default",
+                "incremental 24h committer",
+                "security scan",
+                "cost ceiling",
+                "durable receipt",
+            ],
+        },
+    }
+
+
+def _plan_fills(store: Store, scope: Scope, tasks: list[dict], auto_verbatim: bool, tidy_only: bool) -> None:
+    if tidy_only:
+        return
+    covered = _parents_with_gist(store)
+    for parent in sorted(scope.fill_parents):
+        if store.ptype(parent) not in MISSING_GIST_TYPES or covered.get(parent):
+            continue
+        pack = _evidence_pack(store, parent)
+        new_key = _new_gist_key(store, parent)
+        cls = _fill_class(pack, auto_verbatim)
+        if new_key is None and cls in ("auto", "confirm"):
+            cls = "handoff"
+            pack = {**pack, "sufficient": False, "reason": "gist filename is already taken"}
+        _path, meta, _body = store.pages[parent]
+        proposed = None
+        if cls in ("auto", "confirm") and new_key and pack.get("extract") and pack.get("body"):
+            proposed = {
+                "path": new_key,
+                "title": _gist_title(meta, parent),
+                "created": _created_day(meta),
+                "description": pack["extract"],
+                "body": pack["body"],
+                "sensitivity": pack["sensitivity"] if pack["sensitivity"] in ("public", "internal") else "internal",
+            }
+        action = (
+            f"create gist for {parent} from the evidence pack ({pack['reason']})"
+            if cls in ("auto", "confirm")
+            else f"no gist written for {parent}: {pack['reason']}"
+        )
+        tasks.append(_task(
+            "missing-gist-fill", cls, [new_key or parent, parent], action,
+            {
+                "parent": parent,
+                "parent_type": store.ptype(parent),
+                "new_path": new_key,
+                "sensitivity": pack["sensitivity"],
+                "sufficient": pack["sufficient"] and cls in ("auto", "confirm"),
+                "reason": pack["reason"],
+                "extract": pack.get("extract") if cls in ("auto", "confirm") else None,
+                "extract_kind": pack.get("extract_kind") if cls in ("auto", "confirm") else None,
+                "excerpt_rule": pack.get("excerpt_rule") if cls in ("auto", "confirm") else None,
+                "body": pack.get("body") if cls in ("auto", "confirm") else None,
+                "auto_eligible": pack.get("auto_eligible", False),
+                "findings": pack.get("findings") or [],
+                "sources": pack.get("sources") or [],
+                "proposed": proposed,
+            },
+            store, tid=f"missing-gist-fill:{parent}",
+        ))
+
+    for gist in sorted(key for key in scope.page_keys if store.ptype(key) == "gist"):
+        parent = _gist_parent_key(store, gist)
+        if parent is None or parent not in scope.fill_parents:
+            continue
+        if store.ptype(parent) not in MISSING_GIST_TYPES:
+            continue
+        _gpath, gmeta, _gbody = store.pages[gist]
+        desc = gmeta.get("description")
+        _ppath, pmeta, pbody = store.pages[parent]
+        if isinstance(desc, str) and desc and _grounded(desc, pmeta, pbody):
+            continue
+        if any(
+            task["kind"] == "stale-gist-description" and task["class"] == "auto" and gist in task["paths"]
+            for task in tasks
+        ):
+            continue
+        pack = _evidence_pack(store, parent)
+        cls = _fill_class(pack, auto_verbatim)
+        proposed = None
+        if cls in ("auto", "confirm") and pack.get("extract") and pack.get("body"):
+            proposed = {
+                "path": gist,
+                "title": str(gmeta.get("title") or _gist_title(pmeta, parent)),
+                "description": pack["extract"],
+                "body": pack["body"],
+            }
+        tasks.append(_task(
+            "gist-body-enrich", cls, [gist, parent],
+            (
+                f"rewrite {gist} description from the evidence pack ({pack['reason']}); parent text is not edited"
+                if cls in ("auto", "confirm")
+                else f"no gist rewrite for {gist}: {pack['reason']}"
+            ),
+            {
+                "parent": parent,
+                "parent_type": store.ptype(parent),
+                "new_path": gist,
+                "sensitivity": pack["sensitivity"],
+                "sufficient": pack["sufficient"] and cls in ("auto", "confirm"),
+                "reason": pack["reason"],
+                "extract": pack.get("extract") if cls in ("auto", "confirm") else None,
+                "extract_kind": pack.get("extract_kind") if cls in ("auto", "confirm") else None,
+                "excerpt_rule": pack.get("excerpt_rule") if cls in ("auto", "confirm") else None,
+                "body": pack.get("body") if cls in ("auto", "confirm") else None,
+                "auto_eligible": pack.get("auto_eligible", False),
+                "findings": pack.get("findings") or [],
+                "sources": pack.get("sources") or [],
+                "proposed": proposed,
+            },
+            store, tid=f"gist-body-enrich:{gist}",
+        ))
+
+    folders: set[str] = set()
+    for key in scope.page_keys:
+        if store.ptype(key) == "gist" or key in scope.fill_parents:
+            folders.add(store.folder(key))
+    for task in list(tasks):
+        if task["kind"] == "missing-gist-fill" and task["class"] in ("auto", "confirm"):
+            new_path = (task.get("evidence") or {}).get("new_path")
+            if new_path:
+                folders.add(store.folder(new_path))
+    for folder in sorted(folders):
+        if any(store.folder(key) == folder and store.ptype(key) == "schema" for key in store.pages):
+            continue
+        members = _schema_members(store, folder, tasks)
+        _plan_schema_fill(store, folder, members, tasks)
+
+
+def _schema_members(store: Store, folder: str, tasks: list[dict]) -> list[dict]:
+    members = []
+    for key in sorted(store.pages):
+        if store.folder(key) != folder or store.ptype(key) != "gist":
+            continue
+        meta = store.pages[key][1]
+        title = str(meta.get("title") or "").strip()
+        desc = meta.get("description")
+        description = desc.strip() if isinstance(desc, str) else ""
+        if not title and not description:
+            continue
+        if str(meta.get("sensitivity") or "").strip().lower() == "restricted":
+            continue
+        if _scan_findings(f"{title}\n{description}"):
+            continue
+        members.append({
+            "path": key,
+            "title": title,
+            "description": description,
+            "planned": False,
+        })
+    known = {member["path"] for member in members}
+    for task in tasks:
+        if task["kind"] != "missing-gist-fill" or task["class"] not in ("auto", "confirm"):
+            continue
+        proposed = (task.get("evidence") or {}).get("proposed") or {}
+        path = proposed.get("path")
+        if not path or store.folder(path) != folder or path in known:
+            continue
+        title = str(proposed.get("title") or "").strip()
+        description = str(proposed.get("description") or "").strip()
+        if not title and not description:
+            continue
+        members.append({
+            "path": path,
+            "title": title,
+            "description": description,
+            "planned": True,
+        })
+    return members
+
+
+def _minimal_schema_prose(members: list[dict]) -> str | None:
+    bits = []
+    for member in members:
+        title = member.get("title") or ""
+        description = member.get("description") or ""
+        if title and description:
+            bits.append(f"{title}. {description}")
+        elif description:
+            bits.append(description)
+        elif title:
+            bits.append(title)
+    text = " ".join(bits).strip()
+    if len(_claim_prose(text)) < MIN_PROSE_CHARS:
+        return None
+    return text
+
+
+def _new_schema_key(store: Store, folder: str) -> str | None:
+    candidates = ["schema.schema.md"]
+    stem = "folder" if folder == "." else folder.split("/")[-1]
+    candidates.append(f"{stem}.schema.md")
+    for name in candidates:
+        rel = name if folder == "." else f"{folder}/{name}"
+        if rel not in store.pages and not (store.root / rel).exists():
+            return rel
+    return None
+
+
+def _plan_schema_fill(store: Store, folder: str, members: list[dict], tasks: list[dict]) -> None:
+    schema_key = _new_schema_key(store, folder)
+    prose = _minimal_schema_prose(members)
+    index_key = "index.md" if folder == "." else f"{folder}/index.md"
+    label = next((member["title"] for member in members if member.get("title")), "")
+    description = next((member["description"] for member in members if member.get("description")), "")
+    findings = _scan_findings(f"{prose or ''}\n{description}")
+    if schema_key and prose and members and not findings:
+        title = f"{label} schema" if label else "Schema"
+        if _yaml_scalar(title) is None or (description and _yaml_scalar(description) is None):
+            cls = "handoff"
+            reason = "schema title or description cannot be written without invention"
+            proposed = None
+        else:
+            cls = "confirm"
+            reason = "minimal prose cited from gist title or description"
+            proposed = {
+                "path": schema_key,
+                "title": title,
+                "created": date.today().isoformat(),
+                "description": description or None,
+                "body": prose,
+                "index": index_key,
+            }
+    else:
+        cls = "blocked" if findings else "handoff"
+        if findings:
+            reason = "security scan blocked schema promotion"
+        elif not members:
+            reason = "no gist title or description to cite"
+        elif prose is None:
+            reason = "gist titles and descriptions are too thin for minimal schema prose"
+        else:
+            reason = "schema filename is already taken"
+        proposed = None
+        schema_key = schema_key or (f"{folder}/schema.schema.md" if folder != "." else "schema.schema.md")
+    paths = [schema_key, index_key, *[member["path"] for member in members]]
+    tasks.append(_task(
+        "schema-fill", cls, paths,
+        (
+            f"create {schema_key} with minimal prose and relates_to for {len(members)} gist(s)"
+            if cls == "confirm"
+            else f"no schema written in {folder}: {reason}"
+        ),
+        {
+            "folder": folder,
+            "members": members,
+            "body": prose if cls == "confirm" else None,
+            "reason": reason,
+            "sufficient": cls == "confirm",
+            "findings": findings,
+            "sensitivity": "",
+            "proposed": proposed,
+            "sources": [
+                {"path": member["path"], "sha256": _sha(store.root / member["path"]), "redacted": bool(findings)}
+                for member in members
+                if not member.get("planned")
+            ],
+        },
+        store, tid=f"schema-fill:{folder}",
+    ))
+
+
+def _live_promotion_text(store: Store, task: dict) -> str:
+    evidence = task.get("evidence") or {}
+    kind = task["kind"]
+    if kind == "stale-gist-description" and len(task["paths"]) > 1 and task["paths"][1] in store.pages:
+        return str(store.pages[task["paths"][1]][1].get("description") or "")
+    parent = evidence.get("parent")
+    if parent and parent in store.pages:
+        meta, body = store.pages[parent][1], store.pages[parent][2]
+        return "\n".join([
+            str(meta.get("title") or ""),
+            str(meta.get("description") or ""),
+            body,
+        ])
+    parts = []
+    for member in evidence.get("members") or []:
+        path = member.get("path")
+        if path in store.pages:
+            meta = store.pages[path][1]
+            parts.append(str(meta.get("title") or ""))
+            parts.append(str(meta.get("description") or ""))
+        else:
+            parts.append(str(member.get("title") or ""))
+            parts.append(str(member.get("description") or ""))
+    return "\n".join(parts)
+
+
+def _live_restricted(store: Store, task: dict) -> bool:
+    evidence = task.get("evidence") or {}
+    parent = evidence.get("parent")
+    if parent and parent in store.pages:
+        if str(store.pages[parent][1].get("sensitivity") or "").strip().lower() == "restricted":
+            return True
+    if len(task["paths"]) > 1 and task["paths"][1] in store.pages:
+        if str(store.pages[task["paths"][1]][1].get("sensitivity") or "").strip().lower() == "restricted":
+            return True
+    for member in evidence.get("members") or []:
+        path = member.get("path")
+        if path in store.pages and str(store.pages[path][1].get("sensitivity") or "").strip().lower() == "restricted":
+            return True
+    return False
+
+
+def plan_store(
+    root: Path,
+    target: str,
+    subject_folders: list[tuple[str, str]],
+    *,
+    mode: str = "path",
+    custom_trees: list[str] | None = None,
+    since_hours: int | None = None,
+    tidy_only: bool = False,
+    auto_verbatim: bool = False,
+    cost_ceiling: int = DEFAULT_COST_CEILING,
+    pilot: bool = False,
+    enforce_ceiling: bool = True,
+) -> dict:
     store = Store(root)
     if store.contract_error:
         raise Refusal(f"contract: {store.contract_error}")
+    if cost_ceiling < 0:
+        raise Refusal("--cost-ceiling must be zero or a positive integer")
+    scope = _build_scope(store, target, mode, list(custom_trees or []), since_hours, cost_ceiling)
+    if enforce_ceiling and scope.projected > cost_ceiling:
+        raise Refusal(
+            f"cost ceiling exceeded: projected {scope.projected} pages > ceiling {cost_ceiling}"
+        )
     tasks: list[dict] = []
 
     frames = sorted(k for k in store.pages if store.ptype(k) == "frame")
@@ -382,7 +1301,7 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
         }
         tasks.append(precondition)
 
-    keys = sorted(k for k in store.pages if _in_target(k, target))
+    keys = sorted(scope.page_keys)
     by_folder: dict[str, list[str]] = {}
     for k in store.pages:
         by_folder.setdefault(store.folder(k), []).append(k)
@@ -390,7 +1309,7 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
     # --- index files in target: dead cues, layer-skip cues, schema cues
     index_files = [
         p for p in store.md_files
-        if p.name == "index.md" and _in_target(_rel(root, p), target) and _is_index_scope(root, p)
+        if p.name == "index.md" and _rel(root, p) in scope.index_keys and _is_index_scope(root, p)
     ]
     for idx in index_files:
         ikey = _rel(root, idx)
@@ -583,6 +1502,9 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
             {"work_id": wid, "new_path": new_key, "referrers": refs, "blocked_by": reasons},
             store, extra_hash=refs))
 
+    _plan_fills(store, scope, tasks, auto_verbatim, tidy_only)
+    _gate_security(tasks)
+
     if precondition:
         for t in tasks:
             if t is not precondition and t["class"] in ("auto", "opt-in", "confirm"):
@@ -601,13 +1523,31 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
     counts: dict[str, int] = {}
     for t in tasks:
         counts[t["class"]] = counts.get(t["class"], 0) + 1
-    return {
+    security_summary = _security_summary(tasks)
+    residuals = _residuals(store, scope, tasks)
+    cost = {
+        "unit": "pages",
+        "projected": scope.projected,
+        "ceiling": cost_ceiling,
+        "within_ceiling": scope.projected <= cost_ceiling,
+        "note": "pages examined in the resolved scope (concept pages and index files)",
+    }
+    plan = {
         "schema": "atlas-optimise-plan/v1",
         "source": {
             "root": str(root),
             "target": target,
             "head": head,
             "dirty": dirty,
+            "fetch_ok": head is not None,
+            "optimise_mode": mode,
+            "since_hours": scope.since_hours,
+            "custom_tree": list(scope.custom_trees),
+            "tidy_only": tidy_only,
+            "auto_verbatim": auto_verbatim,
+            "cost_ceiling": cost_ceiling,
+            "pilot": pilot,
+            "serial_full_only": True,
             "contract_file": store.contract_file,
             "contract_sha256": _sha(root / store.contract_file) if store.contract_file else None,
             "atlas_release": store.schema.get("atlas_release"),
@@ -617,7 +1557,12 @@ def plan_store(root: Path, target: str, subject_folders: list[tuple[str, str]]) 
         "folders": grouped,
         "counts": {"tasks": len(tasks), **counts},
         "unreadable": store.unreadable,
+        "security_summary": security_summary,
+        "residuals": residuals,
+        "cost": cost,
     }
+    plan["receipt"] = _receipt(plan, phase="plan")
+    return plan
 
 
 def _is_index_scope(root: Path, path: Path) -> bool:
@@ -645,7 +1590,8 @@ def render_folder(folder: str, tasks: list[dict], source: dict, mentions: list[d
         f"# atlas-optimise tasks: {name}",
         "",
         f"Source: `{source['root']}` at `{source['head']}` (dirty: {source['dirty']}); "
-        f"target `{source['target']}`; contract `{source['contract_file']}` "
+        f"target `{source['target']}`; mode `{source.get('optimise_mode', 'path')}`; "
+        f"contract `{source['contract_file']}` "
         f"`{source['atlas_release']}`; helper {source['package_version']}.",
         "",
         "Classes: auto = apply does it; opt-in = needs --include-opt-in; confirm = needs "
@@ -686,6 +1632,12 @@ def write_out(plan: dict, out_dir: Path) -> list[str]:
         ]
         path.write_text(render_folder(folder, tasks, plan["source"], mentions), encoding="utf-8")
         written.append(str(path))
+    if plan.get("receipt") is not None:
+        receipt_path = out_dir / "receipt.json"
+        receipt_path.write_text(
+            json.dumps(plan["receipt"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        written.append(str(receipt_path))
     return written
 
 
@@ -837,6 +1789,278 @@ def _apply_move(store: Store, t: dict) -> None:
     old_path.unlink()
 
 
+def _render_gist(proposed: dict, parent_key: str) -> str:
+    description = _yaml_scalar(proposed["description"])
+    title = _yaml_scalar(proposed["title"])
+    if description is None or title is None:
+        raise Refusal("gist text cannot be written as a one-line scalar")
+    sensitivity = proposed.get("sensitivity") or "internal"
+    if sensitivity not in ("public", "internal"):
+        sensitivity = "internal"
+    body = str(proposed["body"]).rstrip() + "\n"
+    return (
+        "---\n"
+        "type: gist\n"
+        f"title: {title}\n"
+        f"created: {proposed['created']}\n"
+        f"description: {description}\n"
+        "origin: derived\n"
+        f"sensitivity: {sensitivity}\n"
+        "relates_to:\n"
+        f"  - path: {parent_key}\n"
+        "    kind: derived_from\n"
+        "---\n"
+        "\n"
+        "## Content\n"
+        "\n"
+        f"{body}"
+    )
+
+
+def _render_schema(proposed: dict, members: list[dict]) -> str:
+    title = _yaml_scalar(proposed["title"])
+    if title is None:
+        raise Refusal("schema title cannot be written as a one-line scalar")
+    description = proposed.get("description") or ""
+    desc_line = ""
+    if description:
+        scalar = _yaml_scalar(description)
+        if scalar is None:
+            raise Refusal("schema description cannot be written as a one-line scalar")
+        desc_line = f"description: {scalar}\n"
+    rels = "".join(
+        f"  - path: {member['path']}\n    kind: related\n" for member in members
+    )
+    body = str(proposed["body"]).rstrip() + "\n"
+    return (
+        "---\n"
+        "type: schema\n"
+        f"title: {title}\n"
+        f"created: {proposed['created']}\n"
+        f"{desc_line}"
+        "origin: derived\n"
+        "sensitivity: internal\n"
+        "relates_to:\n"
+        f"{rels}"
+        "---\n"
+        "\n"
+        "## Content\n"
+        "\n"
+        f"{body}"
+    )
+
+
+def _assert_extract_matches(store: Store, task: dict) -> dict:
+    parent = task["evidence"]["parent"]
+    if parent not in store.pages:
+        raise Refusal(f"{task['id']}: evidence parent missing")
+    pack = _evidence_pack(store, parent)
+    if pack["security_blocked"] or not pack["sufficient"]:
+        raise Refusal(f"{task['id']}: evidence insufficient or blocked at apply")
+    if task["evidence"].get("extract") != pack["extract"]:
+        raise Refusal(
+            f"{task['id']}: proposed gist text is not the evidence-pack extract"
+        )
+    meta, body = store.pages[parent][1], store.pages[parent][2]
+    if not _grounded(pack["extract"], meta, body):
+        raise Refusal(f"{task['id']}: extract is not a verbatim substring of the parent")
+    return pack
+
+
+def _apply_missing_gist(store: Store, task: dict) -> None:
+    pack = _assert_extract_matches(store, task)
+    proposed = task["evidence"].get("proposed") or {}
+    new_key = task["evidence"].get("new_path")
+    parent = task["evidence"]["parent"]
+    if not new_key or proposed.get("description") != pack["extract"]:
+        raise Refusal(f"{task['id']}: proposed gist text is not the evidence-pack extract")
+    dest = store.root / new_key
+    if dest.exists():
+        raise Refusal(f"{new_key} appeared after plan")
+    _path, meta, body = store.pages[parent]
+    prose = _gist_body_prose(pack["extract"], [item["text"] for item in _claim_lines(body)])
+    if prose is None or prose != proposed.get("body"):
+        raise Refusal(f"{task['id']}: proposed gist body is not the evidence pack")
+    text = _render_gist({**proposed, "description": pack["extract"], "body": prose}, parent)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _write(dest, text)
+    try:
+        gmeta, gbody = read_page(dest, store.version)
+    except FrontmatterError as e:
+        dest.unlink(missing_ok=True)
+        raise Refusal(f"{new_key}: gist did not round-trip") from e
+    if gmeta.get("description") != pack["extract"] or not _grounded(pack["extract"], meta, body):
+        dest.unlink(missing_ok=True)
+        raise Refusal(f"{new_key}: copied description did not round-trip; removed")
+    if pack["extract"] not in gbody and pack["extract"] not in str(gmeta.get("description") or ""):
+        dest.unlink(missing_ok=True)
+        raise Refusal(f"{new_key}: gist body dropped the evidence extract; removed")
+
+
+def _set_description_line(lines: list[str], value: str) -> None:
+    scalar = _yaml_scalar(value)
+    if scalar is None:
+        raise Refusal("description cannot be written as a one-line scalar")
+    rendered = f"description: {scalar}\n"
+    found = _single_line_value(lines, "description")
+    if found:
+        lines[found[0]] = rendered
+        return
+    for index, line in enumerate(lines):
+        if re.match(r"^relates_to:\s*$", line):
+            lines.insert(index, rendered)
+            return
+    if lines and lines[-1].strip() == "---":
+        lines.insert(len(lines) - 1, rendered)
+    else:
+        lines.append(rendered)
+
+
+def _apply_gist_enrich(store: Store, task: dict) -> None:
+    pack = _assert_extract_matches(store, task)
+    proposed = task["evidence"].get("proposed") or {}
+    gist_key = task["paths"][0]
+    parent = task["evidence"]["parent"]
+    if proposed.get("description") != pack["extract"]:
+        raise Refusal(f"{task['id']}: proposed gist text is not the evidence-pack extract")
+    gpath = store.root / gist_key
+    original = gpath.read_text(encoding="utf-8")
+    parsed = _fm_lines(original)
+    if parsed is None:
+        raise Refusal(f"{gist_key}: missing frontmatter")
+    lines, _rest = parsed
+    _pmeta, pbody = store.pages[parent][1], store.pages[parent][2]
+    prose = _gist_body_prose(pack["extract"], [item["text"] for item in _claim_lines(pbody)])
+    if prose is None or prose != proposed.get("body"):
+        raise Refusal(f"{task['id']}: proposed gist body is not the evidence pack")
+    _set_description_line(lines, pack["extract"])
+    _write(gpath, "".join(lines) + "---\n\n## Content\n\n" + prose.rstrip() + "\n")
+    try:
+        gmeta, gbody = read_page(gpath, store.version)
+    except FrontmatterError as e:
+        _write(gpath, original)
+        raise Refusal(f"{gist_key}: enrich did not round-trip; reverted") from e
+    if gmeta.get("description") != pack["extract"] or pack["extract"] not in gbody:
+        _write(gpath, original)
+        raise Refusal(f"{gist_key}: enrich did not round-trip; reverted")
+
+
+def _apply_schema_fill(store: Store, task: dict) -> None:
+    proposed = task["evidence"].get("proposed") or {}
+    members = list(task["evidence"].get("members") or [])
+    schema_key = proposed.get("path")
+    if not schema_key or not members:
+        raise Refusal(f"{task['id']}: schema fill has no evidence")
+    prose = _minimal_schema_prose(members)
+    if prose is None or prose != proposed.get("body"):
+        raise Refusal(f"{task['id']}: schema prose is not the minimal evidence blurb")
+    for member in members:
+        path = store.root / member["path"]
+        if not path.is_file():
+            raise Refusal(f"{task['id']}: schema member {member['path']} missing at apply")
+        try:
+            meta, _body = read_page(path, store.version)
+        except FrontmatterError as e:
+            raise Refusal(f"{task['id']}: unreadable schema member") from e
+        title = str(meta.get("title") or "").strip()
+        desc = meta.get("description")
+        description = desc.strip() if isinstance(desc, str) else ""
+        if title != member.get("title") or description != (member.get("description") or ""):
+            raise Refusal(f"{task['id']}: schema evidence does not match {member['path']}")
+        blob = f"{title}\n{description}"
+        if _scan_findings(blob) or str(meta.get("sensitivity") or "").strip().lower() == "restricted":
+            raise Refusal(f"{task['id']}: security scan blocked schema promotion")
+    if _scan_findings(prose):
+        raise Refusal(f"{task['id']}: security scan blocked schema promotion")
+    dest = store.root / schema_key
+    if dest.exists():
+        raise Refusal(f"{schema_key} appeared after plan")
+    text = _render_schema(proposed, members)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _write(dest, text)
+    try:
+        meta, body = read_page(dest, store.version)
+    except FrontmatterError as e:
+        dest.unlink(missing_ok=True)
+        raise Refusal(f"{schema_key}: schema did not round-trip") from e
+    related = {
+        store.canonical(str(item.get("path") or ""))
+        for item in _relates(meta)
+        if _kind(item) == "related"
+    }
+    if any(member["path"] not in related for member in members) or prose not in body:
+        dest.unlink(missing_ok=True)
+        raise Refusal(f"{schema_key}: schema prose did not round-trip; removed")
+    _cue_schema(store.root, schema_key, str(meta.get("title") or proposed["title"]))
+
+
+def _cue_schema(root: Path, schema_key: str, title: str) -> None:
+    spath = root / schema_key
+    idx = spath.parent / "index.md"
+    label = title.replace("[", "(").replace("]", ")")
+    link = f"- [{label}](./{spath.name})\n"
+    if idx.exists():
+        text = idx.read_text(encoding="utf-8")
+        if f"](./{spath.name})" in text or f"]({spath.name})" in text:
+            return
+        if text and not text.endswith("\n"):
+            text += "\n"
+        _write(idx, text + link)
+        return
+    _write(idx, f"# {spath.parent.name}\n\n{link}")
+
+
+def _parent_snapshot(root: Path, store: Store, selected: list[dict]) -> dict[str, bytes]:
+    parents: set[str] = set()
+    for task in selected:
+        evidence = task.get("evidence") or {}
+        parent = evidence.get("parent")
+        if isinstance(parent, str):
+            parents.add(parent)
+        if task["kind"] == "stale-gist-description" and len(task["paths"]) > 1:
+            parents.add(task["paths"][1])
+    snapshot = {}
+    for key in parents:
+        path = root / key
+        if path.is_file():
+            snapshot[key] = path.read_bytes()
+    return snapshot
+
+
+def _preflight_apply(root: Path, store: Store, selected: list[dict]) -> None:
+    for task in selected:
+        if task["kind"] not in PROMOTION_KINDS:
+            continue
+        if _scan_findings(_live_promotion_text(store, task)) or _live_restricted(store, task):
+            raise Refusal(f"{task['id']}: security scan blocked promotion")
+        if task["kind"] != "schema-fill":
+            continue
+        for member in (task.get("evidence") or {}).get("members") or []:
+            path = member.get("path")
+            exists = bool(path) and (root / path).exists()
+            created = any(
+                other["kind"] == "missing-gist-fill" and (other.get("evidence") or {}).get("new_path") == path
+                for other in selected
+            )
+            if not exists and not created:
+                raise Refusal(
+                    f"{task['id']}: schema member {path} is not on disk and is not created by this apply"
+                )
+
+
+def _invocation(plan: dict) -> dict:
+    source = plan.get("source") or {}
+    return {
+        "mode": source.get("optimise_mode") or "path",
+        "custom_trees": list(source.get("custom_tree") or []),
+        "since_hours": source.get("since_hours"),
+        "tidy_only": bool(source.get("tidy_only")),
+        "auto_verbatim": bool(source.get("auto_verbatim")),
+        "cost_ceiling": source.get("cost_ceiling") if source.get("cost_ceiling") is not None else DEFAULT_COST_CEILING,
+        "pilot": bool(source.get("pilot")),
+    }
+
+
 def apply_plan(root: Path, target: str, plan: dict, include_opt_in: bool, confirm: list[str]) -> dict:
     src = plan.get("source") or {}
     if Path(src.get("root", "")).resolve() != root:
@@ -872,9 +2096,17 @@ def apply_plan(root: Path, target: str, plan: dict, include_opt_in: bool, confir
 
     applied = []
     store = Store(root)
+    _preflight_apply(root, store, selected)
+    parents_before = _parent_snapshot(root, store, selected)
     for t in selected:
         kind = t["kind"]
-        if kind in ("dead-index-cue", "layer-skip-cue"):
+        if kind == "missing-gist-fill":
+            _apply_missing_gist(store, t)
+        elif kind == "gist-body-enrich":
+            _apply_gist_enrich(store, t)
+        elif kind == "schema-fill":
+            _apply_schema_fill(store, t)
+        elif kind in ("dead-index-cue", "layer-skip-cue"):
             _remove_line(root / t["paths"][0], t["evidence"]["line"])
         elif kind == "dead-schema-member":
             _apply_relates_remove(store, t["paths"][0], t["evidence"]["member"])
@@ -891,11 +2123,23 @@ def apply_plan(root: Path, target: str, plan: dict, include_opt_in: bool, confir
                 raise Refusal(f"{t['id']}: gate failed at apply: {'; '.join(reasons)}")
             _apply_move(store, t)
             store = Store(root)
+        else:
+            raise Refusal(f"{t['id']}: unknown task kind {kind}")
         applied.append(t["id"])
 
+    parent_edits = 0
+    for key, blob in parents_before.items():
+        if (root / key).read_bytes() != blob:
+            parent_edits += 1
+    if parent_edits:
+        raise Refusal("optimise edited parent claim text")
     if {n: _sha(root / n) for n in CONTRACT_FILENAMES} != contract_before:
         raise Refusal("contract file changed during apply; this helper never writes contracts")
-    residual = plan_store(root, target, [])
+    options = _invocation(plan)
+    residual = plan_store(
+        root, target, [], enforce_ceiling=False, **options,
+    )
+    receipt = _receipt(residual, phase="apply", applied=applied, parent_edits=parent_edits)
     return {
         "schema": "atlas-optimise-apply/v1",
         "root": str(root),
@@ -903,6 +2147,7 @@ def apply_plan(root: Path, target: str, plan: dict, include_opt_in: bool, confir
         "applied": applied,
         "residual_counts": residual["counts"],
         "residual": {f: ts for f, ts in residual["folders"].items() if ts},
+        "receipt": receipt,
     }
 
 
@@ -935,9 +2180,26 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--root", required=True, help="Atlas store root")
         p.add_argument("--target", required=True, help="folder inside the store, or . for the store root")
         p.add_argument("--json", action="store_true", help="print the full JSON result")
-    p_plan.add_argument("--out-dir", help="write plan.json and tasks/<folder>.md here (must be outside the store)")
+    p_plan.add_argument("--out-dir", help="write plan.json, receipt.json, and tasks/<folder>.md here (must be outside the store)")
     p_plan.add_argument("--subject-folder", action="append", default=[],
                         help="operator-named subject folder as <folder>:<stem>; plans confirm-class moves")
+    p_plan.add_argument("--optimise-mode", default="path", choices=OPTIMISE_MODES,
+                        help="path (default, fill on), full (target must be .; serial only), "
+                             "custom (--custom-tree prefixes), or incremental (git commit window)")
+    p_plan.add_argument("--since-hours", type=int, default=None,
+                        help="incremental committer-clock window in hours (default 24). "
+                             "Also filters custom mode. Refused on path and full.")
+    p_plan.add_argument("--custom-tree", action="append", default=[],
+                        help="custom mode path prefix inside the store; repeatable. "
+                             "Refused on path and full. With incremental, intersects the git window.")
+    p_plan.add_argument("--tidy-only", action="store_true",
+                        help="tidy repairs only; do not plan fill tasks")
+    p_plan.add_argument("--auto-verbatim", action="store_true",
+                        help="opt in: verbatim evidence-pack fill may be auto. Confirm stays the default.")
+    p_plan.add_argument("--cost-ceiling", type=int, default=DEFAULT_COST_CEILING,
+                        help=f"max pages examined in the resolved scope (default {DEFAULT_COST_CEILING})")
+    p_plan.add_argument("--pilot", action="store_true",
+                        help="record this run as a pilot. The receipt still does not authorize fleet apply.")
     p_apply.add_argument("--plan", required=True, help="plan.json produced by plan")
     p_apply.add_argument("--include-opt-in", action="store_true", help="also apply opt-in tasks (suffix renames)")
     p_apply.add_argument("--confirm", action="append", default=[], help="apply this confirm-class task id")
@@ -960,20 +2222,59 @@ def main(argv: list[str] | None = None) -> int:
                 out = Path(args.out_dir).expanduser().resolve()
                 if out == root or root in out.parents:
                     raise Refusal("--out-dir must be outside the store root (plan never writes in the store)")
-            plan = plan_store(root, target, subject_folders)
+            mode = args.optimise_mode
+            if mode == "full" and target != ".":
+                raise Refusal(
+                    "optimise_mode=full requires --target . so whole-store cost is never accidental; "
+                    "Full is serial only"
+                )
+            if mode == "custom" and not args.custom_tree:
+                raise Refusal("optimise_mode=custom requires at least one --custom-tree path prefix")
+            if mode in ("path", "full") and args.custom_tree:
+                raise Refusal(f"--custom-tree conflicts with optimise_mode={mode}")
+            if mode in ("path", "full") and args.since_hours is not None:
+                raise Refusal(f"--since-hours conflicts with optimise_mode={mode}")
+            if args.since_hours is not None and args.since_hours < 1:
+                raise Refusal("--since-hours must be a positive integer")
+            if mode == "full":
+                print(
+                    "atlas-optimise: Full is serial only; do not start another Full "
+                    "on any store until this one finishes.",
+                    file=sys.stderr,
+                )
+            since_hours = DEFAULT_SINCE_HOURS if mode == "incremental" and args.since_hours is None else args.since_hours
+            plan = plan_store(
+                root, target, subject_folders,
+                mode=mode,
+                custom_trees=args.custom_tree,
+                since_hours=since_hours,
+                tidy_only=args.tidy_only,
+                auto_verbatim=args.auto_verbatim,
+                cost_ceiling=args.cost_ceiling,
+                pilot=args.pilot,
+            )
             if args.out_dir:
                 written = write_out(plan, out)
             result = {**plan, "written": written} if args.json else {
                 "target": target, "counts": plan["counts"],
+                "optimise_mode": mode,
                 "precondition": bool(plan["precondition"]), "written": written,
                 "per_folder": {f: len(ts) for f, ts in plan["folders"].items()},
+                "receipt": plan["receipt"],
             }
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 1 if plan["counts"]["tasks"] else 0
         plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
         result = apply_plan(root, target, plan, args.include_opt_in, args.confirm)
+        plan_path = Path(args.plan).expanduser().resolve()
+        if plan_path.parent != root and root not in plan_path.parents:
+            receipt_path = plan_path.parent / "receipt-apply.json"
+            receipt_path.write_text(
+                json.dumps(result["receipt"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
         print(json.dumps(result if args.json else {
-            "applied": result["applied"], "residual_counts": result["residual_counts"]}, indent=2, ensure_ascii=False))
+            "applied": result["applied"], "residual_counts": result["residual_counts"],
+            "receipt": result["receipt"]}, indent=2, ensure_ascii=False))
         return 1 if result["residual_counts"]["tasks"] else 0
     except Refusal as e:
         print(json.dumps({"ok": False, "refused": str(e)}), file=sys.stdout)

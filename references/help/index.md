@@ -1,14 +1,14 @@
 ---
 name: atlas/help/baseline
 description: Versioned bundled Atlas module catalog. Help lists from this file plus the SKILL.md path registry; no Atlas mount required.
-package_version: 0.13.0-beta.10
+package_version: 0.13.0-beta.11
 ---
 
 # Bundled help baseline
 
 This directory is the **versioned packaged baseline** for Atlas modules
 `help` and `getting-started`. It ships with this skill at
-`package_version` **0.13.0-beta.10** (see `VERSION`). Help works with **no Atlas
+`package_version` **0.13.0-beta.11** (see `VERSION`). Help works with **no Atlas
 mounted**. If this baseline answers the question, stop; do not query a store.
 
 The installed registry in `SKILL.md` is authoritative for names. This catalog
@@ -29,7 +29,7 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **atlas-memorise** | Choose layers before a write, then follow remember |
 | **atlas-recall** | Navigate by loading path recall; do not restate the walk |
 | **atlas-forget** | Keep, vary, or abandon a memory without a new traffic value |
-| **atlas-optimise** | Operator-chosen optimise of a named target: four-layer repair, subject clustering, per-folder task list, dry-run first; not on install or compile |
+| **atlas-optimise** | Operator-chosen fill and tidy of a named target: evidence-gated gist and schema fill, four-layer tidy repair, subject clustering, per-folder task list, dry-run first; not on install or compile |
 | **work** | Open, update, or close `work_id` hubs |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory |
 | **schema** | Init, overlay install/new/uninstall; compile merge |
