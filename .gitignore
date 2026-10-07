@@ -1,0 +1,28 @@
+# The docs branch holds sources only; never commit build output or dependencies.
+
+# Site build output and dependencies
+site/dist/
+site/.astro/
+site/node_modules/
+node_modules/
+dist/
+.astro/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Fetched Atlas release sources
+atlas-src/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
