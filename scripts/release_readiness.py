@@ -185,9 +185,9 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     if args.tag and args.tag != expected_tag:
         errors.append(f"release tag {args.tag} != {expected_tag}")
     if args.commit:
-        errors.extend(validate_commit(args.commit))
+        errors.extend(validate_commit(args.commit, root))
 
-    print(f"candidate_revision: {args.commit or current_commit()}")
+    print(f"candidate_revision: {args.commit or current_commit(root)}")
     print(f"package_version: {version}")
     print(f"expected_tag: {expected_tag}")
     print(f"version_consistency: {'blocked' if errors else 'pass'}")

@@ -7,6 +7,7 @@ import contextlib
 import io
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -162,6 +163,14 @@ class ReleaseReadinessTests(unittest.TestCase):
             target = temp / surface.path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / surface.path, target)
+        # main(argv, root) reads HEAD from root, so the fixture is its own repo.
+        git = ["git", "-c", "user.name=Atlas Tests", "-c", "user.email=atlas@example.invalid"]
+        for command in (
+            ["init", "--quiet"],
+            ["add", "--all"],
+            ["-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify", "-m", "fixture"],
+        ):
+            subprocess.run(git + command, cwd=temp, check=True, capture_output=True)
         return temp
 
     def _set_ci_refs(self, root: Path, version: str) -> None:
@@ -211,6 +220,28 @@ class ReleaseReadinessTests(unittest.TestCase):
             "(CI ref must equal the package version for a tagged release)",
             output,
         )
+
+    def test_main_uses_given_root_for_commit_lookups(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-root-commit-")
+        other_head = current_commit(temp)
+        repository_head = current_commit()
+        self.assertNotEqual(repository_head, other_head)
+
+        code, output = self._run_main(["--commit", other_head], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"candidate_revision: {other_head}", output)
+
+        code, output = self._run_main(["--commit", repository_head], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn(
+            f"error: candidate commit {repository_head} != checked-out revision {other_head}",
+            output,
+        )
+
+        code, output = self._run_main([], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"candidate_revision: {other_head}", output)
+        self.assertNotIn(repository_head, output)
 
     def test_no_flag_mode_allows_consistent_ci_lag(self) -> None:
         temp = self._copy_surfaces("atlas-release-readiness-lag-")

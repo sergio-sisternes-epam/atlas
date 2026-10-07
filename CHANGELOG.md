@@ -3,8 +3,10 @@
 ## Unreleased
 
 - CI ref surfaces (the reusable workflow default and both
-  `references/ci/` examples) now point at `v0.13.0-beta.12`, matching the
-  package version, so tag validation for that version can pass.
+  `references/ci/` examples) now point at `v0.13.0-beta.12` and match the
+  package version again, which restores release readiness for the next tag.
+  The existing `v0.13.0-beta.12` tag is immutable and references an older
+  commit whose CI refs still lag, so validation for that tag still fails.
 - `scripts/release_readiness.py --pre-tag` applies the strict `--tag` checks
   against `v<package version>` and reports `tag_readiness: pass|blocked`.
   Atlas CI runs it on every build and reports `pre_tag_decision=ready to tag`
@@ -163,7 +165,7 @@
   containing gists so the migrated store satisfies the beta.3 schema-folder
   invariant.
 
-## Unreleased
+## 0.13.0-beta.3 - 2026-10-04
 
 ### Added
 
