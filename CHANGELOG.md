@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.13.0-beta.13 - 2026-10-07
 
 - CI ref surfaces (the reusable workflow default and both
-  `references/ci/` examples) now point at `v0.13.0-beta.12` and match the
-  package version again, which restores release readiness for the next tag.
+  `references/ci/` examples) now point at `v0.13.0-beta.13` and match the
+  package version again, which restores a releasable tag with this release.
   The existing `v0.13.0-beta.12` tag is immutable and references an older
   commit whose CI refs still lag, so validation for that tag still fails.
 - `scripts/release_readiness.py --pre-tag` applies the strict `--tag` checks
