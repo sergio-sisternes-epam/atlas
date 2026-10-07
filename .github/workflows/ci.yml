@@ -100,7 +100,72 @@ jobs:
           cd "$consumer"
           apm install "$GITHUB_WORKSPACE" --target "$TARGETS"
           test -f .agents/skills/atlas/SKILL.md
+          if [ -e .agents/skills/atlas/site ]; then
+            echo "::error title=site/ installed into consumer::The installed Atlas package contains site/; it belongs only on the orphan docs branch."
+            exit 1
+          fi
           apm audit --ci --no-policy --no-fail-fast
+
+  no-site-guard:
+    name: No site/ on main (docs-branch guard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Default branch guard (H1)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! default_branch="$(gh api "repos/$REPO" --jq .default_branch)" ||
+            [ -z "$default_branch" ]; then
+            echo "::error title=Default branch guard::Could not read the default branch of $REPO; failing closed."
+            exit 1
+          fi
+          if [ "$default_branch" != main ]; then
+            echo "::error title=Default branch is not main::The default branch of $REPO is '$default_branch', not main. A default-ref APM install would then ship the docs branch (hard rule H1)."
+            exit 1
+          fi
+          echo "default_branch=main" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: No site/ in the package tree
+        run: |
+          # DOCS_BRANCH* is the docs-branch marker file convention.
+          if ! hits="$(git ls-files -- site ':(glob)**/DOCS_BRANCH*')"; then
+            echo "::error title=site/ guard::git ls-files failed; failing closed."
+            exit 1
+          fi
+          if [ -n "$hits" ]; then
+            echo "Offending tracked paths:"
+            printf '%s\n' "$hits"
+            echo "::error title=site/ found on main::site/ and DOCS_BRANCH* files belong only on the orphan docs branch. APM installs the whole tree of a tag, so they must never reach main or a release."
+            exit 1
+          fi
+          echo "no_site_tree=pass" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Docs workflow on main stays a stub
+        run: |
+          stub=.github/workflows/docs-site.yml
+          not_stub() {
+            echo "::error title=docs-site.yml is not the stub::$stub $1. On main it must stay the T1 stub; the full docs workflow lives only on the orphan docs branch (was docs merged into main?)."
+            exit 1
+          }
+          [ -f "$stub" ] || not_stub "is missing"
+          grep -qxF '# atlas-docs-stub: do not replace' "$stub" ||
+            not_stub "lacks the '# atlas-docs-stub: do not replace' marker line"
+          lines="$(awk 'END { print NR }' "$stub")"
+          [ "$lines" -le 60 ] || not_stub "has $lines lines (at most 60 allowed)"
+          for pattern in 'push:' 'pull_request' 'schedule:' 'workflow_run' \
+            'repository_dispatch' 'uses:' 'pages: write' 'id-token: write' 'site/'; do
+            if grep -nF -- "$pattern" "$stub"; then
+              not_stub "contains '$pattern'"
+            fi
+          done
+          # Also catch flow-style triggers (on: push) and loosely spaced permissions.
+          if grep -nwE 'push|schedule' "$stub" ||
+            grep -nE '(pages|id-token):[[:space:]]*write' "$stub"; then
+            not_stub "contains a forbidden trigger or write permission"
+          fi
+          echo "docs_site_stub=pass" | tee -a "$GITHUB_STEP_SUMMARY"
 
   readiness:
     name: Release readiness decision
@@ -108,6 +173,7 @@ jobs:
       - test
       - package
       - consumer
+      - no-site-guard
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -116,6 +182,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           CONSUMER_RESULT: ${{ needs.consumer.result }}
+          NO_SITE_GUARD_RESULT: ${{ needs.no-site-guard.result }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
@@ -127,10 +194,12 @@ jobs:
            echo "repository_tests=$TEST_RESULT"
            echo "package_integrity=$PACKAGE_RESULT"
            echo "consumer_install=$CONSUMER_RESULT"
+           echo "no_site_guard=$NO_SITE_GUARD_RESULT"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$TEST_RESULT" != success ] ||
             [ "$PACKAGE_RESULT" != success ] ||
-            [ "$CONSUMER_RESULT" != success ]; then
+            [ "$CONSUMER_RESULT" != success ] ||
+            [ "$NO_SITE_GUARD_RESULT" != success ]; then
            echo "release_readiness_decision=blocked" | tee -a "$GITHUB_STEP_SUMMARY"
            exit 1
           fi

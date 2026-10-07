@@ -1,0 +1,5 @@
+# Belt-and-braces trim for `git archive` and GitHub source tarballs only.
+# APM installs the full git tree of a tag and ignores export-ignore, so this
+# is not the real control: the `no-site-guard` CI job and the release tree
+# guard keep site/ off main and out of every release tag.
+site/ export-ignore

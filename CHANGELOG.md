@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Docs-branch guards keep `site/` off `main` and out of every release tag:
+  a new `no-site-guard` CI job fails unless the default branch is `main`,
+  no `site/` or `DOCS_BRANCH*` file is tracked and `docs-site.yml` is still
+  the stub; the release workflow checks the default branch and the tagged
+  tree before publishing; `.gitattributes` adds `site/ export-ignore` for
+  archives; and a disabled T1 `docs-site.yml` stub plus `notify-docs` job
+  prepare the docs-branch build.
+
 ## 0.13.0-beta.13 - 2026-10-07
 
 - CI ref surfaces (the reusable workflow default and both
