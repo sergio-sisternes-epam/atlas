@@ -268,7 +268,11 @@ class CiActivationContractTests(unittest.TestCase):
             '            echo "tag_ready=false" >> "$GITHUB_OUTPUT"\n',
             self.ci_workflow,
         )
-        self.assertNotIn("continue-on-error", self.ci_workflow)
+        step = workflow_step(
+            CI_WORKFLOW, "test", "Check tag readiness (CI refs equal package version)"
+        )
+        self.assertEqual("pre_tag", step.get("id"))
+        self.assertNotIn("continue-on-error", step)
 
     def test_ci_readiness_gates_ready_to_tag_on_tag_ready(self) -> None:
         self.assertIn(
@@ -295,8 +299,18 @@ class CiActivationContractTests(unittest.TestCase):
 
     def test_release_creation_is_idempotent(self) -> None:
         self.assertIn(
-            'if existing="$(gh release view "$TAG" --json tagName,isPrerelease '
-            '--jq .isPrerelease 2>/dev/null)"; then',
+            'if state="$(gh release view "$TAG" --json tagName,isDraft,isPrerelease '
+            "--jq '\"\\(.isDraft) \\(.isPrerelease)\"' 2>/dev/null)\"; then",
+            self.release_workflow,
+        )
+        self.assertIn('read -r draft existing <<<"$state"', self.release_workflow)
+        self.assertIn(
+            '            if [ "$draft" = true ]; then\n'
+            '              echo "::error title=Release is a draft::GitHub release $TAG '
+            "exists but is still a draft; publish it (or delete it) and re-run this "
+            'workflow."\n'
+            "              exit 1\n"
+            "            fi\n",
             self.release_workflow,
         )
         self.assertIn('if [ "$existing" != "$PRERELEASE" ]; then', self.release_workflow)
@@ -475,13 +489,19 @@ class WorkflowStepExecutionTests(unittest.TestCase):
 
     # --- Release workflow: idempotent GitHub release creation --------------
 
-    def _run_release(self, tag: str, existing: str | None) -> subprocess.CompletedProcess:
+    def _run_release(
+        self,
+        tag: str,
+        existing: str | None,
+        draft: bool | str = False,
+        expected_exit: int = 0,
+    ) -> subprocess.CompletedProcess:
         self._real_python3()
         self._stub(
             "gh",
             'if [ "$1 $2" = "release view" ]; then\n'
             '  if [ -n "${STUB_EXISTING_PRERELEASE:-}" ]; then\n'
-            '    echo "$STUB_EXISTING_PRERELEASE"\n'
+            '    echo "${STUB_EXISTING_DRAFT:-false} $STUB_EXISTING_PRERELEASE"\n'
             "    exit 0\n"
             "  fi\n"
             '  echo "release not found" >&2\n'
@@ -495,10 +515,18 @@ class WorkflowStepExecutionTests(unittest.TestCase):
         env = {"GITHUB_REF_NAME": tag, "GH_TOKEN": "stub-token"}
         if existing is not None:
             env["STUB_EXISTING_PRERELEASE"] = existing
+            if isinstance(draft, str):
+                env["STUB_EXISTING_DRAFT"] = draft
+            else:
+                env["STUB_EXISTING_DRAFT"] = "true" if draft else "false"
         result = self._run(step, env)
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(expected_exit, result.returncode, result.stdout + result.stderr)
         self.assertEqual(
-            [["release", "view", tag, "--json", "tagName,isPrerelease", "--jq", ".isPrerelease"]],
+            [[
+                "release", "view", tag,
+                "--json", "tagName,isDraft,isPrerelease",
+                "--jq", '"\\(.isDraft) \\(.isPrerelease)"',
+            ]],
             [call for call in self._calls("gh") if call[:2] == ["release", "view"]],
         )
         return result
@@ -555,6 +583,41 @@ class WorkflowStepExecutionTests(unittest.TestCase):
                     f"prerelease={expected}.",
                     result.stdout,
                 )
+
+    def test_existing_draft_release_fails_closed(self) -> None:
+        for tag, existing in (("v0.13.0-beta.13", "true"), ("v1.0.0", "false")):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing, draft=True, expected_exit=1)
+                self.assertIn(
+                    f"::error title=Release is a draft::GitHub release {tag} exists "
+                    "but is still a draft; publish it (or delete it) and re-run this "
+                    "workflow.",
+                    result.stdout,
+                )
+                self.assertEqual([], self._creates())
+                self.assertEqual(
+                    [],
+                    [call for call in self._calls("gh") if call[:2] != ["release", "view"]],
+                )
+                self.assertNotIn("::notice title=Release already exists::", result.stdout)
+
+    def test_existing_release_with_unreadable_draft_state_fails_closed(self) -> None:
+        for tag, existing in (("v0.13.0-beta.13", "true"), ("v1.0.0", "false")):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing, draft="null", expected_exit=1)
+                self.assertIn(
+                    f"::error title=Unknown release state::Could not read the draft "
+                    f"state of GitHub release {tag} (got 'null {existing}').",
+                    result.stdout,
+                )
+                self.assertEqual([], self._creates())
+                self.assertEqual(
+                    [],
+                    [call for call in self._calls("gh") if call[:2] != ["release", "view"]],
+                )
+                self.assertNotIn("::notice title=Release already exists::", result.stdout)
 
 
 if __name__ == "__main__":

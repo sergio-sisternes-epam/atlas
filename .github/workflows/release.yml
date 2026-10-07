@@ -53,7 +53,16 @@ jobs:
             PRERELEASE=false
           fi
           echo "prerelease=$PRERELEASE (tag $TAG)"
-          if existing="$(gh release view "$TAG" --json tagName,isPrerelease --jq .isPrerelease 2>/dev/null)"; then
+          if state="$(gh release view "$TAG" --json tagName,isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"' 2>/dev/null)"; then
+            read -r draft existing <<<"$state"
+            if [ "$draft" = true ]; then
+              echo "::error title=Release is a draft::GitHub release $TAG exists but is still a draft; publish it (or delete it) and re-run this workflow."
+              exit 1
+            fi
+            if [ "$draft" != false ]; then
+              echo "::error title=Unknown release state::Could not read the draft state of GitHub release $TAG (got '$state')."
+              exit 1
+            fi
             echo "::notice title=Release already exists::GitHub release $TAG already exists and was left unchanged."
             echo "existing_prerelease=$existing expected_prerelease=$PRERELEASE"
             if [ "$existing" != "$PRERELEASE" ]; then

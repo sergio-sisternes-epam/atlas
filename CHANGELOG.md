@@ -20,6 +20,8 @@
   and its blocked reason is now the generic `pre-tag check failed`.
 - The release workflow leaves an existing GitHub release for the tag
   unchanged instead of failing, and warns when its prerelease flag differs.
+  It now fails when that existing release is still a draft, instead of
+  finishing green with nothing published.
 
 ## 0.13.0-beta.12 - 2026-10-06
 
