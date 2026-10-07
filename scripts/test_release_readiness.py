@@ -221,6 +221,56 @@ class ReleaseReadinessTests(unittest.TestCase):
             output,
         )
 
+    def _tag_fixture(self, prefix: str) -> tuple[Path, str]:
+        temp = self._copy_surfaces(prefix)
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+        return temp, f"v{package_version}"
+
+    def _git(self, root: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=Atlas Tests", "-c", "user.email=atlas@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args],
+            cwd=root, check=True, capture_output=True,
+        )
+
+    def test_pre_tag_mode_passes_when_expected_tag_is_absent(self) -> None:
+        temp, _ = self._tag_fixture("atlas-release-readiness-tag-absent-")
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn("tag_readiness: pass", output)
+
+    def test_pre_tag_mode_blocks_when_tag_exists_at_another_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-conflict-")
+        self._git(temp, "tag", tag)
+        old_head = current_commit(temp)
+        self._git(temp, "commit", "--allow-empty", "--quiet", "-m", "next")
+        new_head = current_commit(temp)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: tag {tag} already exists at {old_head}", output)
+        self.assertIn(f"not candidate {new_head}", output)
+        self.assertIn("package version must advance", output)
+
+    def test_pre_tag_mode_blocks_on_annotated_tag_at_another_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-annotated-")
+        self._git(temp, "tag", "-a", tag, "-m", "release")
+        self._git(temp, "commit", "--allow-empty", "--quiet", "-m", "next")
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+
+    def test_pre_tag_mode_passes_when_tag_already_at_candidate(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-at-head-")
+        self._git(temp, "tag", tag)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn("tag_readiness: pass", output)
+
     def test_main_uses_given_root_for_commit_lookups(self) -> None:
         temp = self._copy_surfaces("atlas-release-readiness-root-commit-")
         other_head = current_commit(temp)

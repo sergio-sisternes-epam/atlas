@@ -9,6 +9,8 @@
   commit whose CI refs still lag, so validation for that tag still fails.
 - `scripts/release_readiness.py --pre-tag` applies the strict `--tag` checks
   against `v<package version>` and reports `tag_readiness: pass|blocked`.
+  It also blocks when the expected tag already exists at a different commit,
+  so a failed tag requires advancing the package version.
   Atlas CI runs it on every build and reports `pre_tag_decision=ready to tag`
   on `main` only when it passes. A blocked manual run fails, while ordinary
   pushes to `main` only warn.

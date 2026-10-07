@@ -243,6 +243,16 @@ class CiActivationContractTests(unittest.TestCase):
             self.ci_workflow,
         )
 
+    def test_ci_test_job_fetches_tags_for_pre_tag_check(self) -> None:
+        self.assertIn(
+            "    steps:\n"
+            "      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n"
+            "        with:\n"
+            "          fetch-tags: true\n"
+            "      - uses: actions/setup-python",
+            self.ci_workflow,
+        )
+
     def test_ci_test_job_runs_pre_tag_check_and_exports_tag_ready(self) -> None:
         self.assertIn(
             "    outputs:\n"

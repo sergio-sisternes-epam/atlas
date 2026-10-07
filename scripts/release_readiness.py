@@ -136,6 +136,33 @@ def current_commit(root: Path = ROOT) -> str:
     return result.stdout.strip()
 
 
+def tag_commit(tag: str, root: Path = ROOT) -> str | None:
+    """Return the commit *tag* peels to in *root*, or None when it is absent."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def validate_tag_available(tag: str, candidate: str, root: Path = ROOT) -> list[str]:
+    """Reject an expected tag that already exists at a different commit.
+
+    Tags are immutable, so the package version must advance. A tag that already
+    points at the candidate commit is accepted: nothing conflicts and re-running
+    the gate after tagging stays idempotent.
+    """
+    existing = tag_commit(tag, root)
+    if existing is None or existing.lower() == candidate.lower():
+        return []
+    return [
+        f"tag {tag} already exists at {existing}, not candidate {candidate}; "
+        "the package version must advance to a new version"
+    ]
+
+
 def validate_commit(candidate: str, root: Path = ROOT) -> list[str]:
     if not re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
         return [f"candidate commit must be a 40-character SHA: {candidate}"]
@@ -186,8 +213,11 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         errors.append(f"release tag {args.tag} != {expected_tag}")
     if args.commit:
         errors.extend(validate_commit(args.commit, root))
+    candidate = args.commit or current_commit(root)
+    if args.pre_tag:
+        errors.extend(validate_tag_available(expected_tag, candidate, root))
 
-    print(f"candidate_revision: {args.commit or current_commit(root)}")
+    print(f"candidate_revision: {candidate}")
     print(f"package_version: {version}")
     print(f"expected_tag: {expected_tag}")
     print(f"version_consistency: {'blocked' if errors else 'pass'}")
