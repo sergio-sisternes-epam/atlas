@@ -172,7 +172,7 @@
       "atlas compile checks that relates_to paths resolve (and Markdown links if present).",
       "On promote/compile, agent writes relates_to first; body Related is optional echo.",
       "Optional relates_to[].ref is a git rev for that path. Absent ref means the active tip (compile resolves path on HEAD). Present ref means time travel: tip compile does not resolve the blob and does not fail if the path is absent on HEAD.",
-      "Relation ref is not mount or mesh store-tracking ref. Mount ref is the branch a store tracks. Relation ref is a per-edge revision. Do not put ref next to title."
+      "Relation ref is not mount or mesh store-tracking ref. Mount ref is the branch a store tracks. Relation ref is a per-edge revision. A ref-bearing item does not satisfy a live relates_to contract. Do not put ref next to title."
     ],
     "authoritative": "frontmatter",
     "ref": {

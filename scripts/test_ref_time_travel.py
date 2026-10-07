@@ -33,6 +33,7 @@ from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: 
 from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref, _relation_path_escapes  # noqa: E402
+from atlas_cli.commands.memory_migrate import _converted_frame_text  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
 
 
@@ -163,6 +164,20 @@ def main() -> int:
             failures.append(f"whitespace ref should fail compile: {bad_payload.get('critical')}")
         else:
             print("[PASS] whitespace ref fails compile")
+        blank.write_text(
+            page(
+                "Range ref",
+                "relates_to:\n  - path: gone.md\n    kind: related\n    ref: HEAD..HEAD\n",
+                "A revision range is not a history rev.",
+            ),
+            encoding="utf-8",
+        )
+        range_ref = run(["compile", "--root", str(store), "--json"])
+        range_payload = json.loads(range_ref.stdout) if range_ref.stdout else {}
+        if not any("ref must be" in item.get("msg", "") for item in range_payload.get("critical", [])):
+            failures.append(f"revision range should fail compile: {range_payload.get('critical')}")
+        else:
+            print("[PASS] revision range fails compile")
         blank.unlink()
         missing.unlink()
 
@@ -343,10 +358,31 @@ def main() -> int:
             print("[PASS] history path must stay inside the store")
         escaped.unlink()
 
-        if _bad_relation_ref(123) is None or _bad_relation_ref(None) is None:
-            failures.append("non-string ref should be rejected before stringification")
+        if (
+            _bad_relation_ref(123) is None
+            or _bad_relation_ref(None) is None
+            or _bad_relation_ref("HEAD..HEAD") is None
+        ):
+            failures.append("non-string ref and revision ranges should be rejected")
         else:
             print("[PASS] non-string ref is rejected")
+
+        converted = _converted_frame_text(
+            {
+                "type": "frame",
+                "title": "History only",
+                "relates_to": [
+                    {"path": "notes/old.gist.md", "kind": "related", "ref": "abc333"},
+                ],
+            },
+            "\n\n## Content\n\nBody.\n",
+            ["notes/old.gist.md"],
+            "1.0",
+        )
+        if converted.count("path: notes/old.gist.md") < 2 or "ref: abc333" not in converted:
+            failures.append(f"history edge must not suppress the live gist link:\n{converted}")
+        else:
+            print("[PASS] frame conversion keeps a live gist link beside a history edge")
 
         preview = _relates_preview(
             {

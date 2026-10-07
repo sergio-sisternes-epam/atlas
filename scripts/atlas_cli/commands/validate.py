@@ -155,7 +155,13 @@ def _bad_relation_ref(value: object) -> str | None:
     """Relation ref is a per-edge git rev, not mount ref. Compile does not resolve it."""
     if not isinstance(value, str):
         return "ref must be a git rev string"
-    if not value or value.strip() != value or any(ch.isspace() for ch in value) or value.startswith("-"):
+    if (
+        not value
+        or value.strip() != value
+        or any(ch.isspace() for ch in value)
+        or value.startswith("-")
+        or ".." in value
+    ):
         return "ref must be a non-empty git rev without whitespace"
     return None
 
