@@ -1,0 +1,9 @@
+# The T1 docs dispatch is deliberately disabled with `if: false` until the
+# orphan docs branch exists (Atlas docs plan P1b).
+paths:
+  .github/workflows/docs-site.yml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/release.yml:
+    ignore:
+      - 'constant expression "false" in condition'

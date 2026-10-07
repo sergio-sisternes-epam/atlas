@@ -1,0 +1,26 @@
+# atlas-docs-stub: do not replace
+# The real docs workflow lives on the orphan `docs` branch. GitHub only allows
+# workflow_dispatch with `--ref docs` when a workflow of the same file name
+# exists on the default branch, so this file must stay a stub on main
+# (checked by the no-site-guard job in ci.yml).
+name: Atlas docs site
+
+on:
+  workflow_dispatch:
+    inputs:
+      atlas_tag:
+        description: Atlas release tag to build the docs against, for example v0.13.0-beta.13
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stub:
+    # Disabled until the docs branch exists.
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Point to the docs branch
+        run: echo "The real Atlas docs workflow runs from the docs branch."
