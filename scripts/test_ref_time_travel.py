@@ -2574,6 +2574,45 @@ def main() -> int:
             else:
                 print("[PASS] failed undo of a completed exchange is rolled back with the prune")
 
+            foreign_dir = tmp / "rollback-foreign-temp"
+            foreign_dir.mkdir()
+            dirfd = os.open(foreign_dir, os.O_RDONLY)
+            try:
+                live = foreign_dir / "living.md"
+                live.write_bytes(b"replacement-bytes\n")
+                written = live.stat()
+                displaced = foreign_dir / ".atlas-prune-living.md"
+                displaced.write_bytes(b"original-bytes\n")
+                original = displaced.stat()
+                displaced.unlink()
+                displaced.write_bytes(b"foreign-bytes\n")
+                raised = False
+                try:
+                    refcmd._rollback_exchange(
+                        dirfd,
+                        displaced.name,
+                        live.name,
+                        written.st_dev,
+                        written.st_ino,
+                        original.st_dev,
+                        original.st_ino,
+                        b"original-bytes\n",
+                        live.name,
+                    )
+                except RefError:
+                    raised = True
+                if (
+                    not raised
+                    or live.stat().st_ino != written.st_ino
+                    or live.read_bytes() != b"replacement-bytes\n"
+                    or displaced.read_bytes() != b"foreign-bytes\n"
+                ):
+                    failures.append("rollback exchanged a replaced temp into the live page")
+                else:
+                    print("[PASS] rollback leaves the live page when the temp was replaced")
+            finally:
+                os.close(dirfd)
+
         scalar = tmp / "scalar-drop"
         scalar_init = run(["init", "--root", str(scalar), "--json"])
         if scalar_init.returncode != 0:

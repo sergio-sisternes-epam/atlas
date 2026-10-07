@@ -876,17 +876,43 @@ def _exchange_names(dirfd: int, src: str, dst: str) -> None:
         raise OSError(err, os.strerror(err), src)
 
 
-def _rollback_exchange(dirfd: int, tmp: str, name: str, written_dev: int, written_ino: int, label: str) -> None:
-    """Put the checked page back. Never delete a name that is no longer our temp inode."""
+def _rollback_exchange(
+    dirfd: int,
+    tmp: str,
+    name: str,
+    written_dev: int,
+    written_ino: int,
+    displaced_dev: int,
+    displaced_ino: int,
+    displaced_bytes: bytes,
+    label: str,
+) -> None:
+    """Put the checked page back. Do not swap a temp name this operation no longer owns."""
+    if not _dir_inode_is(dirfd, name, written_dev, written_ino) or not _dir_inode_is(
+        dirfd, tmp, displaced_dev, displaced_ino
+    ):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+    try:
+        current = _read_dir_file(dirfd, tmp, label)
+    except RefError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    if current != displaced_bytes:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
     try:
         _exchange_names(dirfd, tmp, name)
     except OSError as e:
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
     try:
         back = os.lstat(tmp, dir_fd=dirfd)
+        restored = os.lstat(name, dir_fd=dirfd)
     except OSError as e:
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
-    if back.st_dev != written_dev or back.st_ino != written_ino:
+    if (
+        back.st_dev != written_dev
+        or back.st_ino != written_ino
+        or restored.st_dev != displaced_dev
+        or restored.st_ino != displaced_ino
+    ):
         raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
 
 
@@ -1017,7 +1043,7 @@ def _rewrite_dir_file(
                     displaced_bytes = _read_dir_file(dirfd, tmp, label)
                 except (OSError, RefError) as e:
                     try:
-                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, label)
+                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, info.st_dev, info.st_ino, snapshot, label)
                     except RefError:
                         tmp = ""
                         raise
@@ -1028,7 +1054,17 @@ def _rewrite_dir_file(
                     or displaced_bytes != snapshot
                 ):
                     try:
-                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, label)
+                        _rollback_exchange(
+                            dirfd,
+                            tmp,
+                            name,
+                            written.st_dev,
+                            written.st_ino,
+                            displaced.st_dev,
+                            displaced.st_ino,
+                            displaced_bytes,
+                            label,
+                        )
                     except RefError:
                         tmp = ""
                         raise
@@ -1093,6 +1129,9 @@ def _rewrite_dir_file(
                                 name,
                                 written.st_dev,
                                 written.st_ino,
+                                info.st_dev,
+                                info.st_ino,
+                                snapshot,
                                 label,
                             )
                         except RefError as rollback_error:
