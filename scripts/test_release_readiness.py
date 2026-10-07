@@ -3,20 +3,27 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from release_readiness import (
     CI_SURFACES,
     ROOT,
     SURFACES,
+    TagLookupError,
     current_commit,
     is_prerelease_tag,
+    main,
     manifest_version,
     read_surface,
+    tag_commit,
     validate_commit,
     validate_versions,
 )
@@ -84,12 +91,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.rmtree(temp, ignore_errors=True)
 
     def test_pretag_allows_package_ci_lag_when_ci_refs_agree(self) -> None:
-        # Pre-tag (require_ci_match_package=False, the `compile` default): CI
-        # ref surfaces are allowed to lag the package version as long as they
-        # all agree with *each other*. The checked-out tree already carries
-        # this exact lag (package at a .N beta while CI refs still point at
-        # the last tagged beta), so this exercises the real surfaces rather
-        # than a synthetic fixture.
+        # Development (require_ci_match_package=False, the no-flag default):
+        # CI ref surfaces are allowed to lag the package version as long as
+        # they all agree with *each other*. This exercises the real surfaces;
+        # the synthetic lag case is covered below.
         version, errors = validate_versions(ROOT, require_ci_match_package=False)
         self.assertEqual(manifest_version(), version)
         self.assertEqual([], errors)
@@ -154,6 +159,190 @@ class ReleaseReadinessTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp, ignore_errors=True)
 
+    def _copy_surfaces(self, prefix: str) -> Path:
+        temp = Path(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(shutil.rmtree, temp, ignore_errors=True)
+        for surface in SURFACES:
+            target = temp / surface.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / surface.path, target)
+        # main(argv, root) reads HEAD from root, so the fixture is its own repo.
+        git = ["git", "-c", "user.name=Atlas Tests", "-c", "user.email=atlas@example.invalid"]
+        for command in (
+            ["init", "--quiet"],
+            ["add", "--all"],
+            ["-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify", "-m", "fixture"],
+        ):
+            subprocess.run(git + command, cwd=temp, check=True, capture_output=True)
+        return temp
+
+    def _set_ci_refs(self, root: Path, version: str) -> None:
+        for surface in CI_SURFACES:
+            path = root / surface.path
+            content = path.read_text(encoding="utf-8")
+            for actual in re.findall(surface.pattern, content, re.MULTILINE):
+                content = content.replace(f"v{actual}", f"v{version}")
+            path.write_text(content, encoding="utf-8")
+
+    def _run_main(self, argv: list[str], root: Path) -> tuple[int, str]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main(argv, root)
+        return code, output.getvalue()
+
+    def test_pre_tag_mode_passes_when_ci_refs_equal_package_version(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-pretag-pass-")
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"expected_tag: v{package_version}", output)
+        self.assertIn("tag_readiness: pass", output)
+        self.assertIn("release_metadata_decision: pass", output)
+
+    def test_pre_tag_mode_blocks_when_ci_ref_lags(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-pretag-block-")
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+        lagging = CI_SURFACES[0]
+        path = temp / lagging.path
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"v{package_version}", "v0.1.0"
+            ),
+            encoding="utf-8",
+        )
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn("release_metadata_decision: blocked", output)
+        self.assertIn(
+            f"error: {lagging.path}: {lagging.label} version 0.1.0 != {package_version} "
+            "(CI ref must equal the package version for a tagged release)",
+            output,
+        )
+
+    def _tag_fixture(self, prefix: str) -> tuple[Path, str]:
+        temp = self._copy_surfaces(prefix)
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+        return temp, f"v{package_version}"
+
+    def _git(self, root: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=Atlas Tests", "-c", "user.email=atlas@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args],
+            cwd=root, check=True, capture_output=True,
+        )
+
+    def test_pre_tag_mode_passes_when_expected_tag_is_absent(self) -> None:
+        temp, _ = self._tag_fixture("atlas-release-readiness-tag-absent-")
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn("tag_readiness: pass", output)
+
+    def test_pre_tag_mode_blocks_when_tag_exists_at_another_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-conflict-")
+        self._git(temp, "tag", tag)
+        old_head = current_commit(temp)
+        self._git(temp, "commit", "--allow-empty", "--quiet", "-m", "next")
+        new_head = current_commit(temp)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: tag {tag} already exists at {old_head}", output)
+        self.assertIn(f"not candidate {new_head}", output)
+        self.assertIn("package version must advance", output)
+
+    def test_pre_tag_mode_blocks_on_annotated_tag_at_another_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-annotated-")
+        self._git(temp, "tag", "-a", tag, "-m", "release")
+        self._git(temp, "commit", "--allow-empty", "--quiet", "-m", "next")
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+
+    def test_pre_tag_mode_passes_when_tag_already_at_candidate(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-at-head-")
+        self._git(temp, "tag", tag)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn("tag_readiness: pass", output)
+
+    def test_tag_commit_missing_returns_none(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-missing-")
+        self.assertIsNone(tag_commit(tag, temp))
+
+    def test_tag_commit_existing_returns_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-existing-")
+        self._git(temp, "tag", tag)
+        self.assertEqual(current_commit(temp), tag_commit(tag, temp))
+
+    def test_pre_tag_mode_blocks_on_unpeelable_tag(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-tree-")
+        tree = subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=temp, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        self._git(temp, "update-ref", f"refs/tags/{tag}", tree)
+        with self.assertRaises(TagLookupError):
+            tag_commit(tag, temp)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: tag {tag} exists but does not peel to a commit", output)
+
+    def test_pre_tag_mode_blocks_on_git_error(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-giterr-")
+        real_run = subprocess.run
+
+        def failing(cmd, *args, **kwargs):
+            if cmd[:2] == ["git", "show-ref"]:
+                return subprocess.CompletedProcess(cmd, 128, "", "fatal: boom")
+            return real_run(cmd, *args, **kwargs)
+
+        with mock.patch("release_readiness.subprocess.run", failing):
+            code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: git could not check tag {tag}: fatal: boom", output)
+
+    def test_main_uses_given_root_for_commit_lookups(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-root-commit-")
+        other_head = current_commit(temp)
+        repository_head = current_commit()
+        self.assertNotEqual(repository_head, other_head)
+
+        code, output = self._run_main(["--commit", other_head], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"candidate_revision: {other_head}", output)
+
+        code, output = self._run_main(["--commit", repository_head], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn(
+            f"error: candidate commit {repository_head} != checked-out revision {other_head}",
+            output,
+        )
+
+        code, output = self._run_main([], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"candidate_revision: {other_head}", output)
+        self.assertNotIn(repository_head, output)
+
+    def test_no_flag_mode_allows_consistent_ci_lag(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-lag-")
+        self._set_ci_refs(temp, "0.1.0")
+
+        code, output = self._run_main([], temp)
+        self.assertEqual(0, code, output)
+        self.assertNotIn("tag_readiness", output)
+        self.assertIn("release_metadata_decision: pass", output)
 
 
 if __name__ == "__main__":

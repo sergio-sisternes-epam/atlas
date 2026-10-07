@@ -106,16 +106,26 @@ for new capability or a compatibility-breaking package or CLI contract.
    `--tag`) blocks when any package surface disagrees, or when the CI ref
    surfaces disagree with each other. `scripts/release_readiness.py --tag
    vX.Y.Z` additionally requires every CI ref to equal the package version;
-   it must never pass while a workflow still points at an older ref.
+   it must never pass while a workflow still points at an older ref. Before
+   tagging, run `scripts/release_readiness.py --pre-tag` locally: it applies
+   the same strict checks against the expected tag `v<package version>` and
+   must report `tag_readiness: pass`.
 3. Merge through the normal review process.
 4. Run **Atlas CI** manually against the exact `main` commit intended for the
    release. Its final **Release readiness decision** job must report the
-   candidate SHA and `pre_tag_decision=ready to tag`.
+   candidate SHA and `pre_tag_decision=ready to tag`, which it reports only
+   when the `--pre-tag` check passes. Otherwise it reports
+   `pre_tag_decision=blocked: pre-tag check failed` and the manual run fails;
+   the cause (CI ref mismatch, an existing or unreadable tag `vX.Y.Z`, or
+   package-surface errors) is in the **Check tag readiness** step log. CI
+   checks out full history so existing tags are always visible to the gate.
 5. Create and push the matching immutable tag, `vX.Y.Z`, against that exact
    commit. Never tag a different commit merely because it has the same version.
 6. The release workflow reruns every repository test, frozen APM installation,
    source audit, and disposable-consumer audit. It then checks version/tag
-   alignment and `main` ancestry before creating the GitHub release.
+   alignment and `main` ancestry before creating the GitHub release. If a
+   GitHub release for the tag was already created manually, the workflow
+   leaves it unchanged after verification passes.
 7. Give the EPAM Marketplace maintainer the source repository, immutable tag or
    compatible version range, description, and tags.
 
