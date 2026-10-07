@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import shutil
 import tempfile
@@ -15,6 +17,7 @@ from release_readiness import (
     SURFACES,
     current_commit,
     is_prerelease_tag,
+    main,
     manifest_version,
     read_surface,
     validate_commit,
@@ -84,12 +87,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.rmtree(temp, ignore_errors=True)
 
     def test_pretag_allows_package_ci_lag_when_ci_refs_agree(self) -> None:
-        # Pre-tag (require_ci_match_package=False, the `compile` default): CI
-        # ref surfaces are allowed to lag the package version as long as they
-        # all agree with *each other*. The checked-out tree already carries
-        # this exact lag (package at a .N beta while CI refs still point at
-        # the last tagged beta), so this exercises the real surfaces rather
-        # than a synthetic fixture.
+        # Development (require_ci_match_package=False, the no-flag default):
+        # CI ref surfaces are allowed to lag the package version as long as
+        # they all agree with *each other*. This exercises the real surfaces;
+        # the synthetic lag case is covered below.
         version, errors = validate_versions(ROOT, require_ci_match_package=False)
         self.assertEqual(manifest_version(), version)
         self.assertEqual([], errors)
@@ -154,6 +155,71 @@ class ReleaseReadinessTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp, ignore_errors=True)
 
+    def _copy_surfaces(self, prefix: str) -> Path:
+        temp = Path(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(shutil.rmtree, temp, ignore_errors=True)
+        for surface in SURFACES:
+            target = temp / surface.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / surface.path, target)
+        return temp
+
+    def _set_ci_refs(self, root: Path, version: str) -> None:
+        for surface in CI_SURFACES:
+            path = root / surface.path
+            content = path.read_text(encoding="utf-8")
+            for actual in re.findall(surface.pattern, content, re.MULTILINE):
+                content = content.replace(f"v{actual}", f"v{version}")
+            path.write_text(content, encoding="utf-8")
+
+    def _run_main(self, argv: list[str], root: Path) -> tuple[int, str]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main(argv, root)
+        return code, output.getvalue()
+
+    def test_pre_tag_mode_passes_when_ci_refs_equal_package_version(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-pretag-pass-")
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(0, code, output)
+        self.assertIn(f"expected_tag: v{package_version}", output)
+        self.assertIn("tag_readiness: pass", output)
+        self.assertIn("release_metadata_decision: pass", output)
+
+    def test_pre_tag_mode_blocks_when_ci_ref_lags(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-pretag-block-")
+        package_version = manifest_version(temp)
+        self._set_ci_refs(temp, package_version)
+        lagging = CI_SURFACES[0]
+        path = temp / lagging.path
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"v{package_version}", "v0.1.0"
+            ),
+            encoding="utf-8",
+        )
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn("release_metadata_decision: blocked", output)
+        self.assertIn(
+            f"error: {lagging.path}: {lagging.label} version 0.1.0 != {package_version} "
+            "(CI ref must equal the package version for a tagged release)",
+            output,
+        )
+
+    def test_no_flag_mode_allows_consistent_ci_lag(self) -> None:
+        temp = self._copy_surfaces("atlas-release-readiness-lag-")
+        self._set_ci_refs(temp, "0.1.0")
+
+        code, output = self._run_main([], temp)
+        self.assertEqual(0, code, output)
+        self.assertNotIn("tag_readiness", output)
+        self.assertIn("release_metadata_decision: pass", output)
 
 
 if __name__ == "__main__":

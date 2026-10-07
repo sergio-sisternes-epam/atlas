@@ -97,7 +97,8 @@ def validate_versions(
     # CI ref surfaces are pinned to the last tagged release, not the
     # in-development package version (e.g. v0.13.0-beta can stay the CI ref
     # while the package advances to 0.13.0-beta.3) — but only during pre-tag
-    # development. When `--tag` is passed (an actual release cut),
+    # development. When `--tag` (an actual release cut) or `--pre-tag` (the
+    # gate before cutting tag v<package version>) is passed,
     # `require_ci_match_package` is set and every CI ref must equal the
     # package version; a tag validation must never pass while workflows
     # still point at an older ref.
@@ -158,21 +159,28 @@ def is_prerelease_tag(tag: str) -> bool:
     return "-" in core
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Release tag to compare with apm.yml")
+    parser.add_argument(
+        "--pre-tag",
+        action="store_true",
+        help="Apply --tag checks against the expected tag v<package version>",
+    )
     parser.add_argument("--commit", help="Candidate commit SHA")
     parser.add_argument(
         "--is-prerelease-tag",
         metavar="TAG",
         help="Exit 0 if TAG is a SemVer prerelease, 1 otherwise (no other checks)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.is_prerelease_tag is not None:
         return 0 if is_prerelease_tag(args.is_prerelease_tag) else 1
 
-    version, errors = validate_versions(require_ci_match_package=bool(args.tag))
+    version, errors = validate_versions(
+        root, require_ci_match_package=bool(args.tag) or args.pre_tag
+    )
     expected_tag = f"v{version}"
     if args.tag and args.tag != expected_tag:
         errors.append(f"release tag {args.tag} != {expected_tag}")
@@ -185,6 +193,8 @@ def main() -> int:
     print(f"version_consistency: {'blocked' if errors else 'pass'}")
     if args.tag:
         print(f"tag_consistency: {'blocked' if errors else 'pass'}")
+    if args.pre_tag:
+        print(f"tag_readiness: {'blocked' if errors else 'pass'}")
 
     if errors:
         for error in errors:
