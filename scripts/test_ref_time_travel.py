@@ -489,6 +489,69 @@ def main() -> int:
         else:
             print("[PASS] prune keeps a distinct older history rev")
 
+        (store / "shadow.md").write_text(
+            page("Shadow", "relates_to: []\n", "A page another list also names."),
+            encoding="utf-8",
+        )
+        git(store, ["add", "shadow.md"])
+        git(store, ["commit", "-m", "shadow page"])
+        shadow_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=store,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        (store / "summary-shadow.md").write_text(
+            page(
+                "Shadow summary",
+                (
+                    "sources:\n"
+                    "  - path: shadow.md\n"
+                    "    kind: derived_from\n"
+                    f"    ref: {shadow_sha}\n"
+                    "relates_to: []\n"
+                ),
+                "The same triple outside relates_to must not suppress the history edge.",
+            ),
+            encoding="utf-8",
+        )
+        shadow = run(
+            [
+                "ref",
+                "prune",
+                "--summary",
+                "summary-shadow.md",
+                "--drop",
+                "shadow.md",
+                "--ref",
+                "HEAD",
+                "--kind",
+                "derived_from",
+                "--root",
+                str(store),
+                "--json",
+            ]
+        )
+        shadow_summary = (store / "summary-shadow.md").read_text(encoding="utf-8")
+        relates_at = shadow_summary.find("relates_to:")
+        sources_at = shadow_summary.find("sources:")
+        history_at = shadow_summary.find("path: shadow.md", relates_at)
+        if (
+            shadow.returncode != 0
+            or relates_at < 0
+            or sources_at < 0
+            or history_at < 0
+            or shadow_sha not in shadow_summary[relates_at:]
+            or "path: shadow.md" not in shadow_summary[sources_at:relates_at]
+        ):
+            failures.append(
+                f"a matching triple outside relates_to must not suppress the history edge: "
+                f"{shadow.stdout}\n{shadow_summary}"
+            )
+        else:
+            print("[PASS] prune writes the history edge despite a matching triple outside relates_to")
+
         typed = tmp / "typed"
         typed_init = run(["init", "--root", str(typed), "--schema-version", "2.0", "--json"])
         if typed_init.returncode != 0:

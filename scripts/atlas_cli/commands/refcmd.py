@@ -541,22 +541,47 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
 
 
 def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
+    """History edges already recorded under relates_to, not other frontmatter lists."""
     if not text.startswith("---"):
         return set()
     end = text.find("\n---", 3)
     if end == -1:
         return set()
     found: set[tuple[str, str, str]] = set()
+    in_relates = False
     current: list[str] | None = None
     items: list[list[str]] = []
     for line in text[3:end].splitlines():
+        if TOP_KEY.match(line):
+            if current is not None and in_relates:
+                items.append(current)
+            current = None
+            flow = re.match(r"^relates_to:\s*(\S.*)$", line)
+            in_relates = bool(_empty_relates(line) or re.match(r"^relates_to:\s*$", line))
+            if flow:
+                blob = flow.group(1).strip()
+                if blob.startswith(("[", "{")):
+                    try:
+                        parsed = _parse_relation_value(blob if blob.startswith("[") else f"[{blob}]")
+                    except RefError:
+                        parsed = []
+                    for item in parsed:
+                        path = _norm_path(str(item.get("path") or ""))
+                        ref = _norm_path(str(item.get("ref") or ""))
+                        if path and ref:
+                            found.add((path, _norm_path(str(item.get("kind") or "")), ref))
+                else:
+                    in_relates = True
+            continue
+        if not in_relates:
+            continue
         if ITEM_START.match(line):
             if current is not None:
                 items.append(current)
             current = [line]
         elif current is not None and line.startswith((" ", "\t")):
             current.append(line)
-    if current is not None:
+    if current is not None and in_relates:
         items.append(current)
     for item in items:
         if _has_field(item, "ref"):

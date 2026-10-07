@@ -1,7 +1,7 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.3
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+version: 0.13.0-beta.12
 activation_card: on
 ---
 
@@ -11,7 +11,20 @@ Durable, modular **OKF v0.2** knowledge substrate for skills and projects.
 
 **Format authority:** skill **`okf`**. Atlas does not re-implement OKF rules.
 
-**Default store:** `github.com/sergio-sisternes-epam/atlas-atlas`. Load path **`mount`** (`references/paths/mount.md`) before recall or persist. That module is not a store. The store mounts at `<git-root>/.atlas/github.com/sergio-sisternes-epam/atlas-atlas`. Do not write into the skill package.
+**Current-shape memory model:** recall cues schemas from the reserved
+`index.md` directory listing, then walks schema → gist → memory and stops
+when the level in hand answers; `hub.md` is outside that memory walk. The
+index is a schema cue list, not short-term memory, a table of contents, or a
+copy of memory. Remember cascades a new or contradicted memory to its owning
+gist and schema. On `CONTRACT.json`, suffixes `.schema.md`, `.gist.md`, and
+`.memory.md` are search handles only; frontmatter `type` remains authoritative.
+Compile’s current-shape additions are limited to uncovered gists, missing
+schema index cues, and stale gist descriptions. Shipped `SCHEMA.json` page
+type names and `frame_members` behaviour remain unchanged. If a live branch
+changes subject, remember adds a new suffixed schema linked to the prior
+schema and cued by the index; the work hub stays put and is not a memory.
+
+**Default store:** `github.com/sergio-sisternes-epam/atlas-atlas`. Load path **`mount`** (`references/paths/mount.md`) before query or persist. That module is not a store. The store mounts at `<git-root>/.atlas/github.com/sergio-sisternes-epam/atlas-atlas`. Do not write into the skill package.
 
 ## Activation card (required)
 
@@ -45,7 +58,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: recall | remember | work | landscape | schema | configure | ci | memory-migrate | history | version-hint | prune
+path: recall | remember | atlas-memorise | atlas-recall | atlas-forget | atlas-optimise | work | landscape | schema | configure | ci | memory-migrate | history | version-hint | prune
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -132,6 +145,10 @@ still copies into staging; do not use it for strategy moves.
 | **memory-migrate** | Assess, inventory, or apply a named batch from a document-era store toward memory | `references/paths/memory-migrate.md` |
 | **recall** | Find / answer from an Atlas | `references/paths/recall.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
+| **atlas-memorise** | Choose the four-layer write target, then load path remember | `references/paths/atlas-memorise.md` |
+| **atlas-recall** | Navigate the four-layer model by loading path recall | `references/paths/atlas-recall.md` |
+| **atlas-forget** | Drop memory with keep, vary, or abandon | `references/paths/atlas-forget.md` |
+| **atlas-optimise** | Operator-chosen fill and tidy of a named target: evidence-gated gist and schema fill, four-layer tidy repair, subject clustering, per-folder task list, dry-run first; not on install or compile | `references/paths/atlas-optimise.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
@@ -151,7 +168,7 @@ modules; they are not CLI verbs.
 
 1. **Formal lookup = path `recall` + `atlas recall run`** - B17 card `path: recall`, load `references/paths/recall.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path recall. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas recall run --engine grep` under their own card. That is not path recall. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
+3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. On the current shape its new closed gates are `gist_without_schema`/`schema_folder` for uncovered gists, `schema_missing_from_index`, and exact-substring `stale_upper_page`; a second schema or a schema-only folder is not a compile failure. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
 5. **Work cluster** - pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** - append only for structural store changes (not every experience).
@@ -198,6 +215,8 @@ python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atl
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch <token>]
+python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>] [--tidy-only] [--auto-verbatim] [--fill-sensible] [--cost-ceiling <pages>] [--pilot] [--out-dir <dir>] [--plan <plan.json>]
+                       # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
 
 Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
@@ -208,7 +227,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 |-------|------|
 | Structure | Free layout; mandatory single root contract file (`CONTRACT.json` on new stores, `SCHEMA.json` on shipped 0.13.0-beta and 0.13.0-beta.2 stores — never both); short-lived `staging/`; `index.md` / `log.md` per OKF |
 | Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
-| Memory layers | A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
+| Memory layers | Optional progressive disclosure. Index membership does not require a schema, and a page may skip the gist. A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. A gist may list N≥1 same-folder `derived_from` parents. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind, ref?}]` - kinds: follows, records, supersedes, implements, derived_from, related. Absent `ref` is tip. Present `ref` is a git rev and is not compiled. Not mount `ref`. |
 | Composition | Optional mesh; consolidated in compile |
@@ -234,7 +253,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci,
+(mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci,
 history, version-hint, prune, help, getting-started). Packaged help baseline lives under `references/help/`.
 SCHEMA and templates live under `references/`. Do not dump full help into this
 file.

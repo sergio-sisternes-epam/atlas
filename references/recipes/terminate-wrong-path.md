@@ -17,8 +17,12 @@ Model disagreement alone is not a trigger.
 2. Load catalog skill **discuss** by name (full `SKILL.md`).
 3. Load `discuss/references/paths/terminate.md`.
 4. Follow that path on this Atlas `root`.
-5. After compile green, answer only from living pages and the exit-reason node. Do not continue the dead matrix.
-6. Tip exclusion is a separate explicit step. Discuss terminate does not delete. If the user wants the failed path off tip, enter Atlas path **prune** (`references/paths/prune.md`) after the exit-reason page exists. Do not prune inside this recipe.
+5. If the live branch now has a different subject, use Atlas **remember** to
+   add `<name>.schema.md`, link it same-level to the prior schema, and list it
+   from the folder `index.md`. Keep `hub.md` in place; it is a work hub, not a
+   memory level.
+6. After compile green, answer only from living pages and the exit-reason node. Do not continue the dead matrix.
+7. Tip exclusion is a separate explicit step. Discuss terminate does not delete. If the user wants the failed path off tip, enter Atlas path **prune** (`references/paths/prune.md`) after the exit-reason page exists. Do not prune inside this recipe.
 
 ## Do not
 

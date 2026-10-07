@@ -224,7 +224,7 @@ def migrate_cmd(
     "--operation",
     required=True,
     type=click.Choice(["assess", "inventory", "apply"]),
-    help="assess/inventory write nothing; apply rewrites a pre-beta contract file",
+    help="assess/inventory write nothing; apply rewrites a pre-beta contract or an empty unstamped full beta.2 init",
 )
 @click.option(
     "--batch",
@@ -238,7 +238,7 @@ def memory_migrate_cmd(
     batch: str | None,
     as_json: bool,
 ) -> None:
-    """Pre-beta -> 0.13.0-beta.3 contract-file migration (path memory-migrate)."""
+    """Pre-beta -> 0.13.0-beta.7 contract-file migration (path memory-migrate)."""
     raise SystemExit(cmd_memory_migrate.run(root, operation, batch, as_json))
 
 

@@ -1,5 +1,155 @@
 # Changelog
 
+## 0.13.0-beta.12 - 2026-10-06
+
+- The four-layer model stays optional progressive disclosure. An index may
+  exist with or without a schema. Memory and other types may omit a gist.
+  Non-memory types are not forced through a typed middle extension. A
+  residual `missing_gist` stays expected and does not fail optimise
+  (`missing_gist_fails_run: false`).
+- When optimise fills, same-folder peers that already `relates_to` each
+  other, or that share a `work_id`, get one useful gist. `derived_from`
+  lists every parent (N≥1). Cross-folder `relates_to` does not join a
+  cluster. A folder may hold more than one cluster. A gist description is
+  still a verbatim substring of at least one memory parent. Schema is
+  required when a gist is created, not for bare index membership.
+- Thin evidence, titled stubs, and invented bodies still do not clear
+  `missing_gist`. Critical or high scan hits refuse promotion. A medium
+  `booking_manage_reference` is a handoff. Receipts for fills that happen
+  add `scan_gate_refuse_count`, `body_fills`, `shared_gist_count`,
+  `cluster_size_hist`, `enrich_optional_count`, `zero_crit_high_promoted`,
+  and `{path, type, severity}` hits. The store write stamp stays
+  `0.13.0-beta.7`. Sleep and consolidate remain unimplemented.
+
+## 0.13.0-beta.11 - 2026-10-06
+
+- Path `atlas-optimise` now fills upper layers from an evidence pack and still
+  tidies the beta.10 repairs. Fill can create a gist for every compile
+  missing-gist type and a minimal-prose schema when a folder has gists and no
+  schema. The gist description is a verbatim parent description or the first
+  claim line. Thin evidence is a handoff. A leftover `missing_gist` is
+  expected and does not fail the run. Optimise never invents prose and never
+  edits parent claim text.
+- Modes are `path` (default, fill on), `full` (`--target .` only, serial
+  only), `custom` (`--custom-tree` path prefixes), and `incremental` (git
+  commit history, committer clock, default `--since-hours 24`). Dirty and
+  uncommitted parents are excluded from incremental fill. `--tidy-only` skips
+  fill. `--auto-verbatim` is required before a verbatim fill is `auto`;
+  confirm stays the default.
+- Plan and apply still refuse a stale HEAD or file hash, including every
+  evidence source. A security scan blocks secret-class text and
+  `sensitivity: restricted` pages. The default cost ceiling is 200 pages
+  examined. The receipt records fetch OK, the git tip, counts, residuals,
+  the scan, and cost against the ceiling.
+- The helper stays standalone. `atlas.py` has no optimise command, and
+  install, init, compile, and memory-migrate never call it. The store write
+  stamp stays `0.13.0-beta.7`. Sleep and consolidate remain unimplemented.
+
+## 0.13.0-beta.10 - 2026-10-05
+
+- `memory-migrate apply --batch contract-file` now accepts an unstamped full
+  beta.2 init (`SCHEMA.json` with `templates` and `types.recommended`
+  including `frame`, no `atlas_release` key, no `memory` key) when the store
+  has no content page of type `frame`, `gist`, `page`, or `memory`. Assess
+  and inventory report lineage `empty-beta2-init`, `contract_file_eligible:
+  true`, and `beta_content_pages: []`. Apply writes the current contract
+  shape (`CONTRACT.json`, `atlas_release` `0.13.0-beta.7`, `memory.layers`
+  `["schema", "gist", "memory"]`) and aligns templates and
+  `types.recommended` with a fresh `atlas init` (`frame` and `page` removed,
+  `schema` and `memory` added) while keeping store-specific settings and
+  custom types. Existing content pages are not rewritten.
+- Stamped `0.13.0-beta` / `0.13.0-beta.2` stores, stores with `memory.layers`
+  `frame`/`gist`/`page` or `frame`/`gist`/`memory`, and full beta.2 inits
+  that already contain those content pages still refuse with
+  `in_beta_not_legacy` and are left byte-for-byte unchanged. An unreadable
+  page, a non-string type, or an ambiguous template path fails closed with
+  no partial write. The store write stamp stays `0.13.0-beta.7`.
+
+## 0.13.0-beta.9 - 2026-10-05
+
+- Path `atlas-optimise` now takes an explicit target (one folder or the store
+  root) and runs a dry-run plan first. It writes one migration task list per
+  top-level folder outside the store, then applies only what the operator
+  approves. Pages that already share a parent no longer end the run.
+- Four-layer repair with existing page text only: remove index cues to
+  missing pages (such as a deleted `frame.md`), cue schema pages from
+  `index.md`, add a gist to its folder's only schema, drop dead schema
+  members, and copy the memory description verbatim up into a stale gist.
+  Memory text is never edited; anything without source text hands off to path
+  remember. Direct gist and memory cues in `index.md` are removed only on
+  confirm. Suffix renames are opt-in and rewrite every inbound link.
+- Subject clustering by naming (shared filename stems, operator-named subject
+  folders, `work_id` folders). Moves need confirm, a free filename, a
+  non-layer page, and no `atlas://` mention; links are rewritten.
+- New standalone helper `scripts/atlas_optimise.py` (`plan`, `apply`). apply
+  refuses a stale plan (HEAD or file hash changed) and refuses while a store
+  still needs memory-migrate. It is not an `atlas.py` command and install,
+  init, compile, and memory-migrate never call it. It writes no contract file:
+  the store write stamp stays `0.13.0-beta.7`.
+
+## 0.13.0-beta.8 - 2026-10-04
+
+- Four operator paths help agents use the locked four-layer model:
+  atlas-memorise, atlas-recall, atlas-forget, and atlas-optimise. They are
+  paths in this package, not separate packages and not a new memory layer.
+  The store write stamp stays 0.13.0-beta.7. Nothing here runs on install or
+  compile.
+
+## 0.13.0-beta.7 - 2026-10-04
+
+- Package versions and the stamp written by `atlas init` and operator-chosen
+  `memory-migrate apply --batch contract-file` now agree at `0.13.0-beta.7`.
+  The `CONTRACT.json` shape and layers `schema`/`gist`/`memory` are unchanged;
+  beta.3 and beta.4 remain current readers, and apply never restamps them.
+  Unknown stamps (including beta.6) still fail closed. SCHEMA 2.0 behavior
+  and the fleet pin `v0.12.0` are unchanged.
+- Frame conversion preserves long plain descriptions without YAML wrapping
+  and checks the full converted frontmatter with the store's existing reader.
+  A failed round-trip exits 2 with `frame_description_not_round_trippable`,
+  preserves the frame and contract, and stages the original description plus
+  explicit operator steps. No migration is triggered by install, compile,
+  or schema upgrade; existing page types and multiple-schema coverage stay
+  unchanged.
+
+## 0.13.0-beta.6 - 2026-10-04
+
+- Current-shape recall now progressively discloses `index → schema → gist →
+  memory` and stops at the first level that answers. The folder `index.md` is
+  a schema cue list, not copied memory or a hot list of every gist; work hubs
+  stay outside the memory walk.
+- Remember cascades new or contradicted memories up through their owning gist
+  and schema. Same-folder gists may be covered by multiple schemas; each
+  schema is cued from `index.md`. Current-shape `.schema.md`, `.gist.md`, and
+  `.memory.md` suffixes are search handles; frontmatter `type` remains the
+  contract. Compile checks uncovered gists, missing schema index cues, and
+  stale gist descriptions using the exact specified gates.
+- `memory-migrate` creates suffixed schema pages and adds their index cues.
+  Package surfaces move to v0.13.0-beta.6; the current-store write stamp
+  remains `atlas_release` `0.13.0-beta.4` and existing beta.3 readers remain
+  supported.
+
+## 0.13.0-beta.5 - 2026-10-04
+
+- `atlas init` and `memory-migrate apply --batch contract-file` now write
+  `atlas_release` `0.13.0-beta.4` for the current contract shape (not
+  `0.13.0-beta.3`, which was misleading since beta.3 had already shipped
+  without this write). Readers still accept an existing `0.13.0-beta.3`
+  stamp on `CONTRACT.json` with layers `schema`/`gist`/`memory` as current
+  — `compute_stamp_shape` and `classify_lineage` both resolve it to
+  "current", and `memory-migrate apply` on such a store is a no-op (it does
+  not rewrite the stamp to beta.4). `SCHEMA.json` still refuses to carry
+  either stamp; the current contract shape is written to `CONTRACT.json`
+  only. Package and CI pins move to v0.13.0-beta.5.
+
+## 0.13.0-beta.4 - 2026-10-04
+
+- `memory-migrate` now recognizes existing `memory`, `gist`, or `frame` pages
+  when reporting lineage for an unstamped pre-beta contract. The named
+  `contract-file` batch still performs the beta.3 contract transition without
+  rewriting existing pages, and creates one `schema` page in each folder
+  containing gists so the migrated store satisfies the beta.3 schema-folder
+  invariant.
+
 ## Unreleased
 
 ### Added

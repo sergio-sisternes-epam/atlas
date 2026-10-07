@@ -494,15 +494,15 @@ def _finding_in_focus(
     fpath = (root / finding["path"]).resolve()
     directory_scoped = fpath.is_dir()
     if finding.get("id") == "schema_folder":
-        # schema_folder findings are reported either on the gist-bearing
-        # folder itself (missing/extra schema) or on a sibling type=schema
-        # page in that folder (membership errors). Either way, a focused
-        # compile on a page that is a member of that same folder (e.g. a
-        # gist the schema must list) keeps the folder invariant in scope.
+        # An uncovered-gist finding is reported on the gist itself. Treat the
+        # folder invariant as in scope for either schema or gist type focus.
         folder = fpath if directory_scoped else fpath.parent
         if focus_path is not None and not _folder_in_scope(folder, focus_path):
             return False
         if want_type:
+            relevant_types = {want_type}
+            if want_type in {"schema", "gist"}:
+                relevant_types = {"schema", "gist"}
             for page in iter_concept_md(folder, staging_name):
                 if page.parent.resolve() != folder or page.name in RESERVED:
                     continue
@@ -510,7 +510,7 @@ def _finding_in_focus(
                     meta, _ = read_page(page, sv)
                 except FrontmatterError:
                     continue
-                if _in_focus(page, meta, want_type, None):
+                if str(meta.get("type") or "").strip() in relevant_types:
                     return True
             return False
         return True
@@ -741,43 +741,58 @@ def _memory_findings(
                 out.append(item)
         return out
 
-    def _valid_gist_parent(m: dict) -> str | None:
-        """Return the canonical parent path for a well-formed gist, else None.
+    def _page_folder(path: Path) -> str:
+        folder = rel(root, path.parent)
+        return "." if folder in ("", ".") else folder
 
-        A gist only counts toward ``gist_parent`` coverage when it has
-        exactly one ``derived_from`` parent, that parent resolves to a page
-        inside the store, and the parent's type is a valid gist-parent type
-        (not itself a gist). This mirrors the ``gist_parent`` ok check below
-        so a malformed gist (zero/two+ parents, gist-of-gist, outside the
-        store, wrong type) never suppresses ``missing_gist`` for its target.
+    def _valid_gist_parents(m: dict) -> list[str] | None:
+        """Return canonical parent paths for a well-formed gist, else None.
+
+        A gist counts toward coverage when it has N>=1 ``derived_from``
+        parents, every parent resolves inside the store to a gist-parent
+        type (not itself a gist), and every parent lives in the same folder
+        (Cut 2). A shared cluster gist lists all of those parents. Zero
+        parents, a duplicate parent, a gist-of-gist, an unresolved target,
+        or parents in different folders never suppress ``missing_gist``.
+        Index membership itself does not require a gist or a schema.
         """
         parents = _related(m, "derived_from")
-        if len(parents) != 1:
+        if not parents:
             return None
-        target = str(parents[0].get("path") or "").strip()
-        if not target:
+        canons: list[str] = []
+        folders: list[str] = []
+        for item in parents:
+            target = str(item.get("path") or "").strip()
+            if not target:
+                return None
+            canon = _canonical_local_target(root, target)
+            key = canon if canon is not None else target
+            found = by_rel_path.get(key)
+            if found is None:
+                return None
+            tpath, tmeta = found
+            ttype = str(tmeta.get("type") or "").strip()
+            if ttype not in GIST_PARENT_TYPES:
+                return None
+            if key in canons:
+                return None
+            canons.append(key)
+            folders.append(_page_folder(tpath))
+        if len(set(folders)) != 1:
             return None
-        canon = _canonical_local_target(root, target)
-        found = by_rel_path.get(canon if canon is not None else target)
-        if found is None:
-            return None
-        _, tmeta = found
-        ttype = str(tmeta.get("type") or "").strip()
-        if ttype not in GIST_PARENT_TYPES:
-            return None
-        return canon if canon is not None else target
+        return canons
 
-    # Index gists by the path of the parent they are derived_from — only for
-    # valid single-parent gists; a malformed gist must not suppress the
-    # target's missing_gist finding.
+    # Index gists by each same-folder parent they derive from. A malformed
+    # gist must not suppress missing_gist for any of its targets.
     gists_by_parent: dict[str, list[str]] = {}
     for p, m in pages:
         if str(m.get("type") or "").strip() != "gist":
             continue
         gp = rel(root, p)
-        canon = _valid_gist_parent(m)
-        if canon is not None:
-            gists_by_parent.setdefault(canon, []).append(gp)
+        canons = _valid_gist_parents(m)
+        if canons:
+            for canon in canons:
+                gists_by_parent.setdefault(canon, []).append(gp)
 
     findings: list[dict] = []
     for p, m in pages:
@@ -807,15 +822,16 @@ def _memory_findings(
             )
 
         if ptype == "gist":
-            if _valid_gist_parent(m) is None:
+            if _valid_gist_parents(m) is None:
                 findings.append(
                     {
                         "id": "gist_parent",
                         "path": rp,
                         "msg": (
-                            "a gist has exactly one parent, and that parent is not "
-                            "a gist (parent must be experience, decision, lesson, "
-                            "recipe, document, memory, page, or protostar)."
+                            "a gist has one or more same-folder parents, and no "
+                            "parent is a gist (each parent must be experience, "
+                            "decision, lesson, recipe, document, memory, page, "
+                            "or protostar)."
                         ),
                     }
                 )
@@ -882,97 +898,139 @@ def _memory_findings(
 
 
 def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
-    """On the beta.3 (current) shape only, schema is the renamed frame.
-
-    A folder with >=1 gist has exactly one type=schema page; a folder with
-    zero gists has none (one gist still counts). Unlike frame_members (an
-    info-by-default ladder finding on shipped-beta stores), this is a hard
-    compile failure: pin 4 says a second schema in a gist-bearing folder
-    "fails", not merely "is flagged". That one schema page must also list
-    each gist in its own folder exactly once via relates_to kind=related,
-    and no other targets — duplicates, omissions, and gists that belong to
-    another folder all fail the same way as an empty/non-gist target set
-    (a lone gist still only needs to be listed once).
-    """
-    pages: list[tuple[Path, dict]] = []
+    """Validate schema coverage, index cues, and gist-to-memory freshness."""
+    pages: list[tuple[Path, dict, str]] = []
     for path in iter_concept_md(root, staging_name):
         if path.name in RESERVED:
             continue
         try:
-            meta, _ = read_page(path, schema_version(schema) if schema else "1.0")
+            meta, body = read_page(path, schema_version(schema) if schema else "1.0")
         except FrontmatterError:
             continue
         if not meta:
             continue
-        pages.append((path, meta))
+        pages.append((path, meta, body))
 
-    by_rel_path = {rel(root, p): (p, m) for p, m in pages}
+    by_rel_path = {rel(root, p): (p, m, body) for p, m, body in pages}
 
     gists_by_folder: dict[str, set[str]] = {}
-    schemas_by_folder: dict[str, list[str]] = {}
-    for p, m in pages:
+    for p, m, _ in pages:
         folder = str(p.parent.resolve().relative_to(root.resolve())).replace("\\", "/")
         ptype = str(m.get("type") or "").strip()
         if ptype == "gist":
             gists_by_folder.setdefault(folder, set()).add(rel(root, p))
-        elif ptype == "schema":
-            schemas_by_folder.setdefault(folder, []).append(rel(root, p))
 
     findings: list[dict] = []
-    all_folders = set(gists_by_folder) | set(schemas_by_folder)
-    for folder in sorted(all_folders):
-        expected_gists = gists_by_folder.get(folder, set())
-        schema_paths = schemas_by_folder.get(folder, [])
-        expected = 1 if expected_gists else 0
-        if len(schema_paths) != expected:
-            findings.append(
-                {
-                    "id": "schema_folder",
-                    "path": schema_paths[0] if schema_paths else (folder or "."),
-                    "msg": (
-                        f"folder {folder or '.'!r} has {len(expected_gists)} gist(s) and "
-                        f"{len(schema_paths)} type=schema page(s); expected exactly "
-                        f"{expected} (one gist still counts)."
-                    ),
-                }
-            )
+    covered_gists: set[str] = set()
+    for schema_path, (schema_file, schema_meta, _) in by_rel_path.items():
+        if str(schema_meta.get("type") or "").strip() != "schema":
             continue
-        if not schema_paths:
-            continue
-        schema_path = schema_paths[0]
-        schema_meta = by_rel_path[schema_path][1]
+        schema_folder = schema_file.parent.resolve()
         related = schema_meta.get("relates_to")
-        listed_paths: list[str] = []
-        invalid = not isinstance(related, list)
-        if invalid:
-            related = []
-        for item in related:
-            if isinstance(item, dict) and str(item.get("ref") or "").strip():
+        if isinstance(related, list):
+            for item in related:
+                if isinstance(item, dict) and str(item.get("ref") or "").strip():
+                    continue
+                resolved = _resolve_related_gist(item, root, by_rel_path)
+                if resolved is None:
+                    continue
+                gist_file = by_rel_path[resolved][0]
+                if gist_file.parent.resolve() == schema_folder:
+                    covered_gists.add(resolved)
+
+        index_path = schema_folder / "index.md"
+        cues_schema = False
+        try:
+            index_body = index_path.read_text(encoding="utf-8")
+        except OSError:
+            index_body = ""
+        index_targets = [
+            match.group(2).strip().split()[0].strip("\"'")
+            for match in MD_LINK.finditer(index_body)
+        ]
+        index_targets.extend(match.group(1).strip() for match in WIKILINK.finditer(index_body))
+        for target in index_targets:
+            if target.startswith(("http://", "https://", "atlas://", "#")):
                 continue
-            resolved = _resolve_related_gist(item, root, by_rel_path)
-            if resolved is None:
-                invalid = True
+            local_target = target.split("#", 1)[0].split("?", 1)[0]
+            if not local_target:
                 continue
-            listed_paths.append(resolved)
-        if (
-            not expected_gists
-            or invalid
-            or len(listed_paths) != len(set(listed_paths))
-            or set(listed_paths) != expected_gists
-            or len(listed_paths) != len(expected_gists)
-        ):
+            candidate = (index_path.parent / local_target).resolve()
+            if candidate == schema_file.resolve():
+                cues_schema = True
+                break
+        if not cues_schema:
+            findings.append(
+                {
+                    "id": "schema_missing_from_index",
+                    "path": schema_path,
+                    "msg": f"type=schema page {schema_path} is not cued by {rel(root, index_path)}",
+                }
+            )
+
+    for _, gist_paths in sorted(gists_by_folder.items()):
+        for gist_path in sorted(gist_paths - covered_gists):
             findings.append(
                 {
                     "id": "schema_folder",
-                    "path": schema_path,
+                    "path": gist_path,
                     "msg": (
-                        "a type=schema page must list each gist in its own folder "
-                        "exactly once via relates_to kind=related, and no other "
-                        "targets (no duplicates, no omissions, no gists from "
-                        "another folder)."
+                        f"gist {gist_path} is not listed by any same-folder "
+                        "type=schema page via relates_to kind=related"
                     ),
                 }
             )
+
+    for gist_path, (_, gist_meta, _) in by_rel_path.items():
+        if str(gist_meta.get("type") or "").strip() != "gist":
+            continue
+        description = gist_meta.get("description")
+        if not isinstance(description, str) or not description:
+            continue
+        relates = gist_meta.get("relates_to")
+        if not isinstance(relates, list):
+            continue
+        memory_parents: list[tuple] = []
+        for item in relates:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("ref") or "").strip():
+                continue
+            if str(item.get("kind") or item.get("role") or "").strip().lower() != "derived_from":
+                continue
+            target = str(item.get("path") or "").strip()
+            canonical = _canonical_local_target(root, target)
+            found = by_rel_path.get(canonical if canonical is not None else target)
+            if found is None or str(found[1].get("type") or "").strip() != "memory":
+                continue
+            memory_parents.append(found)
+        if not memory_parents:
+            continue
+        # N=1: the description must be a substring of that parent.
+        # N>1: union pack — a substring of at least one derived_from parent.
+        def _holds(found: tuple) -> bool:
+            memory_meta, memory_body = found[1], found[2]
+            memory_description = memory_meta.get("description")
+            return description in memory_body or (
+                isinstance(memory_description, str) and description in memory_description
+            )
+
+        if any(_holds(found) for found in memory_parents):
+            continue
+        if len(memory_parents) == 1:
+            msg = (
+                "gist description is not present in its memory parent "
+                f"{rel(root, memory_parents[0][0])}"
+            )
+        else:
+            msg = "gist description is not present in any derived_from memory parent"
+        findings.append(
+            {
+                "id": "stale_upper_page",
+                "path": gist_path,
+                "msg": msg,
+            }
+        )
     return findings
 
 

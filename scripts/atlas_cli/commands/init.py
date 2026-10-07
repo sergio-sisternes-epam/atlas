@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from ..core.recall_config import default_recall_block
-from ..core.schema import BETA3_LAYERS, BETA3_RELEASE, skill_root
+from ..core.schema import BETA3_LAYERS, CURRENT_RELEASE, skill_root
 from ..core.paths import CONTRACT_NAME, has_contract_file
 from ..core.paths import store_root
 
@@ -14,7 +14,7 @@ DEFAULT_CONTRACT = {
     "schema_version": "1.0",
     "atlas_id": "new-atlas",
     "title": "New Atlas",
-    "atlas_release": BETA3_RELEASE,
+    "atlas_release": CURRENT_RELEASE,
     "structure": {
         "free_layout": True,
         "staging_dir": "staging",

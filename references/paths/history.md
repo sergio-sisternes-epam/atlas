@@ -39,7 +39,7 @@ Read this file before `atlas ref show`. Missing card, unloaded module, missing `
    python3 <atlas-skill>/scripts/atlas.py ref show <page> --ref <rev> --root <root>
    ```
 
-4. **Refuse is final.** The root must be an Atlas store (`SCHEMA.json`). Path escape, an Atlas-managed root (`staging`, a custom `staging_dir`, `templates`, `mesh`, `schema.d`, `.atlas-index`), a rev that does not resolve in that repo, a missing blob, or a historical entry that is not a regular file (including a symlink blob) is a stop. Staging never answers, including through git history and including when that directory is passed as `--root`. Do not search the worktree for a lookalike.
+4. **Refuse is final.** The root must be an Atlas store (`SCHEMA.json` or `CONTRACT.json`). Path escape, an Atlas-managed root (`staging`, a custom `staging_dir`, `templates`, `mesh`, `schema.d`, `.atlas-index`), a rev that does not resolve in that repo, a missing blob, or a historical entry that is not a regular file (including a symlink blob) is a stop. Staging never answers, including through git history and including when that directory is passed as `--root`. Do not search the worktree for a lookalike.
 
 ## Exit
 

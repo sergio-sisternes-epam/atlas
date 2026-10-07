@@ -1,0 +1,20 @@
+id: four-layer-migration-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-04-four-layer-migration
+adversarial: true
+smokes:
+  - id: migration-not-on-install
+    source: "scripts/atlas_cli/commands/memory_migrate.py; references/paths/memory-migrate.md"
+    expect: "Migration stays operator-chosen: install, compile, and schema upgrade never call memory-migrate apply. Missing --batch and batch text migrate everything refuse with batch_required and zero writes; the whole-store batch is contract-file."
+  - id: wrapped-description-survives
+    source: "scripts/atlas_cli/commands/memory_migrate.py; scripts/test_schema_layer_contract.py"
+    expect: "A long plain frame description that default YAML width would wrap survives apply exactly. Serialization uses allow_unicode=True, sort_keys=False, width=10**9, and the schema-version-matched reader must return the entire converted mapping unchanged."
+  - id: unroundtrippable-description-operator-step
+    source: "scripts/atlas_cli/commands/memory_migrate.py; references/paths/memory-migrate.md"
+    expect: "A description that cannot round-trip exits 2 with finding frame_description_not_round_trippable and writes staging/memory-migrate-operator-steps.md containing the original description verbatim and the next step: make the description a plain scalar the reader round-trips, then re-run atlas memory-migrate --operation apply --batch contract-file."
+  - id: package-and-store-stamps
+    source: "apm.yml; SKILL.md; scripts/atlas_cli/__init__.py; scripts/atlas_cli/core/schema.py"
+    expect: "Package and new write stamp are 0.13.0-beta.7 on CONTRACT.json with memory.layers schema/gist/memory. beta.3 and beta.4 readers remain current and apply is a no-op without restamping. beta.6 and unknown stamps fail closed; SCHEMA.json refuses current stamps. SCHEMA 2.0 behavior and the fleet pin v0.12.0 stay unchanged."
+  - id: no-contract-rename-on-description-failure
+    source: "scripts/atlas_cli/commands/memory_migrate.py; scripts/test_schema_layer_contract.py"
+    expect: "Failed description round-trip leaves frame.md and SCHEMA.json byte-for-byte in place, creates no CONTRACT.json or schema page, never drops the description, and never deletes the frame. Success deletes the leftover frame only after the new schema contains its original description."

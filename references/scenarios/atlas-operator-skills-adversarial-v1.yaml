@@ -1,0 +1,23 @@
+id: atlas-operator-skills-adversarial-v1
+packages: [atlas]
+work_id: 2026-10-04-atlas-operator-skills
+adversarial: true
+smokes:
+  - id: not-separate-packages
+    source: "NN/g progressive disclosure (Nielsen 2006); information hiding"
+    expect: "The four operators are path modules in the atlas package. apm.yml name stays atlas. No packages/ tree and no sibling skill package."
+  - id: recall-delegates
+    source: "references/paths/recall.md"
+    expect: "atlas-recall loads references/paths/recall.md and does not restate the index, schema, gist, memory walk."
+  - id: forget-short-kva
+    source: "discuss Knowledge Variance Authority; short keep/vary/abandon pin"
+    expect: "keep leaves the page, vary uses path remember, abandon uses kva terminated and does not delete the file. No new traffic values."
+  - id: optimise-operator-only
+    source: "gist false memory during consolidation"
+    expect: "atlas-optimise is operator-chosen, not on install, not on compile, and must not invent gist text."
+  - id: no-fifth-layer
+    source: "locked four-layer model"
+    expect: "The four paths are operators, not a memory rung. hub.md stays outside the walk."
+  - id: migration-not-hooked
+    source: "work_id 2026-10-04-four-layer-migration"
+    expect: "This change does not make memory-migrate, install, init, or compile run atlas-optimise."
