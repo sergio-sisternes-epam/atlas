@@ -136,15 +136,41 @@ def current_commit(root: Path = ROOT) -> str:
     return result.stdout.strip()
 
 
+class TagLookupError(Exception):
+    """The tag ref could not be resolved to a commit and must fail closed."""
+
+
 def tag_commit(tag: str, root: Path = ROOT) -> str | None:
-    """Return the commit *tag* peels to in *root*, or None when it is absent."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
+    """Return the commit *tag* peels to, None only when the ref is missing.
+
+    Raises TagLookupError when the ref exists but cannot be peeled to a commit
+    or when git itself fails, so an occupied tag name is never treated as free.
+    """
+    ref = f"refs/tags/{tag}"
+    try:
+        exists = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", ref],
+            cwd=root, capture_output=True, text=True,
+        )
+        if exists.returncode == 1:
+            return None
+        if exists.returncode != 0:
+            raise TagLookupError(
+                f"git could not check tag {tag}: {exists.stderr.strip() or exists.returncode}"
+            )
+        peeled = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=root, capture_output=True, text=True,
+        )
+    except OSError as exc:
+        raise TagLookupError(f"git could not check tag {tag}: {exc}") from exc
+    commit = peeled.stdout.strip()
+    if peeled.returncode != 0 or not commit:
+        raise TagLookupError(
+            f"tag {tag} exists but does not peel to a commit; "
+            "the tag name is occupied and the package version must advance"
+        )
+    return commit
 
 
 def validate_tag_available(tag: str, candidate: str, root: Path = ROOT) -> list[str]:
@@ -154,7 +180,10 @@ def validate_tag_available(tag: str, candidate: str, root: Path = ROOT) -> list[
     points at the candidate commit is accepted: nothing conflicts and re-running
     the gate after tagging stays idempotent.
     """
-    existing = tag_commit(tag, root)
+    try:
+        existing = tag_commit(tag, root)
+    except TagLookupError as exc:
+        return [str(exc)]
     if existing is None or existing.lower() == candidate.lower():
         return []
     return [

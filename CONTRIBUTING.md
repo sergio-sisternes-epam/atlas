@@ -115,8 +115,10 @@ for new capability or a compatibility-breaking package or CLI contract.
    release. Its final **Release readiness decision** job must report the
    candidate SHA and `pre_tag_decision=ready to tag`, which it reports only
    when the `--pre-tag` check passes. Otherwise it reports
-   `pre_tag_decision=blocked: CI refs do not match package version` and the
-   manual run fails.
+   `pre_tag_decision=blocked: pre-tag check failed` and the manual run fails;
+   the cause (CI ref mismatch, an existing or unreadable tag `vX.Y.Z`, or
+   package-surface errors) is in the **Check tag readiness** step log. CI
+   checks out full history so existing tags are always visible to the gate.
 5. Create and push the matching immutable tag, `vX.Y.Z`, against that exact
    commit. Never tag a different commit merely because it has the same version.
 6. The release workflow reruns every repository test, frozen APM installation,

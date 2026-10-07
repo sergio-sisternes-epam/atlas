@@ -243,12 +243,12 @@ class CiActivationContractTests(unittest.TestCase):
             self.ci_workflow,
         )
 
-    def test_ci_test_job_fetches_tags_for_pre_tag_check(self) -> None:
+    def test_ci_test_job_fetches_full_history_and_tags_for_pre_tag_check(self) -> None:
         self.assertIn(
             "    steps:\n"
             "      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n"
             "        with:\n"
-            "          fetch-tags: true\n"
+            "          fetch-depth: 0\n"
             "      - uses: actions/setup-python",
             self.ci_workflow,
         )
@@ -276,7 +276,7 @@ class CiActivationContractTests(unittest.TestCase):
         )
         self.assertIn(
             '           if [ "$TAG_READY" != true ]; then\n'
-            '             echo "pre_tag_decision=blocked: CI refs do not match package version" |\n'
+            '             echo "pre_tag_decision=blocked: pre-tag check failed" |\n'
             '               tee -a "$GITHUB_STEP_SUMMARY"\n'
             '             if [ "$EVENT_NAME" = workflow_dispatch ]; then\n'
             "               exit 1\n"
@@ -410,6 +410,8 @@ class WorkflowStepExecutionTests(unittest.TestCase):
         result = self._run_pre_tag(1)
         self.assertEqual("tag_ready=false\n", self.output.read_text(encoding="utf-8"))
         self.assertIn("::warning title=Tagging blocked::", result.stdout)
+        self.assertIn("release_readiness.py --pre-tag failed", result.stdout)
+        self.assertNotIn("every CI ref", result.stdout)
 
     # --- CI readiness decision ---------------------------------------------
 
@@ -454,7 +456,7 @@ class WorkflowStepExecutionTests(unittest.TestCase):
                 result, summary = self._run_decision(event, tag_ready)
                 self.assertEqual(expected_exit, result.returncode, result.stderr)
                 self.assertIn(
-                    "pre_tag_decision=blocked: CI refs do not match package version\n",
+                    "pre_tag_decision=blocked: pre-tag check failed\n",
                     summary,
                 )
                 self.assertNotIn("pre_tag_decision=ready to tag", summary)

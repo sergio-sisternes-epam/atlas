@@ -14,6 +14,10 @@
   Atlas CI runs it on every build and reports `pre_tag_decision=ready to tag`
   on `main` only when it passes. A blocked manual run fails, while ordinary
   pushes to `main` only warn.
+- The `--pre-tag` gate now fails closed: only a genuinely missing tag ref
+  counts as free, while a tag that cannot be peeled to a commit or a git
+  error blocks. Atlas CI checks out full history so older tags are visible,
+  and its blocked reason is now the generic `pre-tag check failed`.
 - The release workflow leaves an existing GitHub release for the tag
   unchanged instead of failing, and warns when its prerelease flag differs.
 

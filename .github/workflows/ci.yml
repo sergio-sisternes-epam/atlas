@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          fetch-tags: true
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
@@ -39,7 +39,7 @@ jobs:
             echo "tag_ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "tag_ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Tagging blocked::Tagging is blocked until every CI ref (reusable workflow default and references/ci/ examples) equals the package version."
+            echo "::warning title=Tagging blocked::Tagging is blocked: scripts/release_readiness.py --pre-tag failed (CI ref mismatch, existing conflicting or unreadable tag, or package-surface errors). See the step log for details."
           fi
 
   package:
@@ -148,7 +148,7 @@ jobs:
              exit 1
            fi
            if [ "$TAG_READY" != true ]; then
-             echo "pre_tag_decision=blocked: CI refs do not match package version" |
+             echo "pre_tag_decision=blocked: pre-tag check failed" |
                tee -a "$GITHUB_STEP_SUMMARY"
              if [ "$EVENT_NAME" = workflow_dispatch ]; then
                exit 1

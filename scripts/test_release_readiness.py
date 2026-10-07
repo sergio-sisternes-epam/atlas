@@ -10,17 +10,20 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from release_readiness import (
     CI_SURFACES,
     ROOT,
     SURFACES,
+    TagLookupError,
     current_commit,
     is_prerelease_tag,
     main,
     manifest_version,
     read_surface,
+    tag_commit,
     validate_commit,
     validate_versions,
 )
@@ -270,6 +273,45 @@ class ReleaseReadinessTests(unittest.TestCase):
         code, output = self._run_main(["--pre-tag"], temp)
         self.assertEqual(0, code, output)
         self.assertIn("tag_readiness: pass", output)
+
+    def test_tag_commit_missing_returns_none(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-missing-")
+        self.assertIsNone(tag_commit(tag, temp))
+
+    def test_tag_commit_existing_returns_commit(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-existing-")
+        self._git(temp, "tag", tag)
+        self.assertEqual(current_commit(temp), tag_commit(tag, temp))
+
+    def test_pre_tag_mode_blocks_on_unpeelable_tag(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-tree-")
+        tree = subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=temp, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        self._git(temp, "update-ref", f"refs/tags/{tag}", tree)
+        with self.assertRaises(TagLookupError):
+            tag_commit(tag, temp)
+
+        code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: tag {tag} exists but does not peel to a commit", output)
+
+    def test_pre_tag_mode_blocks_on_git_error(self) -> None:
+        temp, tag = self._tag_fixture("atlas-release-readiness-tag-giterr-")
+        real_run = subprocess.run
+
+        def failing(cmd, *args, **kwargs):
+            if cmd[:2] == ["git", "show-ref"]:
+                return subprocess.CompletedProcess(cmd, 128, "", "fatal: boom")
+            return real_run(cmd, *args, **kwargs)
+
+        with mock.patch("release_readiness.subprocess.run", failing):
+            code, output = self._run_main(["--pre-tag"], temp)
+        self.assertEqual(1, code, output)
+        self.assertIn("tag_readiness: blocked", output)
+        self.assertIn(f"error: git could not check tag {tag}: fatal: boom", output)
 
     def test_main_uses_given_root_for_commit_lookups(self) -> None:
         temp = self._copy_surfaces("atlas-release-readiness-root-commit-")
