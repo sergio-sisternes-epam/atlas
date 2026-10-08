@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import errno
-import fcntl
 import io
 import json
 import os
@@ -826,18 +825,29 @@ def _matching_restore(dirfd: int, name: str, data: bytes, label: str, mode: int)
     return again.st_dev, again.st_ino
 
 
+def _fcntl():
+    """Unix file locking. Imported lazily so other commands load on Windows."""
+    try:
+        import fcntl
+    except ImportError as e:
+        raise RefError("refusing to prune without file locking on this platform") from e
+    return fcntl
+
+
 def _lock_fd(fd: int, label: str) -> None:
     """Serialize cooperating writers across the check and the directory update."""
+    locking = _fcntl()
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        locking.flock(fd, locking.LOCK_EX | locking.LOCK_NB)
     except OSError as e:
         raise RefError(f"refusing to update locked page {label}") from e
 
 
 def _lock_dir(dirfd: int, label: str) -> None:
     """Hold the parent directory across a rename and the following delete or exchange."""
+    locking = _fcntl()
     try:
-        fcntl.flock(dirfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        locking.flock(dirfd, locking.LOCK_EX | locking.LOCK_NB)
     except OSError as e:
         raise RefError(f"refusing to update locked page {label}") from e
 
@@ -1588,7 +1598,8 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
         if "missing page" in str(e):
             raise RefError(f"refusing to drop absent tip page {store_rel}") from e
         raise
-    if not _blob_exists(repo, _resolve_commit(repo, "HEAD"), gitpath):
+    head = _resolve_commit(repo, "HEAD")
+    if not _blob_exists(repo, head, gitpath):
         raise RefError(f"refusing to delete untracked {store_rel}")
     hashed = subprocess.run(
         ["git", "hash-object", "--stdin"],
@@ -1599,8 +1610,22 @@ def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath:
     )
     out = hashed.stdout.decode("utf-8", errors="replace").strip() if hashed.returncode == 0 else ""
     blob_code, blob, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
-    if hashed.returncode != 0 or blob_code != 0 or not blob or out != blob:
-        raise RefError(f"refusing to drop dirty {store_rel}; commit it before prune or choose a rev that matches the worktree")
+    head_code, head_blob, _ = run_git(
+        ["rev-parse", "--verify", "--end-of-options", f"{head}:{gitpath}"],
+        cwd=repo,
+    )
+    if (
+        hashed.returncode != 0
+        or blob_code != 0
+        or head_code != 0
+        or not blob
+        or not head_blob
+        or out != blob
+        or out != head_blob
+    ):
+        raise RefError(
+            f"refusing to drop dirty {store_rel}; commit it before prune or choose a rev that matches the worktree and HEAD"
+        )
     return None
 
 
@@ -1693,7 +1718,6 @@ def run_prune(
         drop_set = set(drop_rels)
         rewritten: list[str] = []
         pending: list[tuple[str, str, bytes, int, int, int]] = []
-        baseline: list[tuple[str, bytes, int]] = []
         summary_final: str | None = None
         _schema, _schema_err = load_schema(store)
         version = schema_version(_schema)
@@ -1702,7 +1726,6 @@ def run_prune(
             if rel in drop_set:
                 continue
             original_bytes, mode, dev, ino = _read_identity(store, rel)
-            baseline.append((rel, original_bytes, mode))
             try:
                 original = original_bytes.decode("utf-8")
             except UnicodeDecodeError as e:
@@ -1752,11 +1775,10 @@ def run_prune(
             raise RefError(f"summary would fail compile: {transformed[0]}")
         removed: list[tuple[str, bytes, int]] = []
         written: list[tuple[str, bytes, int, int, int, bytes]] = []
-        lock_path = store / ".atlas-prune.lock"
+        lock_path = store / ".atlas-ref-prune.lock"
         root_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             _lock_fd(root_fd, summary_rel)
-            before_critical = _compile_critical(store)
             try:
                 for rel, updated, original_bytes, _mode, dev, ino in pending:
                     new_bytes = updated.encode("utf-8")
@@ -1781,6 +1803,14 @@ def run_prune(
                     )
                     if _code != 0 or not expected:
                         raise RefError(f"ref {sha} does not contain {rel}")
+                    head_code, head_blob, _head_err = run_git(
+                        ["rev-parse", "--verify", "--end-of-options", f"HEAD:{gitpath}"],
+                        cwd=repo,
+                    )
+                    if head_code != 0 or head_blob != expected:
+                        raise RefError(
+                            f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree and HEAD"
+                        )
                     data, mode = _unlink_store(store, rel, repo, expected)
                     removed.append((rel, data, mode))
                 for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
@@ -1790,9 +1820,9 @@ def run_prune(
                             raise RefError(f"refusing to rewrite changed page {rel}")
                     finally:
                         os.close(dirfd)
-                introduced = sorted(_compile_critical(store) - before_critical)
-                if introduced:
-                    ident, path, msg = introduced[0]
+                remaining = sorted(_compile_critical(store))
+                if remaining:
+                    ident, path, msg = remaining[0]
                     raise RefError(f"prune would fail compile: [{ident}] {path}: {msg}")
             except Exception as exc:
                 try:
@@ -1809,30 +1839,6 @@ def run_prune(
                         )
                     for rel, data, mode in removed:
                         _rewrite_store(store, rel, data, must_exist=False, mode=mode)
-                    if isinstance(exc, RefError) and str(exc).startswith("prune would fail compile"):
-                        restored = {item[0] for item in written} | {item[0] for item in removed}
-                        for rel, original_bytes, mode in baseline:
-                            if rel in restored:
-                                continue
-                            try:
-                                current, current_mode, _dev, _ino = _read_identity(store, rel)
-                            except RefError:
-                                _rewrite_store(
-                                    store,
-                                    rel,
-                                    original_bytes,
-                                    must_exist=False,
-                                    mode=mode,
-                                )
-                                continue
-                            if current != original_bytes:
-                                _rewrite_store(
-                                    store,
-                                    rel,
-                                    original_bytes,
-                                    must_exist=True,
-                                    mode=current_mode,
-                                )
                 except Exception as restore_exc:
                     if isinstance(restore_exc, RefError):
                         raise restore_exc from exc
@@ -1840,10 +1846,6 @@ def run_prune(
                 raise
         finally:
             os.close(root_fd)
-            try:
-                os.unlink(lock_path)
-            except OSError:
-                pass
     except RefError as e:
         return _fail(as_json, str(e))
     except OSError as e:

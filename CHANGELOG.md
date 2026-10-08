@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
+- `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
+- Runtime modules **history**, **version-hint**, and **prune**. Recall, remember, and terminate hand off to those cards. Claim A grain stays deferred.
+
+### Fixed
+
+- `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself, and the worktree bytes match that blob and the HEAD blob. A later or unrelated commit, or a dirty worktree that only matches the older rev, is not the pre-prune snapshot.
+- Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
+- A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
+- After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. A page whose bytes changed, including one that reused the installed inode number, is not reported as a successful retarget. That destination is left in place, and the displaced page is kept for recovery.
+- A drop rename that moves a different inode keeps the checked page bytes and mode in a recovery file, then puts the other file back. The checked page is not closed away as the only remaining copy.
+- A restore link whose destination is replaced before the identity check keeps the checked temp instead of unlinking the last copy.
+- Optimise ignores `relates_to` items that carry `ref` when deciding gist coverage, gist parents, schema members, and cluster joins. A history edge does not suppress `uncovered-gist`.
+- `atlas ref prune` rechecks the tip with a dry-run compile after deletion. Any remaining critical finding rolls back only the pages prune wrote or deleted. A concurrent edit on another page is left in place.
+- `atlas ref prune` keeps one lock file for the mutation window and does not replace that inode between runs.
+- `atlas ref show` and `atlas ref prune` load without `fcntl`, so other commands still start where file locking is unavailable. Prune refuses there instead of failing at import.
+- `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
+- `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
+- `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
+
+### Changed
+
 - Docs-branch guards keep `site/` off `main` and out of every release tag:
   a new `no-site-guard` CI job fails unless the default branch is `main`,
   no `site/` or `DOCS_BRANCH*` file is tracked and `docs-site.yml` is still
@@ -187,9 +211,6 @@
 
 ### Added
 
-- Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
-- `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
-- Runtime modules **history**, **version-hint**, and **prune**. Recall, remember, and terminate hand off to those cards. Claim A grain stays deferred.
 - `CONTRACT.json` is the 0.13.0-beta.3 WRITE model root contract (type/key
   contract, not a JSON Schema document). New `atlas init` writes
   `CONTRACT.json` and does not write `SCHEMA.json`; it sets `atlas_release`
@@ -245,20 +266,6 @@
   batch only when the operator asks. Assess and inventory write nothing.
 - CLI `atlas schema memory-rung --set info|warn|error`: the only writer of
   the `memory` SCHEMA block.
-
-### Fixed
-
-- `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself. A later or unrelated commit with the same page bytes is not the pre-prune snapshot.
-- Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
-- A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
-- After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. A page whose bytes changed, including one that reused the installed inode number, is not reported as a successful retarget. That destination is left in place, and the displaced page is kept for recovery.
-- A drop rename that moves a different inode keeps the checked page bytes and mode in a recovery file, then puts the other file back. The checked page is not closed away as the only remaining copy.
-- A restore link whose destination is replaced before the identity check keeps the checked temp instead of unlinking the last copy.
-- Optimise ignores `relates_to` items that carry `ref` when deciding gist coverage, gist parents, schema members, and cluster joins. A history edge does not suppress `uncovered-gist`.
-- `atlas ref prune` rechecks the tip with a dry-run compile after deletion. A new critical finding, including a frame-member failure or a link added before deletion, rolls the tip back instead of returning success.
-- `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
-- `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
-- `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
 
 ### Changed
 

@@ -227,7 +227,7 @@ def main() -> int:
             page(
                 "Living",
                 "relates_to:\n  - path: dead.md\n    kind: implements\n",
-                "See [the trial](dead.md).",
+                "See [the trial](dead.md). The living page keeps enough prose that compile does not treat it as a link list.",
             ),
             encoding="utf-8",
         )
@@ -238,7 +238,7 @@ def main() -> int:
             page(
                 "Other",
                 "relates_to:\n  - path: dead.md\n    kind: related\n    ref: already-history\n",
-                "Keep [history edge](../dead.md) body link, but frontmatter ref stays.",
+                "Keep [history edge](../dead.md) body link, but frontmatter ref stays. This page keeps enough prose.",
             ),
             encoding="utf-8",
         )
@@ -738,8 +738,6 @@ def main() -> int:
             (guarded / summary_name).write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
             (guarded / "notes.txt").write_text("not a page\n", encoding="utf-8")
             (guarded / "templates" / "foo.md").write_text(page("Template", "relates_to: []\n", prose), encoding="utf-8")
-            (guarded / "staging").mkdir(exist_ok=True)
-            (guarded / "staging" / "foo.md").write_text(page("Staged", "relates_to: []\n", prose), encoding="utf-8")
             git(guarded, ["add", "."])
             git(guarded, ["commit", "-m", "guarded fixtures"])
 
@@ -767,6 +765,8 @@ def main() -> int:
             else:
                 print("[PASS] prune quotes a YAML-special summary path")
 
+            (guarded / "staging").mkdir(exist_ok=True)
+            (guarded / "staging" / "foo.md").write_text(page("Staged", "relates_to: []\n", prose), encoding="utf-8")
             (guarded / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
             not_md = run(
                 [
@@ -861,6 +861,51 @@ def main() -> int:
                 failures.append(f"dirty drop should be refused: {dirty.stdout}")
             else:
                 print("[PASS] prune refuses a dirty drop target")
+
+            original_dead = subprocess.run(
+                ["git", "show", "HEAD:dead.md"],
+                cwd=guarded,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            git(guarded, ["add", "dead.md"])
+            git(guarded, ["commit", "-m", "newer drop"])
+            older = subprocess.run(
+                ["git", "rev-parse", "HEAD~1"],
+                cwd=guarded,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            (guarded / "dead.md").write_text(original_dead, encoding="utf-8")
+            ancestor_dirty = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    summary_name,
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    older,
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(guarded),
+                    "--json",
+                ]
+            )
+            if (
+                ancestor_dirty.returncode == 0
+                or (guarded / "dead.md").read_text(encoding="utf-8") != original_dead
+                or "dirty" not in ancestor_dirty.stdout
+            ):
+                failures.append(
+                    f"ancestor rev matching a dirty worktree should be refused: {ancestor_dirty.stdout}"
+                )
+            else:
+                print("[PASS] prune refuses a worktree that matches an ancestor but not HEAD")
 
         linked = tmp / "linked"
         linked_init = run(["init", "--root", str(linked), "--json"])
@@ -3002,14 +3047,108 @@ def main() -> int:
                 )
             finally:
                 refcmd._unlink_store = real_unlink_store
+            raced_living = (raced_link / "living.md").read_text(encoding="utf-8")
             if (
                 raced_code == 0
                 or not (raced_link / "dead.md").is_file()
-                or (raced_link / "living.md").read_text(encoding="utf-8") != before_living
+                or "path: dead.md" not in raced_living
+                or raced_living == before_living
             ):
-                failures.append("prune returned success after a link appeared before deletion")
+                failures.append("prune overwrote a concurrent link or left the drop deleted")
             else:
-                print("[PASS] prune rolls back a link added before deletion")
+                print("[PASS] prune restores its drop and leaves a concurrent link in place")
+
+        already_red = tmp / "already-red"
+        already_init = run(["init", "--root", str(already_red), "--json"])
+        if already_init.returncode != 0:
+            failures.append(f"already-red store init failed: {already_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(already_red, ["init", "-b", "main"])
+            (already_red / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (already_red / "other.md").write_text(page("Other", "relates_to: []\n", prose), encoding="utf-8")
+            (already_red / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (already_red / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: missing.md\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            git(already_red, ["add", "."])
+            git(already_red, ["commit", "-m", "already red"])
+            red_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(already_red),
+                    "--json",
+                ]
+            )
+            if (
+                red_run.returncode == 0
+                or "would fail compile" not in red_run.stdout
+                or not (already_red / "dead.md").is_file()
+            ):
+                failures.append(f"pre-existing critical compile should block prune: {red_run.stdout}")
+            else:
+                print("[PASS] prune refuses when compile stays red")
+
+        locked = tmp / "stable-lock"
+        locked_init = run(["init", "--root", str(locked), "--json"])
+        if locked_init.returncode != 0:
+            failures.append(f"stable-lock store init failed: {locked_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(locked, ["init", "-b", "main"])
+            (locked / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (locked / "other.md").write_text(page("Other", "relates_to: []\n", prose), encoding="utf-8")
+            (locked / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(locked, ["add", "."])
+            git(locked, ["commit", "-m", "lock"])
+            first_lock = run_prune(str(locked), "summary.md", ("dead.md",), "HEAD", "derived_from", True)
+            lock_path = locked / ".atlas-ref-prune.lock"
+            first_ino = lock_path.stat().st_ino if lock_path.is_file() else None
+            second_lock = run_prune(str(locked), "summary.md", ("other.md",), "HEAD", "derived_from", True)
+            second_ino = lock_path.stat().st_ino if lock_path.is_file() else None
+            if first_lock != 0 or second_lock != 0 or first_ino is None or first_ino != second_ino:
+                failures.append(
+                    f"prune lock inode changed between runs: {first_lock} {second_lock} {first_ino} {second_ino}"
+                )
+            else:
+                print("[PASS] prune keeps one lock inode across runs")
+
+        import builtins
+
+        saved_fcntl = sys.modules.get("fcntl")
+        real_import = builtins.__import__
+
+        def block_fcntl(name, *args, **kwargs):
+            if name == "fcntl":
+                raise ImportError("no fcntl")
+            return real_import(name, *args, **kwargs)
+
+        sys.modules.pop("fcntl", None)
+        builtins.__import__ = block_fcntl
+        try:
+            refcmd._lock_fd(0, "page.md")
+        except RefError as exc:
+            if "file locking" not in str(exc):
+                failures.append(f"missing fcntl should name file locking: {exc}")
+            else:
+                print("[PASS] prune refuses when file locking cannot be imported")
+        else:
+            failures.append("lock should refuse when fcntl cannot be imported")
+        finally:
+            builtins.__import__ = real_import
+            if saved_fcntl is not None:
+                sys.modules["fcntl"] = saved_fcntl
 
         if not _relation_path_escapes(tmp, "bad\0name.md"):
             failures.append("embedded null in a relation path should be treated as escaping")
