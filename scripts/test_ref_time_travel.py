@@ -2613,6 +2613,72 @@ def main() -> int:
             finally:
                 os.close(dirfd)
 
+            restore_dir = tmp / "restore-noreplace"
+            restore_dir.mkdir()
+            restore_fd = os.open(restore_dir, os.O_RDONLY)
+            real_rename = os.rename
+            rename_calls = {"n": 0}
+
+            def tracking_rename(*args, **kwargs):
+                rename_calls["n"] += 1
+                return real_rename(*args, **kwargs)
+
+            os.rename = tracking_rename
+            try:
+                occupied = restore_dir / "dead.md"
+                occupied.write_bytes(b"foreign\n")
+                parked = restore_dir / ".atlas-prune-drop-x.tmp"
+                parked.write_bytes(b"checked\n")
+                refused_replace = False
+                try:
+                    refcmd._restore_displaced(restore_fd, occupied.name, parked.name, occupied.name)
+                except RefError as exc:
+                    refused_replace = "displaced file left" in str(exc)
+                if (
+                    not refused_replace
+                    or occupied.read_bytes() != b"foreign\n"
+                    or parked.read_bytes() != b"checked\n"
+                    or rename_calls["n"]
+                ):
+                    failures.append("restore displaced replaced a name that appeared before rename")
+                else:
+                    print("[PASS] restore displaced refuses an occupied name without replacing it")
+
+                occupied.unlink()
+                rename_calls["n"] = 0
+                refcmd._restore_displaced(restore_fd, occupied.name, parked.name, occupied.name)
+                if occupied.read_bytes() != b"checked\n" or parked.exists() or rename_calls["n"]:
+                    failures.append("restore displaced did not move an absent name without replace")
+                else:
+                    print("[PASS] restore displaced moves only when the name is absent")
+
+                occupied.write_bytes(b"foreign-again\n")
+                parked.write_bytes(b"checked-again\n")
+                rename_calls["n"] = 0
+                stayed = False
+                try:
+                    refcmd._restore_failed_unlink(
+                        restore_fd,
+                        occupied.name,
+                        parked.name,
+                        occupied.name,
+                        OSError("injected unlink failure"),
+                    )
+                except RefError as exc:
+                    stayed = "remains" in str(exc)
+                if (
+                    not stayed
+                    or occupied.read_bytes() != b"foreign-again\n"
+                    or parked.read_bytes() != b"checked-again\n"
+                    or rename_calls["n"]
+                ):
+                    failures.append("failed unlink restore replaced a name created during rollback")
+                else:
+                    print("[PASS] failed unlink restore leaves an occupied name untouched")
+            finally:
+                os.rename = real_rename
+                os.close(restore_fd)
+
         scalar = tmp / "scalar-drop"
         scalar_init = run(["init", "--root", str(scalar), "--json"])
         if scalar_init.returncode != 0:

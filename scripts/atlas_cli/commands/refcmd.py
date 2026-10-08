@@ -840,40 +840,49 @@ def _lock_dir(dirfd: int, label: str) -> None:
         raise RefError(f"refusing to update locked page {label}") from e
 
 
-def _exchange_names(dirfd: int, src: str, dst: str) -> None:
-    """Atomically swap two names in one directory. The destination is not overwritten."""
+def _renameat_flag(dirfd: int, src: str, dst: str, flag: int) -> None:
+    """Rename within one directory using a kernel flag. Never falls back to replace."""
     src_b = os.fsencode(src)
     dst_b = os.fsencode(dst)
     system = platform.system()
+    libc = ctypes.CDLL(None, use_errno=True)
     if system == "Linux":
-        libc = ctypes.CDLL(None, use_errno=True)
-        renameat2 = libc.renameat2
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        rc = renameat2(dirfd, src_b, dirfd, dst_b, 2)
+        rename_fn = libc.renameat2
     elif system == "Darwin":
-        libc = ctypes.CDLL(None, use_errno=True)
-        renameatx_np = libc.renameatx_np
-        renameatx_np.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameatx_np.restype = ctypes.c_int
-        rc = renameatx_np(dirfd, src_b, dirfd, dst_b, 2)
+        rename_fn = libc.renameatx_np
     else:
-        raise RefError("refusing to rewrite without an atomic exchange")
+        raise RefError("refusing to rewrite without an atomic rename")
+    rename_fn.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    rename_fn.restype = ctypes.c_int
+    rc = rename_fn(dirfd, src_b, dirfd, dst_b, flag)
     if rc != 0:
         err = ctypes.get_errno()
         raise OSError(err, os.strerror(err), src)
+
+
+def _exchange_names(dirfd: int, src: str, dst: str) -> None:
+    """Atomically swap two names in one directory. The destination is not overwritten."""
+    if platform.system() not in ("Linux", "Darwin"):
+        raise RefError("refusing to rewrite without an atomic exchange")
+    _renameat_flag(dirfd, src, dst, 2)
+
+
+def _rename_noreplace(dirfd: int, src: str, dst: str) -> None:
+    """Move src onto dst only when dst is absent. A concurrent create is left intact."""
+    system = platform.system()
+    if system == "Linux":
+        flag = 1  # RENAME_NOREPLACE
+    elif system == "Darwin":
+        flag = 4  # RENAME_EXCL
+    else:
+        raise RefError("refusing to restore without an atomic no-replace rename")
+    _renameat_flag(dirfd, src, dst, flag)
 
 
 def _rollback_exchange(
@@ -1243,30 +1252,22 @@ def _read_fd(fd: int) -> bytes:
 
 
 def _restore_displaced(dirfd: int, name: str, tmp: str, label: str) -> None:
-    """Put a renamed replacement back when the checked inode was not the one moved."""
+    """Put a renamed replacement back only when the live name is still absent."""
     try:
-        os.lstat(name, dir_fd=dirfd)
-    except FileNotFoundError:
-        os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
-        return
-    raise RefError(f"refusing to drop replaced page {label}; displaced file left at {tmp}")
+        _rename_noreplace(dirfd, tmp, name)
+    except OSError as e:
+        raise RefError(f"refusing to drop replaced page {label}; displaced file left at {tmp}") from e
 
 
 def _restore_failed_unlink(dirfd: int, name: str, tmp: str, label: str, exc: OSError) -> None:
     """Put the checked page back when delete fails, so it is not stranded under a temp name."""
     try:
-        os.lstat(name, dir_fd=dirfd)
-    except FileNotFoundError:
-        try:
-            os.rename(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
-        except OSError as restore_exc:
-            raise RefError(
-                f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
-            ) from restore_exc
-        raise RefError(f"refusing to drop {label}; deletion failed") from exc
-    raise RefError(
-        f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
-    ) from exc
+        _rename_noreplace(dirfd, tmp, name)
+    except OSError as restore_exc:
+        raise RefError(
+            f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
+        ) from restore_exc
+    raise RefError(f"refusing to drop {label}; deletion failed") from exc
 
 
 def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
