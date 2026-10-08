@@ -252,6 +252,11 @@ def _relates(meta: dict) -> list[dict]:
     return [r for r in rel if isinstance(r, dict)] if isinstance(rel, list) else []
 
 
+def _live_relates(meta: dict) -> list[dict]:
+    """Tip relations only. A ref-bearing item is history and satisfies no live contract."""
+    return [item for item in _relates(meta) if not str(item.get("ref") or "").strip()]
+
+
 def _kind(item: dict) -> str:
     return str(item.get("kind") or item.get("role") or "").strip().lower()
 
@@ -606,7 +611,7 @@ def _gist_parent_keys(store: Store, gist_key: str) -> list[str] | None:
     """
     if gist_key not in store.pages or store.ptype(gist_key) != "gist":
         return None
-    parents = [item for item in _relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
+    parents = [item for item in _live_relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
     if not parents:
         return None
     canons: list[str] = []
@@ -1125,7 +1130,7 @@ def _fill_clusters(store: Store, parents: list[str]) -> list[list[str]]:
                 link[root_right] = root_left
 
         for member in members:
-            for item in _relates(store.pages[member][1]):
+            for item in _live_relates(store.pages[member][1]):
                 target = store.canonical(str(item.get("path") or ""))
                 if target in member_set and target != member and store.folder(target) == folder:
                     union(member, target)
@@ -1648,7 +1653,7 @@ def plan_store(
                 "schema-index-cue", "auto", [k, _rel(root, idx) if idx.exists() else store.folder(k) + "/index.md"],
                 f"append a cue for {path.name} to {store.folder(k)}/index.md labelled with the schema title",
                 {"title": title}, store))
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             if _kind(item) != "related":
                 continue
             ck = store.canonical(str(item.get("path") or ""))
@@ -1663,7 +1668,7 @@ def plan_store(
     for k, (path, meta, _) in store.pages.items():
         if store.ptype(k) != "schema":
             continue
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             ck = store.canonical(str(item.get("path") or ""))
             if _kind(item) == "related" and ck in store.pages and store.folder(ck) == store.folder(k):
                 covered.add(ck)
@@ -1688,7 +1693,7 @@ def plan_store(
         if not isinstance(desc, str) or not desc:
             continue
         memory_parents = []
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             if _kind(item) != "derived_from":
                 continue
             mk = store.canonical(str(item.get("path") or ""))
@@ -2006,7 +2011,7 @@ def _apply_relates_add(store: Store, schema_key: str, gist_key: str) -> None:
         lines.append(entry_style[1])
     _write(path, "".join(lines) + rest)
     meta, _ = read_page(path, store.version)
-    if not any(store.canonical(str(i.get("path") or "")) == gist_key and _kind(i) == "related" for i in _relates(meta)):
+    if not any(store.canonical(str(i.get("path") or "")) == gist_key and _kind(i) == "related" for i in _live_relates(meta)):
         _write(path, text)
         raise Refusal(f"{schema_key}: relates_to edit did not round-trip; reverted")
 
@@ -2302,7 +2307,7 @@ def _apply_schema_fill(store: Store, task: dict) -> None:
         raise Refusal(f"{schema_key}: schema did not round-trip") from e
     related = {
         store.canonical(str(item.get("path") or ""))
-        for item in _relates(meta)
+        for item in _live_relates(meta)
         if _kind(item) == "related"
     }
     if any(member["path"] not in related for member in members) or prose not in body:

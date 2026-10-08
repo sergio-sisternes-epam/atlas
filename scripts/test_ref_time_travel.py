@@ -34,6 +34,7 @@ from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref, _relation_path_escapes  # noqa: E402
 from atlas_cli.commands.memory_migrate import _converted_frame_text  # noqa: E402
+from test_memory_layers import init_legacy, write_index, write_page  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
 
 
@@ -2892,6 +2893,123 @@ def main() -> int:
                 failures.append("OSError during rewrite should refuse without deleting the drop")
             else:
                 print("[PASS] prune turns a rewrite OSError into a non-zero JSON result")
+
+        framed = tmp / "frame-gate"
+        framed_init = init_legacy(framed)
+        if framed_init.returncode != 0:
+            failures.append(f"frame-gate store init failed: {framed_init.stderr}")
+        else:
+            git(framed, ["init", "-b", "main"])
+            concepts = framed / "concepts"
+            write_index(concepts, "Concepts")
+            write_page(concepts / "memory.md", "memory", "Memory", "2026-09-27")
+            write_page(
+                concepts / "g1.md",
+                "gist",
+                "Gist one",
+                "2026-09-27",
+                [{"path": "concepts/memory.md", "kind": "derived_from"}],
+            )
+            write_page(
+                concepts / "g2.md",
+                "gist",
+                "Gist two",
+                "2026-09-27",
+                [{"path": "concepts/memory.md", "kind": "derived_from"}],
+            )
+            write_page(
+                concepts / "frame.md",
+                "frame",
+                "Frame",
+                "2026-09-27",
+                [
+                    {"path": "concepts/g1.md", "kind": "related"},
+                    {"path": "concepts/g2.md", "kind": "related"},
+                ],
+            )
+            write_page(framed / "summary.md", "memory", "Summary", "2026-09-27")
+            git(framed, ["add", "."])
+            git(framed, ["commit", "-m", "frame"])
+            rung = run(["schema", "memory-rung", "--set", "error", "--root", str(framed), "--json"])
+            before_frame = (concepts / "frame.md").read_text(encoding="utf-8")
+            frame_run = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "concepts/g1.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(framed),
+                    "--json",
+                ]
+            )
+            if (
+                rung.returncode != 0
+                or frame_run.returncode == 0
+                or "would fail compile" not in frame_run.stdout
+                or not (concepts / "g1.md").is_file()
+                or (concepts / "frame.md").read_text(encoding="utf-8") != before_frame
+            ):
+                failures.append(
+                    f"prune should roll back a frame compile failure: {rung.stdout} {frame_run.stdout} {frame_run.stderr}"
+                )
+            else:
+                print("[PASS] prune rolls back when the tip compile gate goes red")
+
+        raced_link = tmp / "raced-link-after-rewrite"
+        raced_link_init = run(["init", "--root", str(raced_link), "--json"])
+        if raced_link_init.returncode != 0:
+            failures.append(f"raced-link store init failed: {raced_link_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(raced_link, ["init", "-b", "main"])
+            (raced_link / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (raced_link / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (raced_link / "living.md").write_text(page("Living", "relates_to: []\n", prose), encoding="utf-8")
+            git(raced_link, ["add", "."])
+            git(raced_link, ["commit", "-m", "edge"])
+            before_living = (raced_link / "living.md").read_text(encoding="utf-8")
+            real_unlink_store = refcmd._unlink_store
+
+            def linking_unlink(store, rel, repo, expected):
+                if rel == "dead.md":
+                    living = store / "living.md"
+                    living.write_text(
+                        living.read_text(encoding="utf-8").replace(
+                            "relates_to: []\n",
+                            "relates_to:\n  - path: dead.md\n    kind: related\n",
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                return real_unlink_store(store, rel, repo, expected)
+
+            refcmd._unlink_store = linking_unlink
+            try:
+                raced_code = run_prune(
+                    str(raced_link),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                refcmd._unlink_store = real_unlink_store
+            if (
+                raced_code == 0
+                or not (raced_link / "dead.md").is_file()
+                or (raced_link / "living.md").read_text(encoding="utf-8") != before_living
+            ):
+                failures.append("prune returned success after a link appeared before deletion")
+            else:
+                print("[PASS] prune rolls back a link added before deletion")
 
         if not _relation_path_escapes(tmp, "bad\0name.md"):
             failures.append("embedded null in a relation path should be treated as escaping")

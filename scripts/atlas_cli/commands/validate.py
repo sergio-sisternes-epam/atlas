@@ -560,6 +560,8 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
         ids = set()
     seen: set[str] = set()
     for path in root.rglob("*.md"):
+        if not path.is_file():
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:

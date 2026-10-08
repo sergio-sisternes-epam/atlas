@@ -308,6 +308,38 @@ relates_to:
         self.assertNotIn("schema_folder", crit)
         self.assertNotIn("schema_missing_from_index", crit)
 
+    def test_history_edge_does_not_cover_gist(self) -> None:
+        root = shared_parent_store(self.base)
+        notes = root / "notes"
+        (notes / "index.md").write_text(
+            "# Notes\n\n- [Topic gist](topic.gist.md)\n- [Notes schema](./schema.schema.md)\n",
+            encoding="utf-8",
+        )
+        page(notes / "extra.gist.md", f"""
+type: gist
+title: Extra gist
+created: 2026-10-05
+description: {MEM_DESC}
+relates_to:
+  - path: notes/topic.md
+    kind: derived_from
+""", "## Content\n\nA second gist of the same memory, long enough for the body check.")
+        schema = notes / "schema.schema.md"
+        schema.write_text(
+            schema.read_text(encoding="utf-8").replace(
+                "    kind: related\n",
+                "    kind: related\n  - path: notes/extra.gist.md\n    kind: related\n    ref: abcdef1234567890\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _code, planned = plan(root, self.base / "out")
+        uncovered = [
+            task for task in tasks(planned)
+            if task["kind"] == "uncovered-gist" and "notes/extra.gist.md" in task["paths"]
+        ]
+        self.assertTrue(uncovered, planned)
+
     def test_no_contract_write_and_stamp(self) -> None:
         self.assertEqual(CURRENT_RELEASE, "0.13.0-beta.7")
         root = shared_parent_store(self.base)

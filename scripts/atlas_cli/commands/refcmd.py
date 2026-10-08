@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import errno
 import fcntl
+import io
 import json
 import os
 import platform
@@ -840,6 +842,30 @@ def _lock_dir(dirfd: int, label: str) -> None:
         raise RefError(f"refusing to update locked page {label}") from e
 
 
+def _compile_critical(store: Path) -> set[tuple[str, str, str]]:
+    """Critical compile findings for the tip. Dry-run, so mesh and recall are not published."""
+    from .validate import run as validate_run
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        validate_run(str(store), True, None, None, True)
+    try:
+        payload = json.loads(buffer.getvalue() or "{}")
+    except json.JSONDecodeError as e:
+        raise RefError("refusing to prune without a compile result") from e
+    found: set[tuple[str, str, str]] = set()
+    for item in payload.get("critical") or []:
+        if isinstance(item, dict):
+            found.add(
+                (
+                    str(item.get("id") or ""),
+                    str(item.get("path") or ""),
+                    str(item.get("msg") or ""),
+                )
+            )
+    return found
+
+
 def _renameat_flag(dirfd: int, src: str, dst: str, flag: int) -> None:
     """Rename within one directory using a kernel flag. Never falls back to replace."""
     src_b = os.fsencode(src)
@@ -1667,6 +1693,7 @@ def run_prune(
         drop_set = set(drop_rels)
         rewritten: list[str] = []
         pending: list[tuple[str, str, bytes, int, int, int]] = []
+        baseline: list[tuple[str, bytes, int]] = []
         summary_final: str | None = None
         _schema, _schema_err = load_schema(store)
         version = schema_version(_schema)
@@ -1675,6 +1702,7 @@ def run_prune(
             if rel in drop_set:
                 continue
             original_bytes, mode, dev, ino = _read_identity(store, rel)
+            baseline.append((rel, original_bytes, mode))
             try:
                 original = original_bytes.decode("utf-8")
             except UnicodeDecodeError as e:
@@ -1724,59 +1752,98 @@ def run_prune(
             raise RefError(f"summary would fail compile: {transformed[0]}")
         removed: list[tuple[str, bytes, int]] = []
         written: list[tuple[str, bytes, int, int, int, bytes]] = []
+        lock_path = store / ".atlas-prune.lock"
+        root_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            for rel, updated, original_bytes, _mode, dev, ino in pending:
-                new_bytes = updated.encode("utf-8")
-                try:
-                    new_dev, new_ino = _rewrite_store(
-                        store,
-                        rel,
-                        new_bytes,
-                        expected=original_bytes,
-                        expected_dev=dev,
-                        expected_ino=ino,
-                    )
-                except RewriteInstalled as installed:
-                    written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
-                    raise
-                written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
-            for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
-                dirfd, name = _open_store_parent(store, rel)
-                try:
-                    if not _installed_write_matches(dirfd, name, new_dev, new_ino, _new_bytes, rel):
-                        raise RefError(f"refusing to rewrite changed page {rel}")
-                finally:
-                    os.close(dirfd)
-            for rel in drop_rels:
-                gitpath = _git_path(store, repo, rel)
-                _code, expected, _err = run_git(
-                    ["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"],
-                    cwd=repo,
-                )
-                if _code != 0 or not expected:
-                    raise RefError(f"ref {sha} does not contain {rel}")
-                data, mode = _unlink_store(store, rel, repo, expected)
-                removed.append((rel, data, mode))
-        except Exception as exc:
+            _lock_fd(root_fd, summary_rel)
+            before_critical = _compile_critical(store)
             try:
-                for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
-                    _rewrite_store(
-                        store,
-                        rel,
-                        original_bytes,
-                        must_exist=True,
-                        mode=mode,
-                        expected=new_bytes,
-                        expected_dev=new_dev,
-                        expected_ino=new_ino,
+                for rel, updated, original_bytes, _mode, dev, ino in pending:
+                    new_bytes = updated.encode("utf-8")
+                    try:
+                        new_dev, new_ino = _rewrite_store(
+                            store,
+                            rel,
+                            new_bytes,
+                            expected=original_bytes,
+                            expected_dev=dev,
+                            expected_ino=ino,
+                        )
+                    except RewriteInstalled as installed:
+                        written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
+                        raise
+                    written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
+                for rel in drop_rels:
+                    gitpath = _git_path(store, repo, rel)
+                    _code, expected, _err = run_git(
+                        ["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"],
+                        cwd=repo,
                     )
-                for rel, data, mode in removed:
-                    _rewrite_store(store, rel, data, must_exist=False, mode=mode)
-            except Exception as restore_exc:
-                if isinstance(restore_exc, RefError):
-                    raise restore_exc from exc
-                raise RefError(f"refusing to update page: {restore_exc}") from exc
-            raise
+                    if _code != 0 or not expected:
+                        raise RefError(f"ref {sha} does not contain {rel}")
+                    data, mode = _unlink_store(store, rel, repo, expected)
+                    removed.append((rel, data, mode))
+                for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
+                    dirfd, name = _open_store_parent(store, rel)
+                    try:
+                        if not _installed_write_matches(dirfd, name, new_dev, new_ino, _new_bytes, rel):
+                            raise RefError(f"refusing to rewrite changed page {rel}")
+                    finally:
+                        os.close(dirfd)
+                introduced = sorted(_compile_critical(store) - before_critical)
+                if introduced:
+                    ident, path, msg = introduced[0]
+                    raise RefError(f"prune would fail compile: [{ident}] {path}: {msg}")
+            except Exception as exc:
+                try:
+                    for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
+                        _rewrite_store(
+                            store,
+                            rel,
+                            original_bytes,
+                            must_exist=True,
+                            mode=mode,
+                            expected=new_bytes,
+                            expected_dev=new_dev,
+                            expected_ino=new_ino,
+                        )
+                    for rel, data, mode in removed:
+                        _rewrite_store(store, rel, data, must_exist=False, mode=mode)
+                    if isinstance(exc, RefError) and str(exc).startswith("prune would fail compile"):
+                        restored = {item[0] for item in written} | {item[0] for item in removed}
+                        for rel, original_bytes, mode in baseline:
+                            if rel in restored:
+                                continue
+                            try:
+                                current, current_mode, _dev, _ino = _read_identity(store, rel)
+                            except RefError:
+                                _rewrite_store(
+                                    store,
+                                    rel,
+                                    original_bytes,
+                                    must_exist=False,
+                                    mode=mode,
+                                )
+                                continue
+                            if current != original_bytes:
+                                _rewrite_store(
+                                    store,
+                                    rel,
+                                    original_bytes,
+                                    must_exist=True,
+                                    mode=current_mode,
+                                )
+                except Exception as restore_exc:
+                    if isinstance(restore_exc, RefError):
+                        raise restore_exc from exc
+                    raise RefError(f"refusing to update page: {restore_exc}") from exc
+                raise
+        finally:
+            os.close(root_fd)
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
     except RefError as e:
         return _fail(as_json, str(e))
     except OSError as e:
