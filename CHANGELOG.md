@@ -243,6 +243,7 @@
 - A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
 - After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. A page whose bytes changed, including one that reused the installed inode number, is not reported as a successful retarget. That destination is left in place, and the displaced page is kept for recovery.
 - A drop rename that moves a different inode keeps the checked page bytes and mode in a recovery file, then puts the other file back. The checked page is not closed away as the only remaining copy.
+- A restore link whose destination is replaced before the identity check keeps the checked temp instead of unlinking the last copy.
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
 - `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.

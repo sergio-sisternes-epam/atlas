@@ -1671,6 +1671,60 @@ def main() -> int:
         else:
             print("[PASS] failed unlink restores the page before raising")
 
+        raced_restore = tmp / "raced-restore"
+        raced_restore.mkdir()
+        checked_restore = b"checked-restore\n"
+        real_link = os.link
+        raced_link = {"done": False}
+
+        def racing_link(src, dst, *args, **kwargs):
+            linked = real_link(src, dst, *args, **kwargs)
+            if not raced_link["done"] and dst == "gone.md":
+                raced_link["done"] = True
+                dirfd = kwargs.get("dst_dir_fd")
+                os.unlink(dst, dir_fd=dirfd)
+                fd = os.open(
+                    dst,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                    0o644,
+                    dir_fd=dirfd,
+                )
+                os.write(fd, b"racer-restore\n")
+                os.close(fd)
+            return linked
+
+        os.link = racing_link
+        try:
+            _rewrite_store(
+                raced_restore,
+                "gone.md",
+                checked_restore,
+                must_exist=False,
+                mode=0o640,
+            )
+        except RefError as exc:
+            refused_restore = "checked page left at" in str(exc)
+        else:
+            refused_restore = False
+        finally:
+            os.link = real_link
+        kept_restore = [
+            path
+            for path in raced_restore.glob(".atlas-prune-*.tmp")
+            if path.read_bytes() == checked_restore
+            and stat.S_IMODE(path.stat().st_mode) == 0o640
+        ]
+        racer_page = raced_restore / "gone.md"
+        if (
+            not refused_restore
+            or not kept_restore
+            or not racer_page.is_file()
+            or racer_page.read_bytes() != b"racer-restore\n"
+        ):
+            failures.append("restore link of a replacement lost the checked page")
+        else:
+            print("[PASS] restore link of a replacement keeps the checked page")
+
         edited = tmp / "edited-inode"
         edited.mkdir()
         git(edited, ["init", "-b", "main"])

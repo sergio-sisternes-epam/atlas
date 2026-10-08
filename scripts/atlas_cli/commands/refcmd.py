@@ -1179,14 +1179,23 @@ def _rewrite_dir_file(
                 replaced = _matching_restore(dirfd, name, data, label, mode)
                 return replaced
             written = os.lstat(tmp, dir_fd=dirfd)
-            replaced_info = os.lstat(name, dir_fd=dirfd)
+            try:
+                replaced_info = os.lstat(name, dir_fd=dirfd)
+            except OSError as e:
+                held = tmp
+                tmp = ""
+                raise RefError(f"refusing to restore {label}; checked page left at {held}") from e
             if (
                 stat.S_ISLNK(replaced_info.st_mode)
                 or not stat.S_ISREG(replaced_info.st_mode)
                 or replaced_info.st_dev != written.st_dev
                 or replaced_info.st_ino != written.st_ino
             ):
-                raise RefError(f"refusing to restore replaced page {label}")
+                held = tmp
+                tmp = ""
+                raise RefError(
+                    f"refusing to restore replaced page {label}; checked page left at {held}"
+                )
             return replaced_info.st_dev, replaced_info.st_ino
         tmp = ""
         replaced = os.lstat(name, dir_fd=dirfd)
