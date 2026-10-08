@@ -394,6 +394,36 @@ relates_to:
         self.assertNotIn("(old.md)", keeper)
         self.assertIn("new.md", keeper.split("## Content", 1)[1])
 
+    def test_quoted_ref_key_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "history-only.md",
+            """
+type: document
+title: History only
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    'ref': abcdef1234567890
+""",
+            "## Content\n\nHistory only page has enough prose and no live link.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("history-only.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["history-only.md"])
+        history_only = (root / "history-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history_only)
+        self.assertIn("'ref': abcdef1234567890", history_only)
+        self.assertNotIn("new.md", history_only)
+
     def test_no_contract_write_and_stamp(self) -> None:
         self.assertEqual(CURRENT_RELEASE, "0.13.0-beta.7")
         root = shared_parent_store(self.base)

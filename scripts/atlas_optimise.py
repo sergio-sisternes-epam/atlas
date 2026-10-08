@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas_cli import __version__ as PACKAGE_VERSION  # noqa: E402
 from atlas_cli.commands.validate import GIST_PARENT_TYPES, MISSING_GIST_TYPES  # noqa: E402
-from atlas_cli.core.frontmatter import FrontmatterError, read_page  # noqa: E402
+from atlas_cli.core.frontmatter import FrontmatterError, load_yaml_value, read_page  # noqa: E402
 from atlas_cli.core.paths import CONTRACT_FILENAMES, CONTRACT_NAME, RESERVED  # noqa: E402
 from atlas_cli.core.recall_config import schema_version  # noqa: E402
 from atlas_cli.core.schema import (  # noqa: E402
@@ -333,6 +333,23 @@ def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
     return None
 
 
+_HISTORY_REF = re.compile(r"""(?:^|\s)(?:(['"])ref\1|ref)\s*:\s*\S""")
+
+
+def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
+    """True when the item is a history edge, including a quoted SCHEMA 2.0 ref key."""
+    chunk = lines[span[0] : span[1]]
+    if any(_HISTORY_REF.search(line) for line in chunk):
+        return True
+    try:
+        value = load_yaml_value("\n".join(chunk))
+    except FrontmatterError:
+        return False
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return isinstance(value, dict) and bool(str(value.get("ref") or "").strip())
+
+
 def _history_path_lines(text: str) -> set[int]:
     """Line numbers of path fields inside ref-bearing relates_to items."""
     parsed = _fm_lines(text)
@@ -344,7 +361,7 @@ def _history_path_lines(text: str) -> set[int]:
         return set()
     found: set[int] = set()
     for span in _item_spans(lines, *block):
-        if not any(re.search(r"(?:^|\s)ref:\s*\S", lines[i]) for i in range(*span)):
+        if not _span_is_history(lines, span):
             continue
         for i in range(*span):
             if re.match(r"^\s*-?\s*path:\s*\S", lines[i]):

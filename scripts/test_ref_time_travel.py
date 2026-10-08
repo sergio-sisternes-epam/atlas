@@ -1308,6 +1308,53 @@ def main() -> int:
             else:
                 print("[PASS] prune rewrites a commented schema 2.0 path")
 
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (commented / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (commented / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n"
+                    "  - path: dead.md\n"
+                    "    kind: related\n"
+                    "    'ref': abcdef\n"
+                    "  - path: dead.md\n"
+                    "    kind: implements\n",
+                    prose,
+                ),
+                encoding="utf-8",
+            )
+            git(commented, ["add", "."])
+            git(commented, ["commit", "-m", "quoted ref"])
+            quoted_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(commented),
+                    "--json",
+                ]
+            )
+            living = (commented / "living.md").read_text(encoding="utf-8")
+            history, _sep, live = living.partition("'ref': abcdef")
+            if (
+                quoted_prune.returncode != 0
+                or "'ref': abcdef" not in living
+                or "path: dead.md" not in history
+                or "path: summary.md" not in live
+                or "path: dead.md" in live
+            ):
+                failures.append(f"quoted ref key was rewritten as a live edge: {quoted_prune.stdout}\n{living}")
+            else:
+                print("[PASS] prune keeps a quoted schema 2.0 ref edge")
+
         shown = tmp / "shown"
         shown_init = run(["init", "--root", str(shown), "--json"])
         if shown_init.returncode != 0:

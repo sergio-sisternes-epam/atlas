@@ -29,7 +29,9 @@ _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 TOP_KEY = re.compile(r"^[A-Za-z_][\w-]*:")
 ITEM_START = re.compile(r"^\s*-\s+")
-FIELD = re.compile(r"^(\s*(?:-\s*)?)([A-Za-z_][\w-]*):\s*(.*?)\s*$")
+FIELD = re.compile(
+    r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
+)
 
 
 class RefError(ValueError):
@@ -222,16 +224,45 @@ def _norm_path(value: str) -> str:
     return "/".join(parts)
 
 
+def _field_parts(line: str) -> tuple[str, str, str] | None:
+    """Return indent, key, and value. A quoted SCHEMA 2.0 key is still that key."""
+    match = FIELD.match(line)
+    if not match:
+        return None
+    return match.group(1), match.group(3) or match.group(4), match.group(5)
+
+
 def _item_field(lines: list[str], key: str) -> str | None:
     for line in lines:
-        match = FIELD.match(line)
-        if match and match.group(2) == key:
-            return _norm_path(match.group(3))
+        field = _field_parts(line)
+        if field and field[1] == key:
+            return _norm_path(field[2])
     return None
 
 
 def _has_field(lines: list[str], key: str) -> bool:
-    return any(FIELD.match(line) and FIELD.match(line).group(2) == key for line in lines)
+    for line in lines:
+        field = _field_parts(line)
+        if field and field[1] == key:
+            return True
+    return False
+
+
+def _parsed_item(lines: list[str]) -> dict | None:
+    try:
+        value = load_yaml_value("\n".join(lines))
+    except FrontmatterError:
+        return None
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return value if isinstance(value, dict) else None
+
+
+def _item_has_ref(lines: list[str]) -> bool:
+    if _has_field(lines, "ref"):
+        return True
+    parsed = _parsed_item(lines)
+    return parsed is not None and "ref" in parsed
 
 
 def _needs_yaml_item(lines: list[str]) -> bool:
@@ -270,17 +301,17 @@ def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
 def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str] | None, bool]:
     lines = _coerce_block_item(lines, drop)
     path = _item_field(lines, "path")
-    if path is None or path not in drop or _has_field(lines, "ref"):
+    if path is None or path not in drop or _item_has_ref(lines):
         return lines, False
     if on_summary:
         return None, True
     rewritten: list[str] = []
     for line in lines:
-        match = FIELD.match(line)
-        if match and match.group(2) == "path":
-            rewritten.append(f"{match.group(1)}path: {_yaml_scalar(summary)}")
+        field = _field_parts(line)
+        if field and field[1] == "path":
+            rewritten.append(f"{field[0]}path: {_yaml_scalar(summary)}")
             continue
-        if match and match.group(2) == "ref":
+        if field and field[1] == "ref":
             continue
         rewritten.append(line)
     return rewritten, True
