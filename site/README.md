@@ -144,3 +144,12 @@ The repository owner sets that variable after the pre-publish gate, after settin
 - Show the CLI only as `python3 <atlas-skill>/scripts/atlas.py ...`.
 - Use the `note`, `tip` and `danger` asides only.
 - Style only with atlas-style tokens (`var(--token)`); never edit `src/styles/atlas-tokens.css`.
+
+## Theme and code colours
+
+- The theme follows the OS until the reader picks Light or Dark; the choice is stored under the `atlas-style-theme` key.
+- Known limitation: without JavaScript the site is always dark, even with a light OS.
+  Starlight writes `data-theme="dark"` into the page shell, and changing that would mean overriding the shell.
+- Code block colours come from `ec-theme.mjs`, which reads `src/styles/atlas-tokens.css` at build time.
+  The build fails if a colour role it needs is missing.
+  After changing it, clear the content cache before you build (`rm -rf node_modules/.astro dist`), or the old colours stay.

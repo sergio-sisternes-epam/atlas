@@ -44,20 +44,30 @@
 	--sl-text-body: var(--text-body);
 	--sl-text-body-sm: var(--text-small);
 	--sl-text-code: var(--text-mono);
+	--sl-text-code-sm: var(--text-mono);
 	--sl-line-height: var(--leading-body);
 	--sl-line-height-headings: var(--leading-tight);
 
 	--sl-content-width: var(--content-max);
 	--sl-nav-height: var(--chrome-height);
+	/* Logo box = chrome height - 2 x pad: about 40px, so the Signal mark reads as Signal. */
+	--sl-nav-pad-y: var(--space-1);
 
 	--sl-shadow-sm: var(--shadow-sm);
 	--sl-shadow-md: var(--shadow-md);
 	--sl-shadow-lg: var(--shadow-lg);
 }
 
-/* Pages without a sidebar (the splash home page) use the wide layout token. */
+/*
+ * Pages without a sidebar (splash pages) use the wide layout token for the hero and
+ * card grids only; reading text keeps the readable measure.
+ */
 :root[data-theme]:not([data-has-sidebar]) {
 	--sl-content-width: var(--content-wide);
+}
+
+:root:not([data-has-sidebar]) .sl-markdown-content > :not(.card-grid) {
+	max-width: var(--content-max);
 }
 
 /* gray-7 exists in Starlight's light palette only. */
@@ -102,4 +112,76 @@
 
 :focus-visible {
 	outline-color: var(--color-focus-ring);
+}
+
+/* Headings follow the type tokens: H1 bold, H2 and H3 snug. */
+h1#_top,
+.hero h1 {
+	font-weight: var(--weight-bold);
+}
+
+.sl-markdown-content :is(h2, h3) {
+	line-height: var(--leading-snug);
+}
+
+.sl-anchor-link:focus-visible {
+	outline-offset: var(--space-1);
+}
+
+/* Header: the wordmark is text, not accent; accent marks only hover and focus. */
+.site-title {
+	color: var(--color-text);
+}
+
+.social-icons a {
+	color: var(--color-text);
+}
+
+.social-icons a:hover,
+.social-icons a:focus-visible {
+	color: var(--color-accent);
+}
+
+/* Active sidebar item: accent text on the accent-muted selection fill. */
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+	color: var(--color-accent);
+	background-color: var(--color-accent-muted);
+}
+
+/* Mobile tap targets: grow the hit area of the menu and search buttons, not their look. */
+.sl-menu-button::after,
+site-search button[data-open-modal]::after {
+	content: '';
+	position: absolute;
+	inset-block-start: 50%;
+	inset-inline-start: 50%;
+	width: 100%;
+	height: 100%;
+	min-width: var(--space-7);
+	min-height: var(--space-7);
+	translate: -50% -50%;
+}
+
+site-search button[data-open-modal] {
+	position: relative;
+}
+
+/* Hero Signal mark: smaller on tall, narrow screens so the actions stay near the top. */
+@media (orientation: portrait) {
+	.hero > img {
+		width: calc(var(--space-8) * 2);
+	}
+}
+
+/* Inline code in light: the white chip needs an edge on the light page background. */
+:root[data-theme='light'] .sl-markdown-content code:not(:where(.not-content *)) {
+	border: var(--border);
+}
+
+/* Search: matches get a soft selection fill, text stays in the text colour. */
+#starlight__search mark {
+	color: var(--color-text);
+	background-color: var(--color-accent-muted);
 }
