@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,8 @@ SCENARIO = ROOT / "references/scenarios/ci-activation-adversarial-v1.yaml"
 CI_REQUIREMENTS = ROOT / "scripts/requirements-ci.txt"
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
+DOCS_SITE_WORKFLOW = ROOT / ".github/workflows/docs-site.yml"
+GITATTRIBUTES = ROOT / ".gitattributes"
 
 
 class CiActivationContractTests(unittest.TestCase):
@@ -240,7 +243,8 @@ class CiActivationContractTests(unittest.TestCase):
         )
         self.assertIn('if [ "$TEST_RESULT" != success ] ||', self.ci_workflow)
         self.assertIn('[ "$PACKAGE_RESULT" != success ] ||', self.ci_workflow)
-        self.assertIn('[ "$CONSUMER_RESULT" != success ]; then', self.ci_workflow)
+        self.assertIn('[ "$CONSUMER_RESULT" != success ] ||', self.ci_workflow)
+        self.assertIn('[ "$NO_SITE_GUARD_RESULT" != success ]; then', self.ci_workflow)
         self.assertIn(
             'echo "release_readiness_decision=blocked"',
             self.ci_workflow,
@@ -333,6 +337,115 @@ class CiActivationContractTests(unittest.TestCase):
             self.assertIn(f"id: {smoke}", self.scenario)
 
 
+def workflow_triggers(document: dict) -> dict:
+    # PyYAML (YAML 1.1) parses the bare key `on` as boolean True.
+    return document.get("on", document.get(True))
+
+
+class DocsBranchGuardContractTests(unittest.TestCase):
+    """Static checks for the P1a guards that keep site/ off main and tags."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.ci = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        cls.release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+        cls.docs_site = yaml.safe_load(DOCS_SITE_WORKFLOW.read_text(encoding="utf-8"))
+
+    def test_gitattributes_export_ignores_site(self) -> None:
+        lines = GITATTRIBUTES.read_text(encoding="utf-8").splitlines()
+        self.assertIn("site/ export-ignore", lines)
+
+    def test_no_site_guard_runs_unconditionally_with_read_only_token(self) -> None:
+        job = self.ci["jobs"]["no-site-guard"]
+        self.assertEqual("No site/ on main (docs-branch guard)", job["name"])
+        self.assertNotIn("if", job)
+        self.assertNotIn("needs", job)
+        self.assertNotIn("permissions", job)
+        self.assertEqual({"contents": "read"}, self.ci["permissions"])
+        checkout = job["steps"][0]
+        self.assertEqual(
+            "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", checkout["uses"]
+        )
+        self.assertIs(False, checkout["with"]["persist-credentials"])
+        self.assertEqual(
+            [
+                "Default branch guard (H1)",
+                "No site/ in the package tree",
+                "Docs workflow on main stays a stub",
+            ],
+            [step.get("name") for step in job["steps"][1:]],
+        )
+
+    def test_readiness_needs_no_site_guard(self) -> None:
+        readiness = self.ci["jobs"]["readiness"]
+        self.assertEqual(
+            ["test", "package", "consumer", "no-site-guard"], readiness["needs"]
+        )
+        self.assertEqual("always()", readiness["if"])
+
+    def test_consumer_install_asserts_no_site(self) -> None:
+        step = workflow_step(
+            CI_WORKFLOW, "consumer", "Install checked-out package into a disposable consumer"
+        )
+        self.assertIn(
+            "test -f .agents/skills/atlas/SKILL.md\n"
+            "if [ -e .agents/skills/atlas/site ]; then\n",
+            step["run"],
+        )
+
+    def test_release_guards_run_between_verify_and_create(self) -> None:
+        names = [step.get("name") for step in self.release["jobs"]["release"]["steps"]]
+        verify = names.index("Verify release candidate")
+        self.assertEqual(
+            [
+                "Verify release candidate",
+                "Default branch guard (H1)",
+                "Release tree guard (H4)",
+                "Create GitHub release",
+            ],
+            names[verify : verify + 4],
+        )
+
+    def test_notify_docs_is_disabled_and_least_privilege(self) -> None:
+        job = self.release["jobs"]["notify-docs"]
+        self.assertIs(False, job["if"])
+        self.assertEqual("release", job["needs"])
+        self.assertEqual({"actions": "write"}, job["permissions"])
+        self.assertEqual({"contents": "read"}, self.release["permissions"])
+        (step,) = job["steps"]
+        self.assertNotIn("uses", step)
+        self.assertIn(
+            'gh workflow run docs-site.yml --repo "$GITHUB_REPOSITORY" --ref docs '
+            '-f atlas_tag="$ATLAS_TAG"',
+            step["run"],
+        )
+        self.assertIn(
+            "    # T1 disabled until the orphan docs branch exists (Atlas docs plan P1b); "
+            "remove this line to enable.\n    if: false\n",
+            RELEASE_WORKFLOW.read_text(encoding="utf-8"),
+        )
+
+    def test_docs_site_is_a_disabled_dispatch_only_stub(self) -> None:
+        text = DOCS_SITE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# atlas-docs-stub: do not replace\n"))
+        triggers = workflow_triggers(self.docs_site)
+        self.assertEqual(["workflow_dispatch"], list(triggers))
+        atlas_tag = triggers["workflow_dispatch"]["inputs"]["atlas_tag"]
+        self.assertIs(True, atlas_tag["required"])
+        self.assertEqual("string", atlas_tag["type"])
+        self.assertEqual({"contents": "read"}, self.docs_site["permissions"])
+        self.assertEqual(["stub"], list(self.docs_site["jobs"]))
+        self.assertIs(False, self.docs_site["jobs"]["stub"]["if"])
+        self.assertNotIn("uses:", text)
+
+    def test_guarded_workflows_have_no_continue_on_error(self) -> None:
+        for workflow in (CI_WORKFLOW, RELEASE_WORKFLOW, DOCS_SITE_WORKFLOW):
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn(
+                    "continue-on-error", workflow.read_text(encoding="utf-8")
+                )
+
+
 def workflow_step(workflow: Path, job: str, name: str) -> dict:
     document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
     matches = [
@@ -377,7 +490,9 @@ class WorkflowStepExecutionTests(unittest.TestCase):
         )
         path.chmod(0o755)
 
-    def _run(self, step: dict, env: dict[str, str]) -> subprocess.CompletedProcess:
+    def _run(
+        self, step: dict, env: dict[str, str], cwd: Path = ROOT
+    ) -> subprocess.CompletedProcess:
         script = step["run"]
         self.assertNotIn("${{", script, "run script must take inputs from env only")
         script_path = self.temp / "step.sh"
@@ -392,7 +507,7 @@ class WorkflowStepExecutionTests(unittest.TestCase):
         }
         return subprocess.run(
             ["bash", "--noprofile", "--norc", "-e", str(script_path)],
-            cwd=ROOT,
+            cwd=cwd,
             env=full_env,
             capture_output=True,
             text=True,
@@ -433,16 +548,25 @@ class WorkflowStepExecutionTests(unittest.TestCase):
     # --- CI readiness decision ---------------------------------------------
 
     def _run_decision(
-        self, event: str, tag_ready: str, ref_type: str = "branch", ref_name: str = "main"
+        self,
+        event: str,
+        tag_ready: str,
+        ref_type: str = "branch",
+        ref_name: str = "main",
+        no_site_guard: str = "success",
     ) -> tuple[subprocess.CompletedProcess, str]:
         step = workflow_step(CI_WORKFLOW, "readiness", "Record candidate decision")
         self.assertEqual("${{ needs.test.outputs.tag_ready }}", step["env"]["TAG_READY"])
+        self.assertEqual(
+            "${{ needs.no-site-guard.result }}", step["env"]["NO_SITE_GUARD_RESULT"]
+        )
         result = self._run(
             step,
             {
                 "TEST_RESULT": "success",
                 "PACKAGE_RESULT": "success",
                 "CONSUMER_RESULT": "success",
+                "NO_SITE_GUARD_RESULT": no_site_guard,
                 "EVENT_NAME": event,
                 "REF_TYPE": ref_type,
                 "REF_NAME": ref_name,
@@ -489,6 +613,201 @@ class WorkflowStepExecutionTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("release_readiness_decision=pr-validated\n", summary)
         self.assertNotIn("pre_tag_decision", summary)
+
+    def test_decision_blocked_when_no_site_guard_fails(self) -> None:
+        for event, ref_type, ref_name in (
+            ("push", "branch", "main"),
+            ("pull_request", "branch", "55/merge"),
+            ("push", "tag", "v9.9.9"),
+        ):
+            with self.subTest(event=event, ref_type=ref_type):
+                self.summary.write_text("", encoding="utf-8")
+                result, summary = self._run_decision(
+                    event, "true", ref_type, ref_name, no_site_guard="failure"
+                )
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("no_site_guard=failure\n", summary)
+                self.assertIn("release_readiness_decision=blocked\n", summary)
+                self.assertNotIn("pr-validated", summary)
+                self.assertNotIn("ready to", summary)
+
+    # --- Docs-branch guards (P1a) ------------------------------------------
+
+    def _git(self, repo: Path, *args: str) -> str:
+        return subprocess.run(
+            [
+                "git",
+                "-c", "user.name=Atlas Test",
+                "-c", "user.email=atlas-test@example.invalid",
+                "-c", "commit.gpgsign=false",
+                "-c", "tag.gpgsign=false",
+                *args,
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def _repo(self, files: tuple[str, ...]) -> Path:
+        repo = self.temp / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        for name in ("README.md", *files):
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{name}\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "fixture")
+        return repo
+
+    def _default_branch_steps(self) -> list[tuple[str, dict]]:
+        return [
+            ("ci", workflow_step(CI_WORKFLOW, "no-site-guard", "Default branch guard (H1)")),
+            ("release", workflow_step(RELEASE_WORKFLOW, "release", "Default branch guard (H1)")),
+        ]
+
+    def test_default_branch_guard_passes_only_for_main(self) -> None:
+        for origin, step in self._default_branch_steps():
+            for gh_body, expected_exit, expected_error in (
+                ('echo main\n', 0, None),
+                ('echo docs\n', 1, "::error title=Default branch is not main::"),
+                ('echo "boom" >&2\nexit 1\n', 1, "::error title=Default branch guard::"),
+                ('exit 0\n', 1, "::error title=Default branch guard::"),
+            ):
+                with self.subTest(origin=origin, gh=gh_body):
+                    self.log.write_text("", encoding="utf-8")
+                    self.summary.write_text("", encoding="utf-8")
+                    self._stub("gh", gh_body)
+                    result = self._run(
+                        step, {"GH_TOKEN": "stub-token", "REPO": "owner/atlas"}
+                    )
+                    self.assertEqual(
+                        expected_exit, result.returncode, result.stdout + result.stderr
+                    )
+                    self.assertEqual(
+                        [["api", "repos/owner/atlas", "--jq", ".default_branch"]],
+                        self._calls("gh"),
+                    )
+                    summary = self.summary.read_text(encoding="utf-8")
+                    if expected_error is None:
+                        self.assertIn("default_branch=main\n", summary)
+                        self.assertNotIn("::error", result.stdout)
+                    else:
+                        self.assertIn(expected_error, result.stdout)
+                        self.assertNotIn("default_branch=main", summary)
+                    if gh_body == 'echo docs\n':
+                        self.assertIn("ship the docs branch", result.stdout)
+                        self.assertIn("H1", result.stdout)
+
+    def test_default_branch_guard_is_identical_in_ci_and_release(self) -> None:
+        (_, ci), (_, release) = self._default_branch_steps()
+        self.assertEqual(ci["run"], release["run"])
+        self.assertEqual("${{ github.token }}", ci["env"]["GH_TOKEN"])
+        self.assertEqual("${{ secrets.GITHUB_TOKEN }}", release["env"]["GH_TOKEN"])
+        for step in (ci, release):
+            self.assertEqual("${{ github.repository }}", step["env"]["REPO"])
+
+    def test_no_site_tree_passes_without_site(self) -> None:
+        repo = self._repo(("docs/guide.md", "site-notes.md", "website/index.md"))
+        step = workflow_step(CI_WORKFLOW, "no-site-guard", "No site/ in the package tree")
+        result = self._run(step, {}, cwd=repo)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("::error", result.stdout)
+
+    def test_no_site_tree_fails_for_site_or_docs_branch_marker(self) -> None:
+        step = workflow_step(CI_WORKFLOW, "no-site-guard", "No site/ in the package tree")
+        for offending in (
+            "site/index.md",
+            "DOCS_BRANCH_SENTINEL.md",
+            "nested/DOCS_BRANCH_SENTINEL.md",
+        ):
+            with self.subTest(path=offending):
+                repo = self._repo((offending,))
+                result = self._run(step, {}, cwd=repo)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("::error title=site/ found on main::", result.stdout)
+                self.assertIn(f"{offending}\n", result.stdout)
+                self.assertIn("orphan docs branch", result.stdout)
+                shutil.rmtree(repo)
+
+    def _stub_step(self) -> dict:
+        return workflow_step(CI_WORKFLOW, "no-site-guard", "Docs workflow on main stays a stub")
+
+    def test_docs_stub_guard_passes_for_repository_stub(self) -> None:
+        result = self._run(self._stub_step(), {})
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("::error", result.stdout)
+
+    def test_docs_stub_guard_fails_for_non_stub(self) -> None:
+        stub = DOCS_SITE_WORKFLOW.read_text(encoding="utf-8")
+        checkout = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+        variants = {
+            "push": stub.replace("on:\n", "on:\n  push:\n    branches: [docs]\n", 1),
+            "uses": stub + f"      - uses: {checkout} # v5\n",
+            "no-marker": stub.replace("# atlas-docs-stub: do not replace\n", "", 1),
+            "pages-write": stub.replace(
+                "  contents: read\n", "  contents: read\n  pages: write\n", 1
+            ),
+            "flow-push": stub.replace("on:\n", "on: [push]\nx-on:\n", 1),
+            "too-long": stub + "# padding\n" * 60,
+            "missing": None,
+        }
+        for label, text in variants.items():
+            with self.subTest(variant=label):
+                copy = self.temp / label
+                workflows = copy / ".github/workflows"
+                workflows.mkdir(parents=True)
+                if text is not None:
+                    self.assertNotEqual(stub, text)
+                    (workflows / "docs-site.yml").write_text(text, encoding="utf-8")
+                result = self._run(self._stub_step(), {}, cwd=copy)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("::error title=docs-site.yml is not the stub::", result.stdout)
+
+    def _run_release_tree_guard(self, files: tuple[str, ...]) -> subprocess.CompletedProcess:
+        repo = self._repo(files)
+        self._git(repo, "tag", "-a", "v9.9.9", "-m", "fixture tag")
+        # A later commit on the branch must not affect the tagged tree.
+        (repo / "later.md").write_text("later\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "later")
+        step = workflow_step(RELEASE_WORKFLOW, "release", "Release tree guard (H4)")
+        self.assertEqual("release-tree-guard", step.get("id"))
+        return self._run(
+            step,
+            {"GITHUB_REF": "refs/tags/v9.9.9", "GITHUB_REF_NAME": "v9.9.9"},
+            cwd=repo,
+        )
+
+    def test_release_tree_guard_passes_without_site(self) -> None:
+        result = self._run_release_tree_guard(("docs/guide.md", "site-notes.md"))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        summary = self.summary.read_text(encoding="utf-8")
+        self.assertIn("release_tree_guard=pass\n", summary)
+        self.assertIn("tag=v9.9.9\n", summary)
+
+    def test_release_tree_guard_fails_for_site_in_tag(self) -> None:
+        for offending in ("site/x.md", "nested/DOCS_BRANCH_SENTINEL.md"):
+            with self.subTest(path=offending):
+                self.summary.write_text("", encoding="utf-8")
+                result = self._run_release_tree_guard((offending,))
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("::error title=Release tree contains site/::", result.stdout)
+                self.assertIn(f"{offending}\n", result.stdout)
+                self.assertNotIn(
+                    "release_tree_guard=pass", self.summary.read_text(encoding="utf-8")
+                )
+                shutil.rmtree(self.temp / "repo")
+
+    def test_release_tree_guard_fails_closed_for_unknown_tag(self) -> None:
+        repo = self._repo(())
+        step = workflow_step(RELEASE_WORKFLOW, "release", "Release tree guard (H4)")
+        result = self._run(
+            step, {"GITHUB_REF": "refs/tags/v0.0.0", "GITHUB_REF_NAME": "v0.0.0"}, cwd=repo
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("release_tree_guard=pass", self.summary.read_text(encoding="utf-8"))
 
     # --- Release workflow: idempotent GitHub release creation --------------
 

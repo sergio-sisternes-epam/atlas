@@ -40,6 +40,52 @@ jobs:
             echo "main_ancestry=pass"
             echo "release_validation_decision=ready to publish"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Default branch guard (H1)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! default_branch="$(gh api "repos/$REPO" --jq .default_branch)" ||
+            [ -z "$default_branch" ]; then
+            echo "::error title=Default branch guard::Could not read the default branch of $REPO; failing closed."
+            exit 1
+          fi
+          if [ "$default_branch" != main ]; then
+            echo "::error title=Default branch is not main::The default branch of $REPO is '$default_branch', not main. A default-ref APM install would then ship the docs branch (hard rule H1)."
+            exit 1
+          fi
+          echo "default_branch=main" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Release tree guard (H4)
+        id: release-tree-guard
+        run: |
+          tag_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          listing="$(mktemp)"
+          if ! git ls-tree -r --name-only -z "$tag_commit" > "$listing"; then
+            echo "::error title=Release tree guard::git ls-tree failed for $tag_commit; failing closed."
+            exit 1
+          fi
+          hits=()
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              site | site/*) hits+=("$path") ;;
+              *)
+                # DOCS_BRANCH* is the docs-branch marker file convention.
+                case "${path##*/}" in
+                  DOCS_BRANCH*) hits+=("$path") ;;
+                esac
+                ;;
+            esac
+          done < "$listing"
+          if [ "${#hits[@]}" -gt 0 ]; then
+            echo "Offending paths in $GITHUB_REF_NAME ($tag_commit):"
+            printf '%s\n' "${hits[@]}"
+            echo "::error title=Release tree contains site/::Tag $GITHUB_REF_NAME contains site/ or DOCS_BRANCH* files, which belong only on the orphan docs branch. APM installs the whole tree of a tag, so this release must not be published."
+            exit 1
+          fi
+          {
+            echo "tag=$GITHUB_REF_NAME"
+            echo "release_tree_guard=pass"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,3 +117,19 @@ jobs:
             exit 0
           fi
           gh release create "$TAG" "${ARGS[@]}"
+
+  notify-docs:
+    name: Dispatch docs-site build (T1)
+    needs: release
+    # T1 disabled until the orphan docs branch exists (Atlas docs plan P1b); remove this line to enable.
+    if: false
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch docs-site.yml on the docs branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATLAS_TAG: ${{ github.ref_name }}
+        run: |
+          gh workflow run docs-site.yml --repo "$GITHUB_REPOSITORY" --ref docs -f atlas_tag="$ATLAS_TAG"
