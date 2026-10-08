@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.13.0-beta.13 - 2026-10-07
+
+- CI ref surfaces (the reusable workflow default and both
+  `references/ci/` examples) now point at `v0.13.0-beta.13` and match the
+  package version again, which restores a releasable tag with this release.
+  The existing `v0.13.0-beta.12` tag is immutable and references an older
+  commit whose CI refs still lag, so validation for that tag still fails.
+- `scripts/release_readiness.py --pre-tag` applies the strict `--tag` checks
+  against `v<package version>` and reports `tag_readiness: pass|blocked`.
+  It also blocks when the expected tag already exists at a different commit,
+  so a failed tag requires advancing the package version.
+  Atlas CI runs it on every build and reports `pre_tag_decision=ready to tag`
+  on `main` only when it passes. A blocked manual run fails, while ordinary
+  pushes to `main` only warn.
+- The `--pre-tag` gate now fails closed: only a genuinely missing tag ref
+  counts as free, while a tag that cannot be peeled to a commit or a git
+  error blocks. Atlas CI checks out full history so older tags are visible,
+  and its blocked reason is now the generic `pre-tag check failed`.
+- The release workflow leaves an existing GitHub release for the tag
+  unchanged instead of failing, and warns when its prerelease flag differs.
+  It now fails when that existing release is still a draft, instead of
+  finishing green with nothing published.
+
 ## 0.13.0-beta.12 - 2026-10-06
 
 - The four-layer model stays optional progressive disclosure. An index may
@@ -150,7 +173,7 @@
   containing gists so the migrated store satisfies the beta.3 schema-folder
   invariant.
 
-## Unreleased
+## 0.13.0-beta.3 - 2026-10-04
 
 ### Added
 

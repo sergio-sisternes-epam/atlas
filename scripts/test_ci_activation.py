@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+import yaml
 
 from release_readiness import manifest_version, read_surface, CI_SURFACES
 
@@ -241,10 +246,78 @@ class CiActivationContractTests(unittest.TestCase):
             self.ci_workflow,
         )
 
+    def test_ci_test_job_fetches_full_history_and_tags_for_pre_tag_check(self) -> None:
+        self.assertIn(
+            "    steps:\n"
+            "      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n"
+            "        with:\n"
+            "          fetch-depth: 0\n"
+            "      - uses: actions/setup-python",
+            self.ci_workflow,
+        )
+
+    def test_ci_test_job_runs_pre_tag_check_and_exports_tag_ready(self) -> None:
+        self.assertIn(
+            "    outputs:\n"
+            "      tag_ready: ${{ steps.pre_tag.outputs.tag_ready }}\n",
+            self.ci_workflow,
+        )
+        self.assertIn(
+            "        id: pre_tag\n"
+            "        run: |\n"
+            "          if python3 scripts/release_readiness.py --pre-tag; then\n"
+            '            echo "tag_ready=true" >> "$GITHUB_OUTPUT"\n'
+            "          else\n"
+            '            echo "tag_ready=false" >> "$GITHUB_OUTPUT"\n',
+            self.ci_workflow,
+        )
+        step = workflow_step(
+            CI_WORKFLOW, "test", "Check tag readiness (CI refs equal package version)"
+        )
+        self.assertEqual("pre_tag", step.get("id"))
+        self.assertNotIn("continue-on-error", step)
+
+    def test_ci_readiness_gates_ready_to_tag_on_tag_ready(self) -> None:
+        self.assertIn(
+            "TAG_READY: ${{ needs.test.outputs.tag_ready }}", self.ci_workflow
+        )
+        self.assertIn(
+            '           if [ "$TAG_READY" != true ]; then\n'
+            '             echo "pre_tag_decision=blocked: pre-tag check failed" |\n'
+            '               tee -a "$GITHUB_STEP_SUMMARY"\n'
+            '             if [ "$EVENT_NAME" = workflow_dispatch ]; then\n'
+            "               exit 1\n"
+            "             fi\n"
+            "             exit 0\n"
+            "           fi\n"
+            '           echo "pre_tag_decision=ready to tag" | tee -a "$GITHUB_STEP_SUMMARY"\n',
+            self.ci_workflow,
+        )
+        self.assertEqual(1, self.ci_workflow.count("pre_tag_decision=ready to tag"))
+
     def test_release_verifies_metadata_before_publishing(self) -> None:
         self.assertIn("python3 scripts/release_readiness.py", self.release_workflow)
         self.assertIn('--tag "$GITHUB_REF_NAME"', self.release_workflow)
         self.assertIn("release_validation_decision=ready to publish", self.release_workflow)
+
+    def test_release_creation_is_idempotent(self) -> None:
+        self.assertIn(
+            'if state="$(gh release view "$TAG" --json tagName,isDraft,isPrerelease '
+            "--jq '\"\\(.isDraft) \\(.isPrerelease)\"' 2>/dev/null)\"; then",
+            self.release_workflow,
+        )
+        self.assertIn('read -r draft existing <<<"$state"', self.release_workflow)
+        self.assertIn(
+            '            if [ "$draft" = true ]; then\n'
+            '              echo "::error title=Release is a draft::GitHub release $TAG '
+            "exists but is still a draft; publish it (or delete it) and re-run this "
+            'workflow."\n'
+            "              exit 1\n"
+            "            fi\n",
+            self.release_workflow,
+        )
+        self.assertIn('if [ "$existing" != "$PRERELEASE" ]; then', self.release_workflow)
+        self.assertIn('gh release create "$TAG" "${ARGS[@]}"', self.release_workflow)
 
     def test_adversarial_contract_names_all_approved_smokes(self) -> None:
         for smoke in (
@@ -258,6 +331,296 @@ class CiActivationContractTests(unittest.TestCase):
             "cli-not-in-workspace-root",
         ):
             self.assertIn(f"id: {smoke}", self.scenario)
+
+
+def workflow_step(workflow: Path, job: str, name: str) -> dict:
+    document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    matches = [
+        step for step in document["jobs"][job]["steps"] if step.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"{workflow.name}: expected one {job} step named {name!r}")
+    return matches[0]
+
+
+class WorkflowStepExecutionTests(unittest.TestCase):
+    """Execute workflow `run:` scripts under bash with stubbed tools on PATH."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory(prefix="atlas-workflow-step-")
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name)
+        self.bin = self.temp / "bin"
+        self.bin.mkdir()
+        self.log = self.temp / "calls.log"
+        self.log.touch()
+        self.summary = self.temp / "summary.md"
+        self.summary.touch()
+        self.output = self.temp / "output.txt"
+        self.output.touch()
+
+    def _stub(self, name: str, body: str) -> None:
+        path = self.bin / name
+        path.write_text(
+            "#!/usr/bin/env bash\n"
+            f'{{ printf %s {name}; printf "\\t%s" "$@"; printf "\\n"; }} >> "$STUB_LOG"\n'
+            + body,
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def _real_python3(self) -> None:
+        path = self.bin / "python3"
+        path.write_text(
+            f'#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} "$@"\n',
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def _run(self, step: dict, env: dict[str, str]) -> subprocess.CompletedProcess:
+        script = step["run"]
+        self.assertNotIn("${{", script, "run script must take inputs from env only")
+        script_path = self.temp / "step.sh"
+        script_path.write_text(script, encoding="utf-8")
+        full_env = {
+            **os.environ,
+            "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "STUB_LOG": str(self.log),
+            "GITHUB_STEP_SUMMARY": str(self.summary),
+            "GITHUB_OUTPUT": str(self.output),
+            **env,
+        }
+        return subprocess.run(
+            ["bash", "--noprofile", "--norc", "-e", str(script_path)],
+            cwd=ROOT,
+            env=full_env,
+            capture_output=True,
+            text=True,
+        )
+
+    def _calls(self, tool: str) -> list[list[str]]:
+        return [
+            line.split("\t")[1:]
+            for line in self.log.read_text(encoding="utf-8").splitlines()
+            if line.split("\t", 1)[0] == tool
+        ]
+
+    # --- CI pre-tag check (test job) ---------------------------------------
+
+    def _run_pre_tag(self, exit_code: int) -> subprocess.CompletedProcess:
+        self._stub("python3", f"exit {exit_code}\n")
+        step = workflow_step(CI_WORKFLOW, "test", "Check tag readiness (CI refs equal package version)")
+        self.assertEqual("pre_tag", step.get("id"))
+        result = self._run(step, {})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            [["scripts/release_readiness.py", "--pre-tag"]], self._calls("python3")
+        )
+        return result
+
+    def test_pre_tag_pass_sets_tag_ready_true(self) -> None:
+        result = self._run_pre_tag(0)
+        self.assertEqual("tag_ready=true\n", self.output.read_text(encoding="utf-8"))
+        self.assertNotIn("::warning", result.stdout)
+
+    def test_pre_tag_block_sets_tag_ready_false_and_warns(self) -> None:
+        result = self._run_pre_tag(1)
+        self.assertEqual("tag_ready=false\n", self.output.read_text(encoding="utf-8"))
+        self.assertIn("::warning title=Tagging blocked::", result.stdout)
+        self.assertIn("release_readiness.py --pre-tag failed", result.stdout)
+        self.assertNotIn("every CI ref", result.stdout)
+
+    # --- CI readiness decision ---------------------------------------------
+
+    def _run_decision(
+        self, event: str, tag_ready: str, ref_type: str = "branch", ref_name: str = "main"
+    ) -> tuple[subprocess.CompletedProcess, str]:
+        step = workflow_step(CI_WORKFLOW, "readiness", "Record candidate decision")
+        self.assertEqual("${{ needs.test.outputs.tag_ready }}", step["env"]["TAG_READY"])
+        result = self._run(
+            step,
+            {
+                "TEST_RESULT": "success",
+                "PACKAGE_RESULT": "success",
+                "CONSUMER_RESULT": "success",
+                "EVENT_NAME": event,
+                "REF_TYPE": ref_type,
+                "REF_NAME": ref_name,
+                "TAG_READY": tag_ready,
+                "CANDIDATE_REVISION": "0" * 40,
+            },
+        )
+        return result, self.summary.read_text(encoding="utf-8")
+
+    def test_decision_ready_to_tag_only_when_tag_ready(self) -> None:
+        for event in ("push", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.summary.write_text("", encoding="utf-8")
+                result, summary = self._run_decision(event, "true")
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("pre_tag_decision=ready to tag\n", summary)
+                self.assertNotIn("pre_tag_decision=blocked", summary)
+
+    def test_decision_blocked_pre_tag_fails_only_on_manual_dispatch(self) -> None:
+        for event, tag_ready, expected_exit in (
+            ("push", "false", 0),
+            ("push", "", 0),
+            ("workflow_dispatch", "false", 1),
+            ("workflow_dispatch", "", 1),
+        ):
+            with self.subTest(event=event, tag_ready=tag_ready):
+                self.summary.write_text("", encoding="utf-8")
+                result, summary = self._run_decision(event, tag_ready)
+                self.assertEqual(expected_exit, result.returncode, result.stderr)
+                self.assertIn(
+                    "pre_tag_decision=blocked: pre-tag check failed\n",
+                    summary,
+                )
+                self.assertNotIn("pre_tag_decision=ready to tag", summary)
+
+    def test_decision_tag_and_pr_ignore_tag_ready(self) -> None:
+        result, summary = self._run_decision("push", "false", "tag", "v9.9.9")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("release_validation_decision=ready to publish\n", summary)
+        self.assertNotIn("pre_tag_decision", summary)
+
+        self.summary.write_text("", encoding="utf-8")
+        result, summary = self._run_decision("pull_request", "false", ref_name="55/merge")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("release_readiness_decision=pr-validated\n", summary)
+        self.assertNotIn("pre_tag_decision", summary)
+
+    # --- Release workflow: idempotent GitHub release creation --------------
+
+    def _run_release(
+        self,
+        tag: str,
+        existing: str | None,
+        draft: bool | str = False,
+        expected_exit: int = 0,
+    ) -> subprocess.CompletedProcess:
+        self._real_python3()
+        self._stub(
+            "gh",
+            'if [ "$1 $2" = "release view" ]; then\n'
+            '  if [ -n "${STUB_EXISTING_PRERELEASE:-}" ]; then\n'
+            '    echo "${STUB_EXISTING_DRAFT:-false} $STUB_EXISTING_PRERELEASE"\n'
+            "    exit 0\n"
+            "  fi\n"
+            '  echo "release not found" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            '[ "$1 $2" = "release create" ] && exit 0\n'
+            'echo "unexpected gh call: $*" >&2\n'
+            "exit 64\n",
+        )
+        step = workflow_step(RELEASE_WORKFLOW, "release", "Create GitHub release")
+        env = {"GITHUB_REF_NAME": tag, "GH_TOKEN": "stub-token"}
+        if existing is not None:
+            env["STUB_EXISTING_PRERELEASE"] = existing
+            if isinstance(draft, str):
+                env["STUB_EXISTING_DRAFT"] = draft
+            else:
+                env["STUB_EXISTING_DRAFT"] = "true" if draft else "false"
+        result = self._run(step, env)
+        self.assertEqual(expected_exit, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(
+            [[
+                "release", "view", tag,
+                "--json", "tagName,isDraft,isPrerelease",
+                "--jq", '"\\(.isDraft) \\(.isPrerelease)"',
+            ]],
+            [call for call in self._calls("gh") if call[:2] == ["release", "view"]],
+        )
+        return result
+
+    def _creates(self) -> list[list[str]]:
+        return [call for call in self._calls("gh") if call[:2] == ["release", "create"]]
+
+    def test_release_absent_is_created_with_prerelease_flag(self) -> None:
+        tag = "v0.13.0-beta.13"
+        result = self._run_release(tag, None)
+        self.assertEqual(
+            [["release", "create", tag, "--verify-tag", "--generate-notes",
+              "--title", tag, "--prerelease"]],
+            self._creates(),
+        )
+        self.assertIn(f"prerelease=true (tag {tag})", result.stdout)
+        self.assertNotIn("::warning", result.stdout)
+
+    def test_release_absent_stable_tag_is_created_without_prerelease_flag(self) -> None:
+        tag = "v1.0.0"
+        result = self._run_release(tag, None)
+        self.assertEqual(
+            [["release", "create", tag, "--verify-tag", "--generate-notes", "--title", tag]],
+            self._creates(),
+        )
+        self.assertIn(f"prerelease=false (tag {tag})", result.stdout)
+
+    def test_existing_matching_release_is_left_unchanged(self) -> None:
+        for tag, existing in (("v0.13.0-beta.13", "true"), ("v1.0.0", "false")):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing)
+                self.assertEqual([], self._creates())
+                self.assertIn("::notice title=Release already exists::", result.stdout)
+                self.assertIn(
+                    f"existing_prerelease={existing} expected_prerelease={existing}",
+                    result.stdout,
+                )
+                self.assertNotIn("::warning", result.stdout)
+
+    def test_existing_release_with_different_prerelease_flag_warns(self) -> None:
+        for tag, existing, expected in (
+            ("v0.13.0-beta.13", "false", "true"),
+            ("v1.0.0", "true", "false"),
+        ):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing)
+                self.assertEqual([], self._creates())
+                self.assertIn("::notice title=Release already exists::", result.stdout)
+                self.assertIn(
+                    f"::warning title=Prerelease flag mismatch::Existing release {tag} "
+                    f"has prerelease={existing}; this workflow would have set "
+                    f"prerelease={expected}.",
+                    result.stdout,
+                )
+
+    def test_existing_draft_release_fails_closed(self) -> None:
+        for tag, existing in (("v0.13.0-beta.13", "true"), ("v1.0.0", "false")):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing, draft=True, expected_exit=1)
+                self.assertIn(
+                    f"::error title=Release is a draft::GitHub release {tag} exists "
+                    "but is still a draft; publish it (or delete it) and re-run this "
+                    "workflow.",
+                    result.stdout,
+                )
+                self.assertEqual([], self._creates())
+                self.assertEqual(
+                    [],
+                    [call for call in self._calls("gh") if call[:2] != ["release", "view"]],
+                )
+                self.assertNotIn("::notice title=Release already exists::", result.stdout)
+
+    def test_existing_release_with_unreadable_draft_state_fails_closed(self) -> None:
+        for tag, existing in (("v0.13.0-beta.13", "true"), ("v1.0.0", "false")):
+            with self.subTest(tag=tag):
+                self.log.write_text("", encoding="utf-8")
+                result = self._run_release(tag, existing, draft="null", expected_exit=1)
+                self.assertIn(
+                    f"::error title=Unknown release state::Could not read the draft "
+                    f"state of GitHub release {tag} (got 'null {existing}').",
+                    result.stdout,
+                )
+                self.assertEqual([], self._creates())
+                self.assertEqual(
+                    [],
+                    [call for call in self._calls("gh") if call[:2] != ["release", "view"]],
+                )
+                self.assertNotIn("::notice title=Release already exists::", result.stdout)
 
 
 if __name__ == "__main__":

@@ -97,7 +97,8 @@ def validate_versions(
     # CI ref surfaces are pinned to the last tagged release, not the
     # in-development package version (e.g. v0.13.0-beta can stay the CI ref
     # while the package advances to 0.13.0-beta.3) — but only during pre-tag
-    # development. When `--tag` is passed (an actual release cut),
+    # development. When `--tag` (an actual release cut) or `--pre-tag` (the
+    # gate before cutting tag v<package version>) is passed,
     # `require_ci_match_package` is set and every CI ref must equal the
     # package version; a tag validation must never pass while workflows
     # still point at an older ref.
@@ -135,6 +136,62 @@ def current_commit(root: Path = ROOT) -> str:
     return result.stdout.strip()
 
 
+class TagLookupError(Exception):
+    """The tag ref could not be resolved to a commit and must fail closed."""
+
+
+def tag_commit(tag: str, root: Path = ROOT) -> str | None:
+    """Return the commit *tag* peels to, None only when the ref is missing.
+
+    Raises TagLookupError when the ref exists but cannot be peeled to a commit
+    or when git itself fails, so an occupied tag name is never treated as free.
+    """
+    ref = f"refs/tags/{tag}"
+    try:
+        exists = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", ref],
+            cwd=root, capture_output=True, text=True,
+        )
+        if exists.returncode == 1:
+            return None
+        if exists.returncode != 0:
+            raise TagLookupError(
+                f"git could not check tag {tag}: {exists.stderr.strip() or exists.returncode}"
+            )
+        peeled = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=root, capture_output=True, text=True,
+        )
+    except OSError as exc:
+        raise TagLookupError(f"git could not check tag {tag}: {exc}") from exc
+    commit = peeled.stdout.strip()
+    if peeled.returncode != 0 or not commit:
+        raise TagLookupError(
+            f"tag {tag} exists but does not peel to a commit; "
+            "the tag name is occupied and the package version must advance"
+        )
+    return commit
+
+
+def validate_tag_available(tag: str, candidate: str, root: Path = ROOT) -> list[str]:
+    """Reject an expected tag that already exists at a different commit.
+
+    Tags are immutable, so the package version must advance. A tag that already
+    points at the candidate commit is accepted: nothing conflicts and re-running
+    the gate after tagging stays idempotent.
+    """
+    try:
+        existing = tag_commit(tag, root)
+    except TagLookupError as exc:
+        return [str(exc)]
+    if existing is None or existing.lower() == candidate.lower():
+        return []
+    return [
+        f"tag {tag} already exists at {existing}, not candidate {candidate}; "
+        "the package version must advance to a new version"
+    ]
+
+
 def validate_commit(candidate: str, root: Path = ROOT) -> list[str]:
     if not re.fullmatch(r"[0-9a-fA-F]{40}", candidate):
         return [f"candidate commit must be a 40-character SHA: {candidate}"]
@@ -158,33 +215,45 @@ def is_prerelease_tag(tag: str) -> bool:
     return "-" in core
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Release tag to compare with apm.yml")
+    parser.add_argument(
+        "--pre-tag",
+        action="store_true",
+        help="Apply --tag checks against the expected tag v<package version>",
+    )
     parser.add_argument("--commit", help="Candidate commit SHA")
     parser.add_argument(
         "--is-prerelease-tag",
         metavar="TAG",
         help="Exit 0 if TAG is a SemVer prerelease, 1 otherwise (no other checks)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.is_prerelease_tag is not None:
         return 0 if is_prerelease_tag(args.is_prerelease_tag) else 1
 
-    version, errors = validate_versions(require_ci_match_package=bool(args.tag))
+    version, errors = validate_versions(
+        root, require_ci_match_package=bool(args.tag) or args.pre_tag
+    )
     expected_tag = f"v{version}"
     if args.tag and args.tag != expected_tag:
         errors.append(f"release tag {args.tag} != {expected_tag}")
     if args.commit:
-        errors.extend(validate_commit(args.commit))
+        errors.extend(validate_commit(args.commit, root))
+    candidate = args.commit or current_commit(root)
+    if args.pre_tag:
+        errors.extend(validate_tag_available(expected_tag, candidate, root))
 
-    print(f"candidate_revision: {args.commit or current_commit()}")
+    print(f"candidate_revision: {candidate}")
     print(f"package_version: {version}")
     print(f"expected_tag: {expected_tag}")
     print(f"version_consistency: {'blocked' if errors else 'pass'}")
     if args.tag:
         print(f"tag_consistency: {'blocked' if errors else 'pass'}")
+    if args.pre_tag:
+        print(f"tag_readiness: {'blocked' if errors else 'pass'}")
 
     if errors:
         for error in errors:
