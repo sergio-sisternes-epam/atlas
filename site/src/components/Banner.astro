@@ -1,0 +1,26 @@
+---
+import Default from '@astrojs/starlight/components/Banner.astro';
+
+declare const __DOCS_PREVIEW__: boolean;
+const preview = __DOCS_PREVIEW__;
+---
+
+{
+	preview && (
+		<div class="atlas-preview-banner" role="note" data-pagefind-ignore>
+			Preview build — not published
+		</div>
+	)
+}
+<Default />
+
+<style>
+	.atlas-preview-banner {
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--color-accent-muted);
+		color: var(--color-text);
+		border-bottom: var(--border);
+		font-weight: var(--weight-semibold);
+		text-align: center;
+	}
+</style>

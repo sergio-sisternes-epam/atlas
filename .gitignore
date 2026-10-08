@@ -26,3 +26,9 @@ atlas-src/
 __pycache__/
 *.pyc
 .venv/
+site/.venv/
+
+# Local inputs and test reports
+.inputs/
+site/test-reports/
+test-reports/

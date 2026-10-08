@@ -1,0 +1,70 @@
+---
+import build from '../data/atlas-build.json';
+
+const REPO = 'https://github.com/sergio-sisternes-epam/atlas';
+const data = Astro.locals.starlightRoute.entry.data as {
+	source?: string[];
+	source_tag?: string;
+};
+const sources = data.source ?? [];
+const tag = data.source_tag ?? build.tag;
+---
+
+<div class="atlas-source-footer" data-pagefind-ignore>
+	{
+		sources.length > 0 && (
+			<p>
+				Source:{' '}
+				{sources.map((path, i) => (
+					<>
+						{i > 0 && ', '}
+						<a href={`${REPO}/blob/${tag}/${path}`}>
+							<code>{path}</code>
+						</a>
+					</>
+				))}{' '}
+				· Atlas <code>{tag}</code>
+			</p>
+		)
+	}
+	<p>
+		Agents: the installed <code>SKILL.md</code> is authoritative; this site mirrors it at a release
+		tag.
+	</p>
+</div>
+
+<style>
+	.atlas-source-footer {
+		margin-top: var(--space-5);
+		padding-top: var(--space-4);
+		border-top: var(--border);
+		font-size: var(--text-small);
+		line-height: var(--leading-small);
+		color: var(--color-text-muted);
+	}
+
+	.atlas-source-footer p {
+		margin: 0;
+	}
+
+	.atlas-source-footer p + p {
+		margin-top: var(--space-2);
+	}
+
+	.atlas-source-footer code {
+		font-family: var(--font-mono);
+		font-size: var(--text-small);
+		color: var(--color-text-muted);
+		background: none;
+		padding: 0;
+	}
+
+	.atlas-source-footer a {
+		color: var(--color-text-muted);
+		text-decoration: underline;
+	}
+
+	.atlas-source-footer a:hover {
+		color: var(--color-accent);
+	}
+</style>

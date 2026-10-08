@@ -1,0 +1,32 @@
+{
+  "description": "Public allowlist for check-sanitise (V8 a+b). Public patterns only; private hosts belong in the DOCS_HOST_DENYLIST secret, never here. Each entry is a JavaScript regular expression tested against the matched text.",
+  "exclude_paths": [
+    "site/scripts/check-sanitise.mjs",
+    "site/scripts/sanitise-allowlist.json"
+  ],
+  "allow": {
+    "email": [
+      "@example\\.com$",
+      "@example\\.org$",
+      "\\.invalid$",
+      "^noreply@github\\.com$",
+      "@users\\.noreply\\.github\\.com$"
+    ],
+    "ipv4": [
+      "^0\\.0\\.0\\.0$",
+      "^127\\.0\\.0\\.1$"
+    ],
+    "home_path": [
+      "^/home/you/"
+    ]
+  },
+  "vendored_exemptions": [
+    {
+      "path": "^site/dist/(pagefind/pagefind-(component-)?ui\\.js|_astro/ui-core\\.[A-Za-z0-9_-]+\\.js)$",
+      "kinds": [
+        "email"
+      ],
+      "reason": "Pagefind UI bundles (built output, never committed) embed public translation-credit emails of upstream Pagefind contributors."
+    }
+  ]
+}

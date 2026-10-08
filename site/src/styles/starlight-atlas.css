@@ -1,0 +1,105 @@
+/*
+ * Thin mapping of Starlight custom properties onto atlas-style semantic tokens
+ * (atlas-tokens.css). Unlayered on purpose: Starlight ships its defaults in
+ * cascade layers, so these declarations win without extra specificity.
+ * Only var(--token) references here; no raw colours or lengths.
+ */
+
+:root,
+:root[data-theme='dark'],
+:root[data-theme='light'] {
+	--sl-color-accent-low: var(--color-accent-muted);
+	--sl-color-accent: var(--color-accent);
+	--sl-color-accent-high: var(--color-accent-hover);
+
+	--sl-color-white: var(--color-text);
+	--sl-color-gray-1: var(--color-text);
+	--sl-color-gray-2: var(--color-text);
+	--sl-color-gray-3: var(--color-text-muted);
+	--sl-color-gray-4: var(--color-border);
+	--sl-color-gray-5: var(--color-border);
+	--sl-color-gray-6: var(--color-surface-raised);
+	--sl-color-black: var(--color-bg);
+
+	--sl-color-text: var(--color-text);
+	--sl-color-text-accent: var(--color-accent);
+	--sl-color-text-invert: var(--color-bg);
+	--sl-color-bg: var(--color-bg);
+	--sl-color-bg-nav: var(--color-surface);
+	--sl-color-bg-sidebar: var(--color-surface);
+	--sl-color-bg-inline-code: var(--color-surface-raised);
+	--sl-color-bg-accent: var(--color-accent);
+	--sl-color-hairline-light: var(--color-border);
+	--sl-color-hairline: var(--color-border);
+	--sl-color-hairline-shade: var(--color-border);
+
+	--sl-font: var(--font-sans);
+	--sl-font-mono: var(--font-mono);
+
+	--sl-text-h1: var(--text-h1);
+	--sl-text-h2: var(--text-h2);
+	--sl-text-h3: var(--text-h3);
+	--sl-text-h4: var(--text-body);
+	--sl-text-h5: var(--text-body);
+	--sl-text-body: var(--text-body);
+	--sl-text-body-sm: var(--text-small);
+	--sl-text-code: var(--text-mono);
+	--sl-line-height: var(--leading-body);
+	--sl-line-height-headings: var(--leading-tight);
+
+	--sl-content-width: var(--content-max);
+	--sl-nav-height: var(--chrome-height);
+
+	--sl-shadow-sm: var(--shadow-sm);
+	--sl-shadow-md: var(--shadow-md);
+	--sl-shadow-lg: var(--shadow-lg);
+}
+
+/* Pages without a sidebar (the splash home page) use the wide layout token. */
+:root[data-theme]:not([data-has-sidebar]) {
+	--sl-content-width: var(--content-wide);
+}
+
+/* gray-7 exists in Starlight's light palette only. */
+:root[data-theme='light'] {
+	--sl-color-gray-7: var(--color-surface);
+}
+
+/* Asides: note -> info, tip -> success, danger -> danger. (caution is not used.) */
+.starlight-aside--note {
+	--sl-color-asides-text-accent: var(--color-text);
+	--sl-color-asides-border: var(--color-info);
+	background-color: var(--color-info-muted);
+}
+
+.starlight-aside--tip {
+	--sl-color-asides-text-accent: var(--color-text);
+	--sl-color-asides-border: var(--color-success);
+	background-color: var(--color-success-muted);
+}
+
+.starlight-aside--danger {
+	--sl-color-asides-text-accent: var(--color-text);
+	--sl-color-asides-border: var(--color-danger);
+	background-color: var(--color-danger-muted);
+}
+
+.starlight-aside--note .starlight-aside__icon {
+	color: var(--color-info);
+}
+
+.starlight-aside--tip .starlight-aside__icon {
+	color: var(--color-success);
+}
+
+.starlight-aside--danger .starlight-aside__icon {
+	color: var(--color-danger);
+}
+
+.starlight-aside .starlight-aside__content a {
+	color: var(--color-accent);
+}
+
+:focus-visible {
+	outline-color: var(--color-focus-ring);
+}

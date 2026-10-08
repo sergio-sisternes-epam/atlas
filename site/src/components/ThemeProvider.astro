@@ -1,0 +1,42 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+---
+
+{/* Inlined to avoid a flash of the wrong theme. Stores the choice under the atlas-style key. */}
+<script is:inline>
+	window.StarlightThemeProvider = (() => {
+		const storageKey = 'atlas-style-theme';
+		let storedTheme = null;
+		try {
+			storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null;
+		} catch (e) {
+			storedTheme = null;
+		}
+		if (storedTheme !== 'light' && storedTheme !== 'dark') storedTheme = null;
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+		document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+		return {
+			storageKey,
+			updatePickers(choice = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = choice;
+					const tmpl = document.querySelector('#theme-icons');
+					const newIcon = tmpl && tmpl.content.querySelector('.' + choice);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+					}
+				});
+			},
+		};
+	})();
+</script>
+
+<template id="theme-icons">
+	<Icon name="sun" class="light" />
+	<Icon name="moon" class="dark" />
+	<Icon name="laptop" class="auto" />
+</template>

@@ -1,0 +1,235 @@
+# Atlas documentation site: build, check and (gated) deploy.
+#
+# PUBLISH GATE: the deploy job cannot publish yet. It runs only when ALL of these hold:
+#   - the run is a manual workflow_dispatch with input deploy=true, on refs/heads/docs;
+#   - the repository variable DOCS_PUBLISH_ENABLED is 'true'.
+# Publishing stays blocked until the repository owner:
+#   1. completes the pre-publish gate G1;
+#   2. sets Pages source = GitHub Actions, and protects the `github-pages` environment
+#      to the `docs` branch with required reviewers;
+#   3. sets the repository variable DOCS_PUBLISH_ENABLED=true.
+# The default branch stays `main` (H1). Until then the deploy job is always skipped.
+# Deploy never runs on pull_request. workflow_dispatch also needs a same-path stub
+# workflow on `main` (added separately by maintainers; not part of this branch).
+#
+# No job writes to the repository, opens issues or posts comments.
+name: Docs site
+
+on:
+  push:
+    branches: [docs]
+  pull_request:
+    branches: [docs]
+  workflow_dispatch:
+    inputs:
+      atlas_tag:
+        description: Atlas release tag to document (vX.Y.Z[-pre]); empty = latest tag on main
+        type: string
+        required: false
+        default: ''
+      deploy:
+        description: Deploy to GitHub Pages (only when publishing is enabled; see the gate above)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  # sha256 of gitleaks_8.30.1_linux_x64.tar.gz from the release checksums file.
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  # Builds are unpublished previews (noindex + visible banner) until publishing is enabled.
+  DOCS_PREVIEW: ${{ (github.event_name != 'pull_request' && vars.DOCS_PUBLISH_ENABLED == 'true') && '0' || '1' }}
+
+jobs:
+  build-and-check:
+    name: build-and-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the docs sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch main read-only (for V0 ancestry)
+        run: git fetch --no-tags --filter=tree:0 origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: V0 resolve Atlas tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.atlas_tag }}
+          REMOTE: https://github.com/${{ github.repository }}.git
+        run: |
+          node site/scripts/resolve-atlas-tag.mjs --self-test
+          if [ -n "$INPUT_TAG" ]; then
+            node site/scripts/resolve-atlas-tag.mjs --tag "$INPUT_TAG" --remote "$REMOTE"
+          else
+            node site/scripts/resolve-atlas-tag.mjs --remote "$REMOTE" --main-ref origin/main
+          fi
+
+      - name: Check out Atlas at the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          path: atlas-src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Atlas CLI requirements
+        run: python -m pip install --disable-pip-version-check -r atlas-src/scripts/requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Source checks (V1, V2, V3, V4, V9, V7 sources, gitignore)
+        working-directory: site
+        env:
+          ATLAS_SRC: ${{ github.workspace }}/atlas-src
+          ATLAS_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          npm run check:generated
+          npm run check:version
+          npm run check:drift
+          npm run check:registry
+          npm run check:brand
+          npm run check:no-microsoft:source
+          npm run check:gitignore
+
+      - name: V13 size budget
+        working-directory: site
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          MIRROR_URL: https://github.com/${{ github.repository }}.git
+        run: |
+          # (d) measures this checkout's HEAD history as the stand-in for a fresh docs clone.
+          # (f) clones the public repository as a mirror, without credentials, on pull requests only.
+          if [ "$EVENT" = pull_request ]; then
+            npm run check:size -- --base "origin/$PR_BASE" --mirror-url "$MIRROR_URL"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! printf '%s' "$BEFORE" | grep -qE '^0+$' \
+              && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            npm run check:size -- --base "$BEFORE"
+          else
+            npm run check:size -- --skip-diff
+          fi
+
+      - name: B1 build
+        working-directory: site
+        run: npm run build
+
+      - name: Dist checks (V5 links, V7 dist, V8 a+b sanitise)
+        working-directory: site
+        run: |
+          npm run check:links
+          npm run check:no-microsoft:dist
+          npm run check:sanitise
+
+      - name: V8 (c) private host deny-list
+        working-directory: site
+        env:
+          DOCS_HOST_DENYLIST: ${{ secrets.DOCS_HOST_DENYLIST }}
+          DOCS_DENYLIST_MODE: ${{ github.event_name == 'pull_request' && 'pending-ok' || 'enforce' }}
+        run: npm run check:denylist
+
+      - name: Install gitleaks (pinned release, pinned sha256)
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o "$archive" "$base/$archive"
+          curl -sSfL -o checksums.txt "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          published="$(awk -v f="$archive" '$2 == f { print $1 }' checksums.txt)"
+          actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+          if [ "$actual" != "$GITLEAKS_SHA256" ] || [ "$published" != "$GITLEAKS_SHA256" ]; then
+            echo "::error::gitleaks checksum mismatch (pinned '${GITLEAKS_SHA256}', published '${published}', actual '${actual}')"
+            exit 1
+          fi
+          tar -xzf "$archive" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: gitleaks (docs history and built site)
+        run: |
+          gitleaks git --redact --no-banner --exit-code 1 .
+          gitleaks dir --redact --no-banner --exit-code 1 site/dist
+
+      - name: Prepare link-check root (maps the /atlas/ base onto site/dist)
+        run: |
+          mkdir -p "$RUNNER_TEMP/lychee-root"
+          ln -s "$GITHUB_WORKSPACE/site/dist" "$RUNNER_TEMP/lychee-root/atlas"
+
+      - name: V6 external links (lychee)
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          fail: true
+          args: >-
+            --no-progress
+            --max-retries 3
+            --retry-wait-time 5
+            --accept '200..=299,429'
+            --exclude-loopback
+            --exclude '^https?://([a-z0-9-]+\.)*example\.(com|org|net)([/:?#]|$)'
+            --exclude '\.invalid([/:?#]|$)'
+            --exclude '^https://sergio-sisternes-epam\.github\.io/atlas'
+            --root-dir ${{ runner.temp }}/lychee-root
+            'site/dist/**/*.html'
+
+      - name: V10 accessibility (axe, light and dark)
+        working-directory: site
+        run: |
+          npx playwright install --with-deps chromium
+          npm run check:a11y
+
+      - name: Upload preview artefact (noindex; not a deployment)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-preview
+          path: site/dist
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Pages artefact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    name: deploy
+    needs: build-and-check
+    # Gated: see the comment block at the top of this file.
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true && github.ref == 'refs/heads/docs' && vars.DOCS_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

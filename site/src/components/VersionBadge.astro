@@ -1,0 +1,20 @@
+---
+import build from '../data/atlas-build.json';
+
+const prerelease = /-/.test(build.version) ? build.version.split('-')[1].split('.')[0] : '';
+const label = `Atlas ${build.version}${prerelease ? ` (${prerelease})` : ''}`;
+---
+
+<span class="atlas-version-badge" title={`Docs mirror Atlas ${build.tag}`}>{label}</span>
+
+<style>
+	.atlas-version-badge {
+		font-family: var(--font-mono);
+		font-size: var(--text-small);
+		line-height: var(--leading-small);
+		color: var(--color-text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+</style>

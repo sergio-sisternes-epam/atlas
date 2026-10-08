@@ -1,0 +1,84 @@
+---
+title: Atlas
+description: Atlas is a distributed Semantic Knowledge Network built on git and markdown, with a SCHEMA and a CLI that keep agents inside defined, extensible domains.
+template: splash
+hero:
+  tagline: A distributed Semantic Knowledge Network built with technologies LLMs already know, git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains.
+  actions:
+    - text: Get started
+      link: /atlas/start/what-is-atlas/
+      icon: right-arrow
+    - text: Install
+      link: /atlas/start/install/
+      variant: minimal
+source:
+  - README.md
+  - references/help/getting-started.md
+  - apm.yml
+  - CONTRIBUTING.md
+source_sha:
+  README.md: 504c2d65ab2b42dabe8a456d0ce08d9ca85f3de7
+  references/help/getting-started.md: b1c704e59354a1bacd0e4b98c53dbde67b3e3d0c
+  apm.yml: 6e853cb45104aebe86c615c94e88a1f27ae5ebe2
+  CONTRIBUTING.md: 4b82aac94ff862293369545c8a0fe1a44e1dbd3e
+source_tag: v0.13.0-beta.13
+---
+
+import { Code, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+Atlas gives your agent or skill a second brain.
+The brain follows a defined structure, and it can connect to other brains.
+Knowledge lives in git as markdown pages.
+A SCHEMA and a deterministic Python CLI check the shape of every page.
+Atlas works with any git-capable agent harness that the APM CLI can target.
+
+| Property | What it is |
+| --- | --- |
+| Git-based | Stores mount as git submodules in the project. |
+| Guardrailed | The SCHEMA and the CLI `compile` command check shape, frontmatter and links. |
+| Distributed | Pages link across stores with `atlas://` links. |
+| Clustered | Knowledge groups into logical clusters, such as work hubs. |
+| Shared or dedicated | Knowledge lives on the consumer branch `atlas`, or in a separate store repository. |
+| Recall | Search is `grep` by default. The ranked profile `atlas:ranked` (FTS5) is opt-in. `atlas:tgrep` is advanced. |
+
+## Install
+
+Install Atlas from the marketplace with the APM CLI:
+
+<Code
+	lang="bash"
+	code={`apm marketplace add sergio-sisternes-epam/atlas-marketplace --name atlas
+apm install atlas@atlas`}
+/>
+
+The `--name atlas` option is required, so that the package resolves as `atlas@atlas`.
+
+To install one exact release, pin its tag instead:
+
+<Code lang="bash" code={`apm install sergio-sisternes-epam/atlas#v0.13.0-beta.13`} />
+
+APM version ranges skip prerelease tags.
+A beta release such as `v0.13.0-beta.13` can only be installed by pinning that exact tag.
+Never install from a branch. See [Install](/atlas/start/install/).
+
+Then ask in an agent session: `/atlas How can I get started?`
+
+## Where to go next
+
+<CardGrid>
+	<LinkCard
+		title="Start"
+		description="What Atlas is, how to install it, your first journey and your storage choice."
+		href="/atlas/start/what-is-atlas/"
+	/>
+	<LinkCard
+		title="Modules"
+		description="Each module is one procedure the agent loads for one intent."
+		href="/atlas/modules/"
+	/>
+	<LinkCard
+		title="CLI reference"
+		description="Every command of the deterministic Atlas CLI, with its exact help output."
+		href="/atlas/reference/cli/"
+	/>
+</CardGrid>

@@ -1,0 +1,21 @@
+{
+  "status": "final",
+  "note": "Final values set by the package maintainers. All sizes are in bytes.",
+  "forbidden_dirs": ["dist", ".astro", "node_modules"],
+  "forbidden_prefixes": ["site/public/pagefind/"],
+  "forbidden_extensions": ["zip", "tar", "tgz", "gz", "7z", "pdf", "mp3", "wav", "mp4", "mov", "webm", "psd", "gif", "exe", "dll", "so", "dylib", "jar"],
+  "forbidden_globs_note": "*.tar.* is also forbidden (for example .tar.xz).",
+  "raster_extensions": ["png", "jpg", "jpeg", "webp", "avif"],
+  "raster_image_max_bytes": 204800,
+  "file_max_bytes": 512000,
+  "lockfile": "site/package-lock.json",
+  "diff_added_max_bytes": 1048576,
+  "docs_history_packed": { "warn_bytes": 3145728, "fail_bytes": 5242880 },
+  "repo_mirror_packed": { "warn_bytes": 6291456, "fail_bytes": 8388608 },
+  "svg_max_saving_percent": 10,
+  "brand_verbatim": [
+    "site/src/assets/atlas-mark.svg",
+    "site/src/assets/atlas-mark-on-dark.svg",
+    "site/public/favicon.svg"
+  ]
+}

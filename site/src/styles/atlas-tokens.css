@@ -1,0 +1,134 @@
+/**
+ * Atlas Style — Corporate Brand Tokens
+ * Approved 2026-10-07 (name: Atlas Style) — fleet baseline; package Atlas tip is SoT (MoN may consume)
+ * Date: 2026-10-07 · Changelog: formerly Navlight
+ *
+ * Thesis: "Quiet void, clear signal"
+ * Usage: import or copy into Astro / wiki / BotOps chrome.
+ * Toggle: set data-theme="dark" on <html> (or add .theme-dark).
+ */
+
+:root {
+  /* ——— Semantic colour (light) ——— */
+  --color-bg: #F3F5F9;
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #FFFFFF;
+  --color-text: #0B1220;
+  --color-text-muted: #5A6578;
+  --color-border: #D5DCE8;
+  --color-accent: #3B5BDB;
+  --color-accent-hover: #2F4BC4;
+  --color-accent-muted: #E8EDFF;
+  --color-info: #0A8FA8;
+  --color-info-muted: #E0F5F8;
+  --color-danger: #C23B3B;
+  --color-danger-muted: #FCE8E8;
+  --color-success: #1F7A4C;
+  --color-success-muted: #E3F5EC;
+  --color-focus-ring: #3B5BDB;
+
+  /* ——— Typography ——— */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-h1: 2rem;        /* 32px */
+  --text-h2: 1.5rem;      /* 24px */
+  --text-h3: 1.25rem;     /* 20px */
+  --text-body: 1rem;      /* 16px */
+  --text-small: 0.875rem; /* 14px */
+  --text-mono: 0.875rem;  /* 14px */
+
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-body: 1.65;   /* generous for Read mode */
+  --leading-small: 1.5;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ——— Spacing (4px base) ——— */
+  --space-1: 0.25rem;  /* 4 */
+  --space-2: 0.5rem;   /* 8 */
+  --space-3: 0.75rem;  /* 12 */
+  --space-4: 1rem;     /* 16 */
+  --space-5: 1.5rem;   /* 24 */
+  --space-6: 2rem;     /* 32 */
+  --space-7: 3rem;     /* 48 */
+  --space-8: 4rem;     /* 64 */
+
+  /* ——— Radius ——— */
+  --radius-sm: 0.25rem;  /* 4 */
+  --radius-md: 0.5rem;   /* 8 */
+  --radius-lg: 0.75rem;  /* 12 */
+  --radius-pill: 9999px;
+
+  /* ——— Border ——— */
+  --border-width: 1px;
+  --border: var(--border-width) solid var(--color-border);
+
+  /* ——— Elevation ——— */
+  --shadow-sm: 0 1px 2px rgba(11, 18, 32, 0.06);
+  --shadow-md: 0 4px 12px rgba(11, 18, 32, 0.08);
+  --shadow-lg: 0 12px 28px rgba(11, 18, 32, 0.12);
+
+  /* ——— Motion ——— */
+  --ease: 150ms ease;
+  --ease-slow: 250ms ease;
+
+  /* ——— Layout chrome (wiki tip SHA, nav) ——— */
+  --chrome-height: 3rem;
+  --content-max: 42rem;   /* readable measure for wiki Read mode */
+  --content-wide: 72rem;
+}
+
+[data-theme="dark"],
+.theme-dark {
+  --color-bg: #070B14;
+  --color-surface: #101826;
+  --color-surface-raised: #162033;
+  --color-text: #E8ECF4;
+  --color-text-muted: #9AA6BA;
+  --color-border: #243047;
+  --color-accent: #6B8CFF;
+  --color-accent-hover: #8AA4FF;
+  --color-accent-muted: #1A2744;
+  --color-info: #5EC8D8;
+  --color-info-muted: #0F2A32;
+  --color-danger: #F07178;
+  --color-danger-muted: #3A1A1C;
+  --color-success: #5EC98A;
+  --color-success-muted: #143024;
+  --color-focus-ring: #6B8CFF;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* Prefer dark for Operate / wiki chrome when OS prefers dark and no explicit theme */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not(.theme-light) {
+    --color-bg: #070B14;
+    --color-surface: #101826;
+    --color-surface-raised: #162033;
+    --color-text: #E8ECF4;
+    --color-text-muted: #9AA6BA;
+    --color-border: #243047;
+    --color-accent: #6B8CFF;
+    --color-accent-hover: #8AA4FF;
+    --color-accent-muted: #1A2744;
+    --color-info: #5EC8D8;
+    --color-info-muted: #0F2A32;
+    --color-danger: #F07178;
+    --color-danger-muted: #3A1A1C;
+    --color-success: #5EC98A;
+    --color-success-muted: #143024;
+    --color-focus-ring: #6B8CFF;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+  }
+}
