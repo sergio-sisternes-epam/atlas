@@ -7,12 +7,18 @@
 #   1. completes the pre-publish gate G1;
 #   2. sets Pages source = GitHub Actions, and protects the `github-pages` environment
 #      to the `docs` branch with required reviewers;
-#   3. sets the repository variable DOCS_PUBLISH_ENABLED=true.
+#   3. sets the repository variable DOCS_PUBLISH_ENABLED=true;
+#   4. creates the `docs-deploy` environment (restricted to `docs`, holding the
+#      DOCS_HOST_DENYLIST secret). It must exist before push or dispatch runs can pass the
+#      deny-list scan; until then the scan fails closed.
 # The default branch stays `main` (H1). Until then the deploy job is always skipped.
 # Deploy never runs on pull_request. workflow_dispatch also needs a same-path stub
 # workflow on `main` (added separately by maintainers; not part of this branch).
 #
-# V8(c) trust model: the DOCS_HOST_DENYLIST secret is never exposed to pull_request runs
+# V8(c) trust model: DOCS_HOST_DENYLIST is an environment secret of the `docs-deploy`
+# environment, which the repository owner restricts to the `docs` branch; it is not a
+# repository-level secret. Only the `denylist` job declares that environment.
+# The secret is never exposed to pull_request runs
 # (build-and-check only warns there and references no secrets). Enforcement runs only on
 # push or workflow_dispatch to `docs`, in the separate `denylist` job: it takes the scanner from a
 # sparse checkout of site/scripts at github.sha, installs nothing, clears NODE_OPTIONS, and scans
@@ -240,6 +246,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: docs-deploy
     permissions:
       contents: read
     steps:

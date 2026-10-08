@@ -89,6 +89,7 @@ Notes:
 - `check:denylist` fails closed when `DOCS_HOST_DENYLIST` is unset.
   Set `DOCS_DENYLIST_MODE=pending-ok` to get a warning instead; CI does this on pull requests only.
   The deny-list is a secret: never commit it, and never print its entries.
+  In CI it is an environment secret of the `docs-deploy` environment, which the repository owner sets up and restricts to the `docs` branch; it is not a repository secret.
   Without flags it scans `site/` sources and `site/dist`.
   `--dist <dir>` (or env `DOCS_SCAN_DIST`) scans another built dist; `--dist-only` skips the sources.
   On a hit it prints only `file:line` and the entry index.
@@ -123,6 +124,9 @@ The `build-and-check` job resolves the tag, checks out Atlas into `atlas-src`, r
 Pull requests upload a noindex `docs-preview` artefact; it is not a deployment.
 
 The V8 c deny-list secret never reaches pull request runs.
+`DOCS_HOST_DENYLIST` is an environment secret of the `docs-deploy` environment, not a repository secret.
+The repository owner sets up that environment and restricts it to the `docs` branch. Only the `denylist` job declares it.
+Until the environment exists, the scan fails closed on pushes and manual dispatches.
 On pull requests, `build-and-check` runs `check:denylist` in `pending-ok` mode with no secret, so it only warns.
 On a push or manual dispatch, `build-and-check` uploads the built site as the `docs-dist-scan` artefact (kept for 1 day).
 The `denylist` job then enforces the deny-list, on `docs` only (it fails closed on any other ref).
