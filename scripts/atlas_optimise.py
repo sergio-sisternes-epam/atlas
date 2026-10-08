@@ -333,6 +333,25 @@ def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
     return None
 
 
+def _history_path_lines(text: str) -> set[int]:
+    """Line numbers of path fields inside ref-bearing relates_to items."""
+    parsed = _fm_lines(text)
+    if parsed is None:
+        return set()
+    lines, _rest = parsed
+    block = _relates_block(lines)
+    if block is None:
+        return set()
+    found: set[int] = set()
+    for span in _item_spans(lines, *block):
+        if not any(re.search(r"(?:^|\s)ref:\s*\S", lines[i]) for i in range(*span)):
+            continue
+        for i in range(*span):
+            if re.match(r"^\s*-?\s*path:\s*\S", lines[i]):
+                found.add(i)
+    return found
+
+
 # ---------------------------------------------------------------------------
 # planning
 
@@ -370,7 +389,11 @@ def _atlas_mentions(store: Store, key: str) -> list[str]:
 
 
 def _referrers(store: Store, key: str) -> list[str]:
-    """Files whose relates_to path or relative link resolves to key."""
+    """Files whose live relates_to path or relative link resolves to key.
+
+    A ref-bearing relates_to item is history. It must not make a file a referrer
+    and must not be rewritten when a live page moves.
+    """
     target_file = (store.root / key).resolve()
     refs = []
     for path in store.md_files:
@@ -378,8 +401,11 @@ def _referrers(store: Store, key: str) -> list[str]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        history_lines = _history_path_lines(text)
         hit = False
         for m in re.finditer(r"^\s*-?\s*path:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", text, re.M):
+            if text.count("\n", 0, m.start()) in history_lines:
+                continue
             if store.canonical(m.group(1)) == key:
                 hit = True
                 break
@@ -2047,8 +2073,11 @@ def _rewrite_refs(store: Store, old_key: str, new_key: str, referrers: list[str]
     for rkey in referrers:
         rpath = store.root / rkey
         text = rpath.read_text(encoding="utf-8")
+        history_lines = _history_path_lines(text)
 
         def fm_sub(m: re.Match) -> str:
+            if text.count("\n", 0, m.start()) in history_lines:
+                return m.group(0)
             val = m.group(3)
             if store.canonical(val) == old_key:
                 return m.group(1) + m.group(2) + new_key + m.group(4)

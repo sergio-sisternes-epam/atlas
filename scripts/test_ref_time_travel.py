@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -3123,6 +3125,117 @@ def main() -> int:
                 )
             else:
                 print("[PASS] prune keeps one lock inode across runs")
+
+        linked_lock = tmp / "linked-lock"
+        linked_lock_init = run(["init", "--root", str(linked_lock), "--json"])
+        if linked_lock_init.returncode != 0:
+            failures.append(f"linked-lock store init failed: {linked_lock_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(linked_lock, ["init", "-b", "main"])
+            (linked_lock / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (linked_lock / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            git(linked_lock, ["add", "."])
+            git(linked_lock, ["commit", "-m", "lock symlink"])
+            outside_lock = tmp / "outside-lock"
+            outside_lock.write_text("outside lock\n", encoding="utf-8")
+            (linked_lock / ".atlas-ref-prune.lock").symlink_to(outside_lock)
+            lock_buf = io.StringIO()
+            with contextlib.redirect_stdout(lock_buf):
+                linked_lock_code = run_prune(
+                    str(linked_lock),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            if (
+                linked_lock_code == 0
+                or "symlink" not in lock_buf.getvalue()
+                or outside_lock.read_text(encoding="utf-8") != "outside lock\n"
+                or not (linked_lock / ".atlas-ref-prune.lock").is_symlink()
+                or not (linked_lock / "dead.md").is_file()
+            ):
+                failures.append(f"prune should refuse a lock symlink: {lock_buf.getvalue()}")
+            else:
+                print("[PASS] prune refuses a lock symlink")
+
+        partial = tmp / "partial-rollback"
+        partial_init = run(["init", "--root", str(partial), "--json"])
+        if partial_init.returncode != 0:
+            failures.append(f"partial-rollback store init failed: {partial_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(partial, ["init", "-b", "main"])
+            (partial / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (partial / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (partial / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            (partial / "other.md").write_text(
+                page("Other", "relates_to:\n  - path: dead.md\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            git(partial, ["add", "."])
+            git(partial, ["commit", "-m", "partial"])
+            before = {
+                rel: (partial / rel).read_text(encoding="utf-8")
+                for rel in ("living.md", "other.md", "summary.md")
+            }
+            real_rewrite = refcmd._rewrite_store
+            real_critical = refcmd._compile_critical
+            failed_restore = {"rel": ""}
+
+            def red_compile(_store):
+                return {("injected", "living.md", "injected critical")}
+
+            def fail_one_restore(store, rel, data, **kwargs):
+                if kwargs.get("must_exist", True) and kwargs.get("mode") is not None and not failed_restore["rel"]:
+                    failed_restore["rel"] = rel
+                    raise RefError("injected rollback conflict")
+                return real_rewrite(store, rel, data, **kwargs)
+
+            refcmd._compile_critical = red_compile
+            refcmd._rewrite_store = fail_one_restore
+            partial_buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(partial_buf):
+                    partial_code = run_prune(
+                        str(partial),
+                        "summary.md",
+                        ("dead.md",),
+                        "HEAD",
+                        "derived_from",
+                        True,
+                    )
+            finally:
+                refcmd._rewrite_store = real_rewrite
+                refcmd._compile_critical = real_critical
+            failed_rel = failed_restore["rel"]
+            restored = [
+                rel
+                for rel, text in before.items()
+                if rel != failed_rel and (partial / rel).read_text(encoding="utf-8") == text
+            ]
+            left_rewritten = (
+                failed_rel in before
+                and (partial / failed_rel).read_text(encoding="utf-8") != before[failed_rel]
+            )
+            if (
+                partial_code == 0
+                or "roll back" not in partial_buf.getvalue()
+                or "injected rollback conflict" not in partial_buf.getvalue()
+                or not (partial / "dead.md").is_file()
+                or not left_rewritten
+                or not restored
+            ):
+                failures.append(
+                    f"partial rollback should restore the drop and later pages: {partial_buf.getvalue()} failed={failed_rel} restored={restored}"
+                )
+            else:
+                print("[PASS] prune continues rollback after one restore fails")
 
         import builtins
 

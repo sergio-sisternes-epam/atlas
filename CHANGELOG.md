@@ -18,7 +18,9 @@
 - A restore link whose destination is replaced before the identity check keeps the checked temp instead of unlinking the last copy.
 - Optimise ignores `relates_to` items that carry `ref` when deciding gist coverage, gist parents, schema members, and cluster joins. A history edge does not suppress `uncovered-gist`.
 - `atlas ref prune` rechecks the tip with a dry-run compile after deletion. Any remaining critical finding rolls back only the pages prune wrote or deleted. A concurrent edit on another page is left in place.
-- `atlas ref prune` keeps one lock file for the mutation window and does not replace that inode between runs.
+- `atlas ref prune` keeps one lock file for the mutation window and does not replace that inode between runs. It opens that lock without following a symlink.
+- A failed prune keeps rolling back every page it wrote or deleted. A page that cannot be restored is left for recovery, and the command reports that aggregate failure.
+- Optimise referrer discovery and rewriting leave ref-bearing `relates_to` items unchanged. A history edge still names the pre-move path.
 - `atlas ref show` and `atlas ref prune` load without `fcntl`, so other commands still start where file locking is unavailable. Prune refuses there instead of failing at import.
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.

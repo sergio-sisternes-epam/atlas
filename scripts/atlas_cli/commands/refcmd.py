@@ -834,6 +834,27 @@ def _fcntl():
     return fcntl
 
 
+def _open_prune_lock(store: Path) -> int:
+    """Open the stable prune lock without following a symlink at that name."""
+    try:
+        dirfd = os.open(store, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise RefError(f"refusing to follow symlink {store}") from e
+    try:
+        return os.open(
+            ".atlas-ref-prune.lock",
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=dirfd,
+        )
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise RefError("refusing to follow symlink .atlas-ref-prune.lock") from e
+        raise RefError(f"refusing to open prune lock: {e.strerror or e}") from e
+    finally:
+        os.close(dirfd)
+
+
 def _lock_fd(fd: int, label: str) -> None:
     """Serialize cooperating writers across the check and the directory update."""
     locking = _fcntl()
@@ -1775,8 +1796,7 @@ def run_prune(
             raise RefError(f"summary would fail compile: {transformed[0]}")
         removed: list[tuple[str, bytes, int]] = []
         written: list[tuple[str, bytes, int, int, int, bytes]] = []
-        lock_path = store / ".atlas-ref-prune.lock"
-        root_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        root_fd = _open_prune_lock(store)
         try:
             _lock_fd(root_fd, summary_rel)
             try:
@@ -1825,8 +1845,9 @@ def run_prune(
                     ident, path, msg = remaining[0]
                     raise RefError(f"prune would fail compile: [{ident}] {path}: {msg}")
             except Exception as exc:
-                try:
-                    for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
+                restore_errors: list[str] = []
+                for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
+                    try:
                         _rewrite_store(
                             store,
                             rel,
@@ -1837,12 +1858,17 @@ def run_prune(
                             expected_dev=new_dev,
                             expected_ino=new_ino,
                         )
-                    for rel, data, mode in removed:
+                    except Exception as restore_exc:
+                        restore_errors.append(f"{rel}: {restore_exc}")
+                for rel, data, mode in removed:
+                    try:
                         _rewrite_store(store, rel, data, must_exist=False, mode=mode)
-                except Exception as restore_exc:
-                    if isinstance(restore_exc, RefError):
-                        raise restore_exc from exc
-                    raise RefError(f"refusing to update page: {restore_exc}") from exc
+                    except Exception as restore_exc:
+                        restore_errors.append(f"{rel}: {restore_exc}")
+                if restore_errors:
+                    raise RefError(
+                        "refusing to roll back prune; " + "; ".join(restore_errors)
+                    ) from exc
                 raise
         finally:
             os.close(root_fd)
