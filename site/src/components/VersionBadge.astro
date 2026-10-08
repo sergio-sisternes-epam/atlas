@@ -1,0 +1,20 @@
+---
+import build from '../data/atlas-build.json';
+
+// "Atlas" is already next to the badge, and a prerelease version already names its channel.
+const label = `v${build.version}`;
+---
+
+<span class="atlas-version-badge sl-hidden md:sl-block" title={`Docs mirror Atlas ${build.tag}`}>{label}</span>
+
+<style>
+	.atlas-version-badge {
+		font-family: var(--font-mono);
+		font-size: var(--text-small);
+		line-height: var(--leading-small);
+		color: var(--color-text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+</style>

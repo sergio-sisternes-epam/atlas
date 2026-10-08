@@ -22,6 +22,10 @@ The build fetches these tags from this same repository.
 - Changes arrive by pull request into `docs`. Maintainers squash-merge each pull request.
 - Install Atlas from the marketplace or from a pinned release tag. Never install Atlas from this branch.
 
+## Local development
+
+See [`site/README.md`](site/README.md) to build and check the site locally.
+
 ## Published site
 
 The site is not published yet.

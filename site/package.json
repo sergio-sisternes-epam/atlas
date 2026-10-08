@@ -1,0 +1,49 @@
+{
+  "name": "atlas-docs-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sources of the Atlas documentation site (orphan docs branch; never merged into main).",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": "22.23.3"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "build:preview": "DOCS_PREVIEW=1 astro build",
+    "preview": "astro preview",
+    "generate": "node scripts/run-py.mjs generate.py",
+    "check:generated": "node scripts/run-py.mjs generate.py --check",
+    "check:tag": "node scripts/resolve-atlas-tag.mjs",
+    "check:tag-self-test": "node scripts/resolve-atlas-tag.mjs --self-test",
+    "check:version": "node scripts/run-py.mjs check-version.py",
+    "check:drift": "node scripts/run-py.mjs check-drift.py",
+    "check:registry": "node scripts/run-py.mjs check-registry.py",
+    "check:links": "node scripts/check-links.mjs",
+    "check:no-microsoft": "node scripts/check-no-microsoft.mjs",
+    "check:no-microsoft:source": "node scripts/check-no-microsoft.mjs --source",
+    "check:no-microsoft:dist": "node scripts/check-no-microsoft.mjs --dist",
+    "check:sanitise": "node scripts/check-sanitise.mjs",
+    "check:denylist": "node scripts/check-denylist.mjs",
+    "check:brand": "node scripts/check-brand.mjs",
+    "check:a11y": "node scripts/check-a11y.mjs",
+    "check:size": "node scripts/check-size.mjs",
+    "check:gitignore": "node scripts/check-gitignore.mjs",
+    "check:source": "npm run check:tag-self-test && npm run check:generated && npm run check:version && npm run check:drift && npm run check:registry && npm run check:brand && npm run check:no-microsoft:source && npm run check:gitignore",
+    "check:dist": "npm run check:links && npm run check:no-microsoft:dist && npm run check:sanitise"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.5",
+    "astro": "7.3.6"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "playwright": "1.64.0",
+    "svgo": "4.1.0"
+  },
+  "overrides": {
+    "pagefind": "1.5.2",
+    "@pagefind/default-ui": "1.5.2"
+  }
+}
