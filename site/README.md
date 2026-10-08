@@ -89,6 +89,9 @@ Notes:
 - `check:denylist` fails closed when `DOCS_HOST_DENYLIST` is unset.
   Set `DOCS_DENYLIST_MODE=pending-ok` to get a warning instead; CI does this on pull requests only.
   The deny-list is a secret: never commit it, and never print its entries.
+  Without flags it scans `site/` sources and `site/dist`.
+  `--dist <dir>` (or env `DOCS_SCAN_DIST`) scans another built dist; `--dist-only` skips the sources.
+  On a hit it prints only `file:line` and the entry index.
 - `check:a11y` uses `PLAYWRIGHT_CHROMIUM_EXECUTABLE` when set; otherwise run `npx playwright install chromium` first.
 - External links (V6) are checked in CI with lychee.
 
@@ -119,7 +122,14 @@ The values in `size-budget.json` are final. `check:size` prints one table row pe
 The `build-and-check` job resolves the tag, checks out Atlas into `atlas-src`, runs every check above, builds the site and runs gitleaks, lychee and axe.
 Pull requests upload a noindex `docs-preview` artefact; it is not a deployment.
 
-The `deploy` job is gated and is always skipped today.
+The V8 c deny-list secret never reaches pull request runs.
+On pull requests, `build-and-check` runs `check:denylist` in `pending-ok` mode with no secret, so it only warns.
+On a push or manual dispatch, `build-and-check` uploads the built site as the `docs-dist-scan` artefact (kept for 1 day).
+The `denylist` job then enforces the deny-list, on `docs` only (it fails closed on any other ref).
+It checks out only `site/scripts` at the run's commit, installs no packages, clears `NODE_OPTIONS`, and runs `check-denylist.mjs --dist-only` against that artefact with the secret.
+The built dist is the published output, so it covers what matters for publication.
+
+The `deploy` job needs `build-and-check` and `denylist`. It is gated and is always skipped today.
 It runs only on a manual dispatch with `deploy: true` on `docs`, and only when the repository variable `DOCS_PUBLISH_ENABLED` is `true`.
 The repository owner sets that variable after the pre-publish gate, after setting Pages to deploy from GitHub Actions, and after protecting the `github-pages` environment.
 

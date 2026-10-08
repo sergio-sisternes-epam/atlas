@@ -63,10 +63,13 @@ export const TEXT_EXT = /\.(md|mdx|astro|ts|mts|js|mjs|cjs|json|css|html|svg|xml
 
 const ROOT_TEXT = /(^|\/)(\.nvmrc|\.gitignore|README|LICENSE|NOTICE)$/;
 
-/** Text files to scan for leaks: site sources (caches excluded) plus everything in site/dist. */
-export function scanTargets({ exclude = [] } = {}) {
+/**
+ * Text files to scan for leaks: site sources (caches excluded) plus everything in the dist dir.
+ * distDir defaults to site/dist; includeSources=false scans only the dist dir.
+ */
+export function scanTargets({ exclude = [], distDir = DIST_DIR, includeSources = true } = {}) {
 	const skip = new Set(exclude);
-	const sources = walk(SITE_DIR).filter((f) => TEXT_EXT.test(f) || ROOT_TEXT.test(f));
-	const dist = walk(DIST_DIR, { includeAll: true }).filter((f) => TEXT_EXT.test(f));
+	const sources = includeSources ? walk(SITE_DIR).filter((f) => TEXT_EXT.test(f) || ROOT_TEXT.test(f)) : [];
+	const dist = walk(distDir, { includeAll: true }).filter((f) => TEXT_EXT.test(f));
 	return [...sources, ...dist].filter((f) => !skip.has(rel(f)));
 }

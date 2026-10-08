@@ -52,6 +52,7 @@ Notes:
 
 - The Python checks and the generator need an Atlas checkout at the tag in `atlas-src/` (or `ATLAS_SRC`). See `site/README.md`.
 - `check:denylist` fails closed unless `DOCS_HOST_DENYLIST` is set; use `DOCS_DENYLIST_MODE=pending-ok` only for pull-request runs.
+  CI never passes the secret to pull requests; it enforces the list only on `docs`, in a separate job that scans the built dist (`--dist-only`).
 - `check:links`, `check:no-microsoft` (dist part), `check:sanitise` (dist part) and `check:a11y` need a built `site/dist`.
 - The toolchain needs Node 22.23.3 exactly (`site/.nvmrc`).
 - `check:size` enforces the final budget in `site/size-budget.json`, including an `svgo` dry run on added SVGs.

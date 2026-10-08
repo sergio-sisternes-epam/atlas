@@ -12,6 +12,12 @@
 # Deploy never runs on pull_request. workflow_dispatch also needs a same-path stub
 # workflow on `main` (added separately by maintainers; not part of this branch).
 #
+# V8(c) trust model: the DOCS_HOST_DENYLIST secret is never exposed to pull_request runs
+# (build-and-check only warns there and references no secrets). Enforcement runs only on
+# push or workflow_dispatch to `docs`, in the separate `denylist` job: it takes the scanner from a
+# sparse checkout of site/scripts at github.sha, installs nothing, clears NODE_OPTIONS, and scans
+# only the built dist artefact. deploy needs that job.
+#
 # No job writes to the repository, opens issues or posts comments.
 name: Docs site
 
@@ -145,11 +151,13 @@ jobs:
           npm run check:no-microsoft:dist
           npm run check:sanitise
 
-      - name: V8 (c) private host deny-list
+      # Warn-only and secret-free: PR code must never see the deny-list. Enforcement runs in
+      # the `denylist` job below, on push/dispatch to docs only.
+      - name: V8 (c) private host deny-list (pull request, warn only)
+        if: github.event_name == 'pull_request'
         working-directory: site
         env:
-          DOCS_HOST_DENYLIST: ${{ secrets.DOCS_HOST_DENYLIST }}
-          DOCS_DENYLIST_MODE: ${{ github.event_name == 'pull_request' && 'pending-ok' || 'enforce' }}
+          DOCS_DENYLIST_MODE: pending-ok
         run: npm run check:denylist
 
       - name: Install gitleaks (pinned release, pinned sha256)
@@ -210,15 +218,78 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: Upload dist for the V8 (c) enforce scan
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-dist-scan
+          path: site/dist
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Pages artefact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site/dist
 
+  denylist:
+    name: V8c denylist (enforce)
+    needs: build-and-check
+    # Never on pull_request: this is the only job that receives the deny-list secret.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Guard (enforce runs only for refs/heads/docs)
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/docs" ]; then
+            echo "::error::V8(c) enforce mode only runs for the docs branch (got '$REF'); refusing to run (fail closed)."
+            exit 1
+          fi
+
+      - name: Check out the trusted scanner (site/scripts at github.sha)
+        if: github.ref == 'refs/heads/docs'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: site/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Download the built dist
+        if: github.ref == 'refs/heads/docs'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: docs-dist-scan
+          path: scan/dist
+
+      - name: Set up Node (pinned version; no cache, no install)
+        if: github.ref == 'refs/heads/docs'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+          package-manager-cache: false
+
+      - name: V8 (c) private host deny-list (enforce, dist only)
+        if: github.ref == 'refs/heads/docs'
+        env:
+          DOCS_HOST_DENYLIST: ${{ secrets.DOCS_HOST_DENYLIST }}
+          DOCS_DENYLIST_MODE: enforce
+          DOCS_SCAN_DIST: scan/dist
+          NODE_OPTIONS: ''
+        run: node trusted/site/scripts/check-denylist.mjs --dist-only --dist scan/dist
+
   deploy:
     name: deploy
-    needs: build-and-check
+    needs: [build-and-check, denylist]
     # Gated: see the comment block at the top of this file.
     if: github.event_name == 'workflow_dispatch' && inputs.deploy == true && github.ref == 'refs/heads/docs' && vars.DOCS_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-24.04
