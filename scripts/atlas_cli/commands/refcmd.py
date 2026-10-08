@@ -1251,6 +1251,54 @@ def _read_fd(fd: int) -> bytes:
     return b"".join(chunks)
 
 
+def _preserve_checked_page(dirfd: int, data: bytes, mode: int) -> str:
+    """Write the checked page to a new name before the last directory link can disappear."""
+    recovery = f".atlas-prune-recover-{os.getpid()}-{os.urandom(4).hex()}.tmp"
+    fd = os.open(
+        recovery,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=dirfd,
+    )
+    try:
+        _write_all(fd, data)
+        os.fchmod(fd, mode)
+        os.fsync(fd)
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(recovery, dir_fd=dirfd)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    return recovery
+
+
+def _restore_wrong_rename(
+    dirfd: int,
+    name: str,
+    tmp: str,
+    data: bytes,
+    mode: int,
+    label: str,
+) -> None:
+    """Keep the checked bytes, then put back the file the rename actually moved."""
+    try:
+        recovery = _preserve_checked_page(dirfd, data, mode)
+    except OSError as e:
+        raise RefError(
+            f"refusing to drop replaced page {label}; displaced file left at {tmp}"
+        ) from e
+    try:
+        _restore_displaced(dirfd, name, tmp, label)
+    except RefError as e:
+        raise RefError(
+            f"refusing to drop replaced page {label}; original preserved at {recovery}; displaced file left at {tmp}"
+        ) from e
+    raise RefError(f"refusing to drop replaced page {label}; original preserved at {recovery}")
+
+
 def _restore_displaced(dirfd: int, name: str, tmp: str, label: str) -> None:
     """Put a renamed replacement back only when the live name is still absent."""
     try:
@@ -1307,8 +1355,7 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
             os.rename(name, tmp, src_dir_fd=dirfd, dst_dir_fd=dirfd)
             moved = os.lstat(tmp, dir_fd=dirfd)
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
-                _restore_displaced(dirfd, name, tmp, rel)
-                raise RefError(f"refusing to drop replaced page {rel}")
+                _restore_wrong_rename(dirfd, name, tmp, data, mode, rel)
             if not _name_is_absent(dirfd, name):
                 _restore_displaced(dirfd, name, tmp, rel)
                 raise RefError(f"refusing to drop replaced page {rel}")

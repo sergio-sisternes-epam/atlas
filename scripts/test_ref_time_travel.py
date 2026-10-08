@@ -84,8 +84,26 @@ def page(title: str, relates: str, body: str) -> str:
     )
 
 
+def _scenario_contract() -> None:
+    scenario = ROOT / "references/scenarios/git-ref-time-travel-adversarial-v1.yaml"
+    text = scenario.read_text(encoding="utf-8")
+    required = (
+        "id: git-ref-time-travel-adversarial-v1",
+        "id: compile-fence",
+        "id: tip-exclusion",
+        "id: history-recovery",
+        "Absent ref is tip",
+        "does not satisfy a live",
+        "atlas ref show",
+    )
+    missing = [item for item in required if item not in text]
+    if missing:
+        raise AssertionError(f"scenario contract missing {missing}")
+
+
 def main() -> int:
     failures: list[str] = []
+    _scenario_contract()
     tmp = Path(tempfile.mkdtemp(prefix="atlas-ref-"))
     try:
         store = tmp / "store"
@@ -2678,6 +2696,66 @@ def main() -> int:
             finally:
                 os.rename = real_rename
                 os.close(restore_fd)
+
+        raced_drop = tmp / "raced-drop"
+        raced_init = run(["init", "--root", str(raced_drop), "--json"])
+        if raced_init.returncode != 0:
+            failures.append(f"raced-drop store init failed: {raced_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(raced_drop, ["init", "-b", "main"])
+            original_page = page("Dead", "relates_to: []\n", prose)
+            (raced_drop / "dead.md").write_text(original_page, encoding="utf-8")
+            (raced_drop / "dead.md").chmod(0o640)
+            (raced_drop / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (raced_drop / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            git(raced_drop, ["add", "."])
+            git(raced_drop, ["commit", "-m", "trial"])
+            before_living = (raced_drop / "living.md").read_text(encoding="utf-8")
+            real_rename = os.rename
+            replaced = {"done": False}
+
+            def replace_before_drop_rename(src, dst, *args, **kwargs):
+                src_dir = kwargs.get("src_dir_fd")
+                if not replaced["done"] and src == "dead.md" and src_dir is not None:
+                    replaced["done"] = True
+                    os.unlink(src, dir_fd=src_dir)
+                    fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=src_dir)
+                    os.write(fd, b"racer-drop\n")
+                    os.close(fd)
+                return real_rename(src, dst, *args, **kwargs)
+
+            os.rename = replace_before_drop_rename
+            try:
+                raced = run_prune(
+                    str(raced_drop),
+                    "summary.md",
+                    ("dead.md",),
+                    "HEAD",
+                    "derived_from",
+                    True,
+                )
+            finally:
+                os.rename = real_rename
+            recovered = [
+                path
+                for path in raced_drop.glob(".atlas-prune-recover-*")
+                if path.is_file() and path.read_text(encoding="utf-8") == original_page
+            ]
+            if (
+                raced == 0
+                or not replaced["done"]
+                or (raced_drop / "dead.md").read_bytes() != b"racer-drop\n"
+                or (raced_drop / "living.md").read_text(encoding="utf-8") != before_living
+                or not recovered
+                or stat.S_IMODE(recovered[0].stat().st_mode) != 0o640
+            ):
+                failures.append("drop rename of a replacement lost the checked page")
+            else:
+                print("[PASS] drop rename of a replacement keeps the checked page")
 
         scalar = tmp / "scalar-drop"
         scalar_init = run(["init", "--root", str(scalar), "--json"])
