@@ -664,6 +664,15 @@ def _link_hits_drop(root: Path, page: Path, token: str, drop: set[str]) -> bool:
     token, _suffix = _url_path(token)
     if not token or token.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
         return False
+    # A single leading slash is store-root relative. Joining it onto the page
+    # directory would discard that directory and consult the filesystem root.
+    if token.startswith("/") and not token.startswith("//"):
+        root_path = root / token.lstrip("/")
+        try:
+            root_rel = root_path.resolve(strict=False).relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return False
+        return root_rel in drop
     parent_path = page.parent / token
     try:
         parent_rel = parent_path.resolve(strict=False).relative_to(root.resolve()).as_posix()

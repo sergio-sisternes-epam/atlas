@@ -3294,6 +3294,71 @@ def main() -> int:
                     else:
                         print("[PASS] compile --json reports a null-byte relation path")
 
+        rooted = tmp / "rooted"
+        rooted_init = run(["init", "--root", str(rooted), "--json"])
+        if rooted_init.returncode != 0:
+            failures.append(f"rooted store init failed: {rooted_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (rooted / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (rooted / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (rooted / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n  - path: dead.md\n    kind: related\n",
+                    f"See [the trial](/dead.md#kept). {prose}",
+                ),
+                encoding="utf-8",
+            )
+            real_exists = Path.exists
+
+            def absolute_dead_exists(self: Path) -> bool:
+                if self.as_posix() == "/dead.md":
+                    return True
+                return real_exists(self)
+
+            Path.exists = absolute_dead_exists  # type: ignore[method-assign]
+            try:
+                hits = refcmd._link_hits_drop(rooted, rooted / "living.md", "/dead.md#kept", {"dead.md"})
+            finally:
+                Path.exists = real_exists  # type: ignore[method-assign]
+            if not hits:
+                failures.append("root-relative link should ignore an existing filesystem /dead.md")
+            else:
+                print("[PASS] root-relative link ignores a filesystem path of the same name")
+            git(rooted, ["init", "-b", "main"])
+            git(rooted, ["add", "."])
+            git(rooted, ["commit", "-m", "rooted"])
+            rooted_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(rooted),
+                    "--json",
+                ]
+            )
+            living = (rooted / "living.md").read_text(encoding="utf-8") if (rooted / "living.md").is_file() else ""
+            if (
+                rooted_prune.returncode != 0
+                or (rooted / "dead.md").exists()
+                or "[the trial](summary.md#kept)" not in living
+                or "/dead.md" in living
+            ):
+                failures.append(
+                    f"prune should retarget a store-root link: {rooted_prune.stdout} {rooted_prune.stderr}\n{living}"
+                )
+            else:
+                print("[PASS] prune retargets a store-root markdown link")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1
