@@ -168,8 +168,18 @@ site-search button[data-open-modal] {
 	position: relative;
 }
 
-/* Hero Signal mark: smaller on tall, narrow screens so the actions stay near the top. */
-@media (orientation: portrait) {
+/* Nested sidebar group labels: body size, so they read below the top-level section labels. */
+.sidebar-content ul ul summary .large {
+	font-size: var(--text-body);
+}
+
+/* Source footer on pages without a sidebar: same readable measure as the prose. */
+:root:not([data-has-sidebar]) .atlas-source-footer {
+	max-width: var(--content-max);
+}
+
+/* Hero Signal mark: smaller on tall, narrow screens (phones) so the actions stay near the top. */
+@media (orientation: portrait) and (max-aspect-ratio: 2/3) {
 	.hero > img {
 		width: calc(var(--space-8) * 2);
 	}

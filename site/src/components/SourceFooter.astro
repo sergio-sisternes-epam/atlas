@@ -2,7 +2,10 @@
 import build from '../data/atlas-build.json';
 
 const REPO = 'https://github.com/sergio-sisternes-epam/atlas';
-const data = Astro.locals.starlightRoute.entry.data as {
+const { entry } = Astro.locals.starlightRoute;
+// The not-found page mirrors no source, so it gets no source footer.
+const isNotFound = entry.id === '404';
+const data = entry.data as {
 	source?: string[];
 	source_tag?: string;
 };
@@ -10,28 +13,30 @@ const sources = data.source ?? [];
 const tag = data.source_tag ?? build.tag;
 ---
 
-<div class="atlas-source-footer" data-pagefind-ignore>
-	{
-		sources.length > 0 && (
+{
+	!isNotFound && (
+		<div class="atlas-source-footer" data-pagefind-ignore>
+			{sources.length > 0 && (
+				<p>
+					Source:{' '}
+					{sources.map((path, i) => (
+						<>
+							{i > 0 && ', '}
+							<a href={`${REPO}/blob/${tag}/${path}`}>
+								<code>{path}</code>
+							</a>
+						</>
+					))}{' '}
+					· Atlas <code>{tag}</code>
+				</p>
+			)}
 			<p>
-				Source:{' '}
-				{sources.map((path, i) => (
-					<>
-						{i > 0 && ', '}
-						<a href={`${REPO}/blob/${tag}/${path}`}>
-							<code>{path}</code>
-						</a>
-					</>
-				))}{' '}
-				· Atlas <code>{tag}</code>
+				Agents: the installed <code>SKILL.md</code> is authoritative; this site mirrors it at a
+				release tag.
 			</p>
-		)
-	}
-	<p>
-		Agents: the installed <code>SKILL.md</code> is authoritative; this site mirrors it at a release
-		tag.
-	</p>
-</div>
+		</div>
+	)
+}
 
 <style>
 	.atlas-source-footer {

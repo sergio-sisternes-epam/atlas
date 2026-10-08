@@ -61,6 +61,9 @@ npm run build:preview   # same, with DOCS_PREVIEW=1 (noindex + "Preview build" b
 npm run dev             # local dev server
 ```
 
+The build prints one expected warning: "Could not render `/404` from route `/[...slug]` as it conflicts with higher priority route `/404`".
+It is harmless: the custom 404 page renders through Starlight's own `/404` route. You do not need to fix it.
+
 ## Checks
 
 Every check exits non-zero on failure. Run them inside `site/`.

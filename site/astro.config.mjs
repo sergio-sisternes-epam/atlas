@@ -65,7 +65,7 @@ export default defineConfig({
 						{
 							label: 'Learn about Atlas',
 							items: [
-								{ label: 'getting-started (module)', slug: 'modules/getting-started' },
+								{ label: 'First use (getting-started)', slug: 'modules/getting-started' },
 								{ label: 'help', slug: 'modules/help' },
 							],
 						},
