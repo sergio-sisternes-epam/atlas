@@ -59,17 +59,20 @@ def load_source(root: Path, allow_partial: bool = False) -> dict[str, Any]:
         "complete": True,
         "omitted": [],
     }
-    fast_db = recall_index.matching_fast_path(root, merged)
-    if fast_db is not None:
+    fast_gen = recall_index.find_generation(root, schema=merged, fast_path=True)
+    if fast_gen is not None:
         try:
-            pages = recall_index.pages_from_db(fast_db)
+            pages = recall_index.pages_from_db(fast_gen.db)
         except sqlite3.Error:
             pages = None
-    if pages is not None:
-        cur = recall_index.load_current(root) or {}
+    if pages is not None and fast_gen is not None:
+        cur = fast_gen.pointer
         source["generation"] = cur.get("generation")
         source["corpus_digest"] = str(cur.get("corpus_digest") or "")
         source["fast_path"] = True
+        source.update(recall_index.index_location.describe(root, "fts5"))
+        if fast_gen.legacy:
+            source["warnings"] = [recall_index.legacy_warning(root)]
     else:
         try:
             projection = project_store(root, merged, allow_partial=allow_partial)

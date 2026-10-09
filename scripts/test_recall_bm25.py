@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""--engine bm25 on SQLite FTS5, labelled any-word retry, .atlas-index ignore guard."""
+"""--engine bm25 on SQLite FTS5, labelled any-word retry, index ignore guards."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.commands import search as search_cmd  # noqa: E402
-from atlas_cli.core import ignore_guard  # noqa: E402
+from atlas_cli.core import ignore_guard, index_location  # noqa: E402
 from atlas_cli.core.recall_config import fts5_available  # noqa: E402
 
 PAGES = {
@@ -136,7 +136,10 @@ def main() -> int:
                 str(alpha.get("relates_to")),
             )
             check("no-stub-warning", not bp.get("warnings"), str(bp.get("warnings")))
-            check("no-ephemeral-left-in-store", not (v1 / ".atlas-index").exists())
+            check(
+                "no-ephemeral-left-in-store",
+                not (v1 / ".atlas-index").exists() and not (v1 / ".atlas").exists(),
+            )
 
             # Exit-state exclusion.
             check("bm25-hides-superseded", bool(bpaths) and "decisions/old.md" not in bpaths, str(bpaths))
@@ -218,6 +221,13 @@ def main() -> int:
                 and [h.get("path") for h in fast.get("hits") or []] == bpaths,
                 str({k: fast.get(k) for k in ("engine_used", "fast_path", "ephemeral", "warning")}),
             )
+            check(
+                "bm25-fast-path-reports-index",
+                str(fast.get("index_dir") or "").startswith(".atlas/indexes/fts5/local/v2-")
+                and fast.get("index_location", {}).get("id_source") == "local"
+                and not fast.get("warnings"),
+                str({k: fast.get(k) for k in ("index_dir", "index_location", "warnings")}),
+            )
             run(["recall", "activate", "--profile", "atlas:ranked", "--root", str(v2), "--json"])
             conflict = run(["recall", "run", "ranking", "--root", str(v2), "--engine", "bm25", "--json"])
             check("engine-conflicts-with-enabled-recall", conflict.returncode == 2)
@@ -272,15 +282,24 @@ def main() -> int:
                 want = f"/{rel_store}/.atlas-index/" if rel_store else "/.atlas-index/"
                 lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
                 status = git(repo, "status", "--porcelain", "--untracked-files=all").stdout
-                check(f"guard-{label}-index-built", (store / ".atlas-index" / "recall").is_dir())
+                built_dir = repo / ".atlas" / "indexes" / "fts5" / "local"
+                check(
+                    f"guard-{label}-index-built",
+                    any(built_dir.glob("*/current.json")) and not (store / ".atlas-index").exists(),
+                    str(sorted(p.name for p in built_dir.glob("*"))) if built_dir.is_dir() else "missing",
+                )
                 check(f"guard-{label}-line-once", lines.count(want) == 1, str(lines[-3:]))
-                status_ok = bool(status.strip()) and ".atlas-index" not in status
+                check(f"guard-{label}-indexes-line-once", lines.count("/.atlas/indexes/") == 1, str(lines[-3:]))
+                status_ok = bool(status.strip()) and ".atlas-index" not in status and ".atlas/" not in status
                 check(f"guard-{label}-status-clean", status_ok, "" if status_ok else status[:300])
                 first_ids = [i.get("id") for i in first.get("info") or []]
                 second_ids = [i.get("id") for i in second.get("info") or []]
                 check(
                     f"guard-{label}-info-only-when-added",
-                    "atlas_index_ignored" in first_ids and "atlas_index_ignored" not in second_ids,
+                    "atlas_index_ignored" in first_ids
+                    and "atlas_indexes_ignored" in first_ids
+                    and "atlas_index_ignored" not in second_ids
+                    and "atlas_indexes_ignored" not in second_ids,
                     f"{first_ids} / {second_ids}",
                 )
                 check(f"guard-{label}-no-gitignore", not (repo / ".gitignore").exists())
@@ -295,7 +314,8 @@ def main() -> int:
             check(
                 "guard-index-build",
                 build.get("ok") is True
-                and exclude.read_text(encoding="utf-8").splitlines().count("/.atlas-index/") == 1,
+                and exclude.read_text(encoding="utf-8").splitlines().count("/.atlas-index/") == 1
+                and exclude.read_text(encoding="utf-8").splitlines().count("/.atlas/indexes/") == 1,
                 str(build)[:300],
             )
 
@@ -324,11 +344,16 @@ def main() -> int:
             check(
                 "guard-non-git-silent",
                 pc.returncode in (0, 1)
-                and "atlas_index_ignored" not in [i.get("id") for i in pp.get("info") or []]
-                and ignore_guard.ensure_index_ignored(plain) is None,
+                and not {"atlas_index_ignored", "atlas_indexes_ignored"} & {i.get("id") for i in pp.get("info") or []}
+                and ignore_guard.ensure_index_ignored(plain) is None
+                and ignore_guard.ensure_indexes_ignored(plain) is None,
                 pc.stderr[:200],
             )
-        check("guard-missing-dir-silent", ignore_guard.ensure_index_ignored(tmp / "nope") is None)
+        check(
+        "guard-missing-dir-silent",
+        ignore_guard.ensure_index_ignored(tmp / "nope") is None
+        and ignore_guard.ensure_indexes_ignored(tmp / "nope") is None,
+    )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

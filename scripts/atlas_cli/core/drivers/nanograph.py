@@ -2,8 +2,10 @@
 
 Argv-only subprocess (never a shell), bounded timeouts, embedding credentials
 stripped from the environment, and an Atlas-owned index under
-``.atlas-index/nanograph/<generation>/``. Any failure raises DriverError so
-callers fall back to the built-in driver.
+``<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`` (see
+core/index_location.py). A ready generation in the deprecated in-store
+``.atlas-index/nanograph/`` is reused read-only for 0.14.x. Any failure raises
+DriverError so callers fall back to the built-in driver.
 """
 
 from __future__ import annotations
@@ -17,9 +19,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .. import driver_overlay, graph
+from .. import driver_overlay, graph, index_location
 from ..driver_overlay import BaseDriver, Detection, DriverError
-from ..recall_index import INDEX_DIR, IndexError_, _reject_symlink_escape
+from ..ignore_guard import ensure_indexes_ignored
+from ..index_location import IndexLocationError
 from .fts5 import query_tokens
 
 MIN_VERSION = (1, 3, 0)
@@ -91,6 +94,7 @@ class NanographDriver(BaseDriver):
     capabilities = frozenset({"bm25_search", "graph_traversal"})
     platforms = (("darwin", "arm64"),)
     external = True
+    index_type = "nanograph"
 
     def __init__(self) -> None:
         self.last_index: dict[str, Any] | None = None
@@ -220,12 +224,19 @@ class NanographDriver(BaseDriver):
 
     @staticmethod
     def index_base(store: Path) -> Path:
-        return store / INDEX_DIR / "nanograph"
+        try:
+            return index_location.index_dir(store, "nanograph")
+        except IndexLocationError as e:
+            raise DriverError(f"index path rejected: {e}") from e
+
+    @staticmethod
+    def legacy_base(store: Path) -> Path:
+        return index_location.legacy_dir(store, "nanograph")
 
     def _guard(self, store: Path, path: Path) -> None:
         try:
-            _reject_symlink_escape(store, path)
-        except IndexError_ as e:
+            index_location.reject_symlink_escape(index_location.indexes_base(store), path)
+        except IndexLocationError as e:
             raise DriverError(f"index path rejected: {e}") from e
 
     @staticmethod
@@ -236,6 +247,29 @@ class NanographDriver(BaseDriver):
             return None
         return data if isinstance(data, dict) else None
 
+    def _reusable(self, gen_dir: Path, digest: str, version: str | None) -> bool:
+        ready = self._read_ready(gen_dir)
+        return bool(
+            ready
+            and ready.get("corpus_digest") == digest
+            and ready.get("version") == version
+            and (gen_dir / DB_NAME).exists()
+            and (gen_dir / QUERIES_NAME).is_file()
+        )
+
+    def _legacy_generation(self, store: Path, digest: str, version: str | None) -> Path | None:
+        """A ready generation in the deprecated in-store location, used read-only."""
+        base = self.legacy_base(store)
+        gen_dir = base / digest[:16]
+        for path in (store / index_location.LEGACY_DIR, base, gen_dir):
+            if path.is_symlink():
+                return None
+        try:
+            gen_dir.resolve().relative_to(store.resolve())
+        except ValueError:
+            return None
+        return gen_dir if self._reusable(gen_dir, digest, version) else None
+
     def ensure_index(self, store: Path, source: dict[str, Any]) -> Path:
         det = self._ready()
         digest = str(source.get("corpus_digest") or "")
@@ -244,15 +278,21 @@ class NanographDriver(BaseDriver):
         base = self.index_base(store)
         gen_dir = base / digest[:16]
         self._guard(store, gen_dir)
-        ready = self._read_ready(gen_dir)
-        reused = bool(
-            ready
-            and ready.get("corpus_digest") == digest
-            and ready.get("version") == det.version
-            and (gen_dir / DB_NAME).exists()
-            and (gen_dir / QUERIES_NAME).is_file()
-        )
+        where = index_location.describe(store, "nanograph")
+        reused = self._reusable(gen_dir, digest, det.version)
         if not reused:
+            legacy = self._legacy_generation(store, digest, det.version)
+            if legacy is not None:
+                self.last_index = {
+                    "generation": legacy.name,
+                    "path": legacy.relative_to(store).as_posix(),
+                    "reused": True,
+                    "legacy": True,
+                    "warning": index_location.legacy_warning(store, "nanograph"),
+                    **where,
+                }
+                return legacy
+            ensure_indexes_ignored(store)
             if gen_dir.exists():
                 shutil.rmtree(gen_dir)
             gen_dir.mkdir(parents=True)
@@ -266,8 +306,9 @@ class NanographDriver(BaseDriver):
         self._prune(base, gen_dir)
         self.last_index = {
             "generation": gen_dir.name,
-            "path": str(gen_dir.relative_to(store)),
+            "path": index_location.project_relative(store, gen_dir),
             "reused": reused,
+            **where,
         }
         return gen_dir
 

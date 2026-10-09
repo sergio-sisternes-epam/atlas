@@ -117,13 +117,15 @@ def run_recall(
     corpus_digest = ""
     complete = True
 
-    fast_db = recall_index.matching_fast_path(root, schema)
-    if fast_db is not None:
-        projection_pages = recall_index.pages_from_db(fast_db)
-        cur = recall_index.load_current(root) or {}
-        corpus_digest = str(cur.get("corpus_digest") or "")
-        generation_id = cur.get("generation")
-        db_path = fast_db
+    legacy_used = False
+    extra_warnings: list[dict[str, str]] = []
+    fast_gen = recall_index.find_generation(root, schema=schema, fast_path=True)
+    if fast_gen is not None:
+        projection_pages = recall_index.pages_from_db(fast_gen.db)
+        corpus_digest = str(fast_gen.pointer.get("corpus_digest") or "")
+        generation_id = fast_gen.pointer.get("generation")
+        db_path = fast_gen.db
+        legacy_used = fast_gen.legacy
         fast_path = True
     else:
         try:
@@ -135,18 +137,18 @@ def run_recall(
         complete = bool(projection["complete"])
         omitted = list(projection["omitted"])
         if recall_enabled(effective) and complete:
-            match = recall_index.matching_generation(root, corpus_digest)
-            if match is None:
+            found = recall_index.find_generation(root, digest=corpus_digest)
+            if found is None:
                 published = recall_index.publish_generation(
                     root, schema, False, projection=projection
                 )
                 if published.get("published") and published.get("db"):
-                    db_path = root / str(published["db"])
+                    db_path = recall_index.index_root(root) / str(published["db"])
                     generation_id = published.get("generation")
             else:
-                db_path = match
-                cur = recall_index.load_current(root) or {}
-                generation_id = cur.get("generation")
+                db_path = found.db
+                generation_id = found.pointer.get("generation")
+                legacy_used = found.legacy
 
     pages: list[ProjectedPage] = [
         p for p in projection_pages if _eligible(p, filters, include_exits)
@@ -181,21 +183,27 @@ def run_recall(
         except tgrep_driver.TgrepError as e:
             return {"ok": False, "error": str(e), "complete": complete}, 2
         ephemeral = bool(tmeta.get("ephemeral"))
+        fts_generation = generation_id
         generation_id = tmeta.get("index")
+        if tmeta.get("legacy_warning"):
+            extra_warnings.append(tmeta["legacy_warning"])
         engine_used = "tgrep"
         if rank == "sqlite-fts5" and hits:
-            match = db_path if db_path is not None else recall_index.matching_generation(root, corpus_digest)
             fts_ephemeral = False
-            if match is None:
-                db_path = recall_index.build_ephemeral(
-                    {"pages": projection_pages, "corpus_digest": corpus_digest}
-                )
-                fts_ephemeral = True
-                ephemeral = True
+            if db_path is None:
+                found = recall_index.find_generation(root, digest=corpus_digest)
+                if found is None:
+                    db_path = recall_index.build_ephemeral(
+                        {"pages": projection_pages, "corpus_digest": corpus_digest}
+                    )
+                    fts_ephemeral = True
+                    ephemeral = True
+                else:
+                    db_path = found.db
+                    generation_id = found.pointer.get("generation") or generation_id
+                    legacy_used = found.legacy
             else:
-                db_path = match
-                cur = recall_index.load_current(root) or {}
-                generation_id = cur.get("generation") or generation_id
+                generation_id = fts_generation or generation_id
             conn = recall_index.open_db(db_path)
             try:
                 weights = ((policy.get("rank") or {}).get("weights")) or None
@@ -215,16 +223,17 @@ def run_recall(
         if max_hits:
             hits = hits[:max_hits]
     elif rank == "sqlite-fts5" or coarse == "sqlite-fts5":
-        match = db_path if db_path is not None else recall_index.matching_generation(root, corpus_digest)
-        if match is None:
-            db_path = recall_index.build_ephemeral(
-                {"pages": projection_pages, "corpus_digest": corpus_digest}
-            )
-            ephemeral = True
-        else:
-            db_path = match
-            cur = recall_index.load_current(root) or {}
-            generation_id = cur.get("generation") or generation_id
+        if db_path is None:
+            found = recall_index.find_generation(root, digest=corpus_digest)
+            if found is None:
+                db_path = recall_index.build_ephemeral(
+                    {"pages": projection_pages, "corpus_digest": corpus_digest}
+                )
+                ephemeral = True
+            else:
+                db_path = found.db
+                generation_id = found.pointer.get("generation") or generation_id
+                legacy_used = found.legacy
         conn = recall_index.open_db(db_path)
         allowed = {p.page_id for p in pages}
         try:
@@ -299,6 +308,15 @@ def run_recall(
             "limits": policy["limits"],
         },
     }
+    if db_path is not None and not ephemeral:
+        try:
+            payload["recall"].update(recall_index.index_location.describe(root, "fts5"))
+        except recall_index.IndexError_:
+            pass
+    if legacy_used:
+        extra_warnings.insert(0, recall_index.legacy_warning(root))
+    if extra_warnings:
+        payload.setdefault("warnings", []).extend(extra_warnings)
     if match_mode is not None:
         payload["match"] = match_mode
     if not complete:

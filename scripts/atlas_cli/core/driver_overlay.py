@@ -116,6 +116,8 @@ class BaseDriver:
     capabilities: frozenset[str] = frozenset()
     platforms: tuple[tuple[str, str], ...] = ()
     external = False
+    # Driver type under <project-root>/.atlas/indexes/ (core/index_location.py), if any.
+    index_type: str | None = None
 
     def _unsupported(self, capability: str) -> NotSupported:
         return NotSupported(f"driver {self.id} does not support {capability}")
@@ -135,11 +137,22 @@ class BaseDriver:
     def neighbours(self, store, seed, kinds=(), direction="both", hops=1, **options) -> dict[str, Any]:
         raise self._unsupported("graph_traversal")
 
-    def health(self) -> dict[str, Any]:
-        det = self.detect()
-        return {"id": self.id, "ok": det.available, **det.as_dict()}
+    def index_info(self, store: Path | None) -> dict[str, Any]:
+        """``index_dir`` / ``index_location`` for drivers that keep an index."""
+        if store is None or not self.index_type:
+            return {}
+        from . import index_location
 
-    def describe(self) -> dict[str, Any]:
+        try:
+            return index_location.describe(store, self.index_type)
+        except (index_location.IndexLocationError, OSError):
+            return {}
+
+    def health(self, store: Path | None = None) -> dict[str, Any]:
+        det = self.detect()
+        return {"id": self.id, "ok": det.available, **det.as_dict(), **self.index_info(store)}
+
+    def describe(self, store: Path | None = None) -> dict[str, Any]:
         return {
             "id": self.id,
             "capabilities": sorted(self.capabilities),
@@ -147,6 +160,7 @@ class BaseDriver:
             "external": self.external,
             "default_for": sorted(c for c, d in DEFAULT_DRIVER.items() if d == self.id),
             "detect": self.detect().as_dict(),
+            **self.index_info(store),
         }
 
 
@@ -155,6 +169,7 @@ class SqliteFts5Driver(BaseDriver):
 
     id = "sqlite-fts5"
     capabilities = frozenset({"bm25_search"})
+    index_type = "fts5"
 
     def detect(self) -> Detection:
         from .recall_config import fts5_available
@@ -210,11 +225,11 @@ def get_driver(driver_id: str) -> BaseDriver:
     return drivers[driver_id]
 
 
-def describe_all() -> dict[str, Any]:
+def describe_all(store: Path | None = None) -> dict[str, Any]:
     plat = current_platform()
     return {
         "platform": {"sys_platform": plat[0], "machine": plat[1], "label": platform_label(plat)},
         "defaults": dict(DEFAULT_DRIVER),
-        "drivers": [d.describe() for d in registry().values()],
+        "drivers": [d.describe(store) for d in registry().values()],
         "matrix": [dict(row) for row in PLATFORM_MATRIX],
     }

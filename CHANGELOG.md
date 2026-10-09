@@ -19,13 +19,16 @@
   `match: "all"` or `match: "any"`, and each retried hit carries
   `match: "any"`. The FTS5 driver gains an `operator` parameter (AND by
   default).
-- `.atlas-index/` ignore guard: `atlas compile` / `validate` (not
-  `--dry-run`) and `atlas recall index build` add `/.atlas-index/` (or
-  `/<store>/.atlas-index/` for a store below the work-tree top level) to
-  the repository's `info/exclude` when no existing line covers it. A
-  committed `.gitignore` is never edited, non-git stores are left alone,
-  and compile reports an `atlas_index_ignored` info item only when it
-  added the line. Exit codes are unchanged.
+- Index ignore guards: `atlas compile` / `validate` (not `--dry-run`),
+  `atlas recall index build` and every nanograph or tgrep build add
+  `/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
+  below the work-tree top level) to the project repository's
+  `info/exclude` when no existing line (such as `.atlas/`) covers it, and
+  report an `atlas_indexes_ignored` info item only when they added the
+  line. For this release the legacy guard still adds `/.atlas-index/` (or
+  `/<store>/.atlas-index/`) to the store repository's `info/exclude` and
+  reports `atlas_index_ignored`. A committed `.gitignore` is never edited,
+  non-git roots are left alone, and exit codes are unchanged.
 - Docs: `SKILL.md` and path `recall` describe the FTS5-backed
   `--engine bm25` and the any-word retry; BM25 is no longer listed as a
   non-goal.
@@ -75,7 +78,8 @@
   PATH. Argv-only subprocesses with timeouts, embedding credentials
   (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `NANOGRAPH_EMBED*`) stripped from
   its environment, no `.env.nano`. Its index lives under
-  `.atlas-index/nanograph/<generation>/` (export, generated `atlas.gq`,
+  `<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`
+  (export, generated `atlas.gq`,
   `atlas.nano`, `ready.json`), is reused while the corpus digest matches,
   and only the two newest generations are kept.
 - `atlas recall run --engine nanograph` (where `--engine bm25` is
@@ -90,6 +94,26 @@
   detection results.
 - Docs: new `references/drivers.md`; `SKILL.md` lists `--engine
   nanograph`, `--driver` and `atlas graph drivers`.
+- Derived indexes move out of the store into the consuming project:
+  `<project-root>/.atlas/indexes/<driver-type>/<atlas-id>/` with driver
+  types `fts5` (published recall generations), `nanograph` and `tgrep`.
+  The project root and atlas id come from the `atlas-mesh.json` row whose
+  `path` is the store (mesh mode), otherwise from the store's git
+  work-tree top level and its `origin` id, or the store directory with a
+  `local/<name>-<hash>` id (standalone mode); `ATLAS_INDEX_ROOT` (absolute)
+  overrides the project root. Ids are validated segment by segment and
+  symlinked index paths are refused. `current.json` pointers are now
+  relative to the index directory. Payloads that report an index gain
+  `index_dir` and `index_location` (`mode`, `atlas_id`, `id_source`).
+  Projection and validation skip `.atlas/`. New single source of truth
+  `core/index_location.py`; docs in `references/drivers.md` (Index
+  location).
+- Deprecated: the in-store `.atlas-index/` (`recall/`, `nanograph/`,
+  `tgrep/`). For 0.14.x Atlas still reads a usable index there, read-only
+  and only when the new location has none, with a `legacy_index_location`
+  warning; the next build writes the new location only. Support is
+  removed after 0.14.x. Atlas never deletes it: remove `.atlas-index/`
+  yourself after rebuilding.
 
 ## 0.13.0 - 2026-10-09
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
 from ..core import driver_overlay
 from ..core import graph as core
+from ..core.index_location import warning_text
 from ..core.paths import store_root
 
 
@@ -24,6 +26,11 @@ def _base(root: Path, verb: str, source: dict[str, Any] | None) -> dict[str, Any
     }
     if source.get("omitted"):
         payload["omitted"] = source["omitted"]
+    if source.get("fast_path") and source.get("index_dir"):
+        payload["index_dir"] = source["index_dir"]
+        payload["index_location"] = source["index_location"]
+    if source.get("warnings"):
+        payload["warnings"] = list(source["warnings"])
     return payload
 
 
@@ -76,6 +83,11 @@ def _run(
     except core.GraphError as e:
         return _fail(r, verb, str(e), as_json)
     payload = {**_base(r, verb, source), **extra}
+    if extra.get("warnings"):
+        payload["warnings"] = [*(source.get("warnings") or []), *extra["warnings"]]
+    if not as_json:
+        for item in payload.get("warnings") or []:
+            print(f"warning: {warning_text(item)}", file=sys.stderr)
     return _emit(payload, as_json, lines)
 
 
@@ -184,6 +196,7 @@ def run_neighbours(
         }
         note: str | None = None
         result: dict[str, Any] | None = None
+        warnings: list[dict[str, str]] = []
         if driver == "nanograph":
             nano = driver_overlay.get_driver("nanograph")
             det = nano.detect()
@@ -196,6 +209,9 @@ def run_neighbours(
                     )
                 except driver_overlay.DriverError as e:
                     note = f"nanograph {e}"
+                nano_index = getattr(nano, "last_index", None) or {}
+                if result is not None and nano_index.get("warning"):
+                    warnings.append(nano_index["warning"])
         if result is None:
             result = driver_overlay.get_driver("native-graph").neighbours(
                 r, page, kinds, direction, hops, source=source, **options
@@ -204,6 +220,8 @@ def run_neighbours(
         extra = {"count": len(result["nodes"]), **result, "driver_used": driver_used}
         if note:
             extra["driver_note"] = note
+        if warnings:
+            extra["warnings"] = warnings
         lines = [f"seed {result['seed']}"]
         if note:
             lines.append(f"driver: {driver_used} ({note})")
@@ -244,7 +262,7 @@ def run_export(
 
 def run_drivers(root: str | None, as_json: bool) -> int:
     r = store_root(root)
-    info = driver_overlay.describe_all()
+    info = driver_overlay.describe_all(r)
     payload = {"ok": True, "root": str(r), "verb": "drivers", **info}
     if as_json:
         print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))

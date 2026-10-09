@@ -11,7 +11,8 @@ from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
 from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
-from ..core.ignore_guard import ensure_index_ignored
+from ..core import index_location
+from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
 from ..core.recall_index import IndexError_, publish_generation
 from ..core.schema import (
     by_type_map,
@@ -122,7 +123,7 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
 def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
     """Dirs that contain concept .md files (not only index/log) should have index.md."""
     need: list[Path] = []
-    skip_top = {staging_dir, "templates", "mesh", ".atlas-index", "schema.d"}
+    skip_top = {staging_dir, "templates", "mesh", ".atlas-index", ".atlas", "schema.d"}
     for d in sorted(root.rglob("*")):
         if not d.is_dir():
             continue
@@ -1125,18 +1126,22 @@ def run(
             try:
                 index_info = publish_generation(r, schema, focused=False)
             except (IndexError_, Exception) as e:
+                try:
+                    index_path = index_location.describe(r, "fts5")["index_dir"]
+                except Exception:
+                    index_path = None
                 critical.append(
                     {
                         "id": "recall_index",
-                        "path": ".atlas-index/recall",
+                        "path": index_path or ".atlas/indexes/fts5",
                         "msg": f"failed to publish recall generation: {e}",
                     }
                 )
 
     if not dry_run:
-        ignored = ensure_index_ignored(r)
-        if ignored:
-            info.append(ignored)
+        for ignored in (ensure_indexes_ignored(r), ensure_index_ignored(r)):
+            if ignored:
+                info.append(ignored)
 
     result = {
         "root": str(r),

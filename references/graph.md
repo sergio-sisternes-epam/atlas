@@ -9,7 +9,8 @@ deterministic export. It is a separate command from `atlas recall run`
 All verbs are read-only and dependency-free. They never write to the store
 and never build or publish a recall index. The one exception is the opt-in
 `neighbours --driver nanograph`, which may build a nanograph index under
-`.atlas-index/nanograph/` and nowhere else; see `references/drivers.md`.
+`<project-root>/.atlas/indexes/nanograph/<atlas-id>/` and nowhere else; see
+`references/drivers.md` (Index location).
 
 ## Data source
 
@@ -17,11 +18,14 @@ and never build or publish a recall index. The one exception is the opt-in
   2.0, recall on or off. No index is required.
 - When a published recall generation exists and its cheap fingerprint
   matches the tree, pages come from it (`fast_path: true`, `generation`
-  set). Otherwise the current tree is projected in memory
-  (`fast_path: false`, `generation: null`).
+  set, plus `index_dir` and `index_location`; the generation lives under
+  `.atlas/indexes/fts5/<atlas-id>/`, or the deprecated in-store
+  `.atlas-index/recall/` with a `legacy_index_location` warning). Otherwise
+  the current tree is projected in memory (`fast_path: false`,
+  `generation: null`).
 - Excluded exactly as recall excludes them: `log.md` pages (role `log`),
-  the staging directory, `templates/`, `.atlas-index/`, `schema.d/` and
-  `mesh/`.
+  the staging directory, `templates/`, `.atlas/`, `.atlas-index/`,
+  `schema.d/` and `mesh/`.
 - A projection error (for example invalid SCHEMA 2.0 YAML) exits 2 with the
   message. With `--allow-partial` the command exits 1 instead, with
   `complete: false` and an `omitted` list of `{path, reason}`.

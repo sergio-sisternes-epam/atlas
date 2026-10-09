@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from atlas_cli.core import driver_overlay  # noqa: E402
+from atlas_cli.core import driver_overlay, index_location  # noqa: E402
 from atlas_cli.core.drivers import nanograph as nano_mod  # noqa: E402
 from test_graph import PAGES, SCHEMA_V1  # noqa: E402
 
@@ -127,7 +127,7 @@ def snapshot(store: Path) -> dict[str, bytes]:
     return {
         str(p.relative_to(store)): p.read_bytes()
         for p in sorted(store.rglob("*"))
-        if p.is_file() and ".atlas-index" not in p.relative_to(store).parts
+        if p.is_file() and not ({".atlas-index", ".atlas"} & set(p.relative_to(store).parts))
     }
 
 
@@ -292,7 +292,9 @@ def main() -> int:
         check("recall-nanograph-shape", all(h.get("driver") == "nanograph" and "title" in h and "type" in h for h in hits))
         check("recall-nanograph-order", [h["score"] for h in hits] == sorted((h["score"] for h in hits), reverse=True))
 
-        base = store / ".atlas-index" / "nanograph"
+        base = index_location.index_dir(store, "nanograph")
+        check("index-under-project", base == store / ".atlas" / "indexes" / "nanograph" / "local" / base.name, str(base))
+        check("no-legacy-index-written", not (store / ".atlas-index").exists())
         gens = sorted(d.name for d in base.iterdir()) if base.is_dir() else []
         gen = gens[0] if gens else ""
         ready = {}
@@ -304,7 +306,15 @@ def main() -> int:
             "index-files",
             all((base / gen / f).exists() for f in ("atlas.gq", "atlas.nano", "export/schema.pg", "export/seed.jsonl")),
         )
-        check("recall-index-reported", (p.get("nanograph_index") or {}).get("generation") == gen, str(p.get("nanograph_index")))
+        reported = p.get("nanograph_index") or {}
+        check(
+            "recall-index-reported",
+            reported.get("generation") == gen
+            and reported.get("path") == f".atlas/indexes/nanograph/local/{base.name}/{gen}"
+            and reported.get("index_dir") == f".atlas/indexes/nanograph/local/{base.name}"
+            and (reported.get("index_location") or {}).get("id_source") == "local",
+            str(reported),
+        )
 
         code, p, out = cli("recall", "run", "frame", "--engine", "nanograph")
         check("recall-nanograph-exits-hidden", code == 0 and p.get("engine_used") == "nanograph" and p.get("count") == 0, out)
@@ -430,6 +440,12 @@ def main() -> int:
         check("drivers-cmd", code == 0 and ids == ["sqlite-fts5", "native-graph", "nanograph"], out)
         check("drivers-cmd-detect", nano.get("detect", {}).get("available") is True and p.get("platform", {}).get("label") == "darwin-arm64", out)
         check("drivers-cmd-matrix", len(p.get("matrix", [])) == 5)
+        check(
+            "drivers-cmd-index-dir",
+            str(nano.get("index_dir") or "").startswith(".atlas/indexes/nanograph/local/")
+            and (nano.get("index_location") or {}).get("mode") == "standalone",
+            str(nano),
+        )
         code, p, out = cli("graph", "drivers", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
         nano = next((d for d in p.get("drivers", []) if d["id"] == "nanograph"), {})
         check("drivers-cmd-linux", nano.get("detect", {}).get("reason") == "unavailable on linux-x86_64", out)

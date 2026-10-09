@@ -30,7 +30,7 @@ Then **read this file**. Missing card or unloaded module ⇒ incomplete Enter.
 1. **CLI is the only writer** of the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) and `schema.d/`.
 2. **Explicit selection.** Installing a contribution must not enable its preset.
 3. **Legacy until opt-in.** SCHEMA 1.0 and 2.0 with `recall.enabled=false` keep `atlas recall run` compatibility behaviour.
-4. **tgrep is argv-only.** Use an Atlas-owned `.atlas-index/tgrep/` index rebuilt when the projection digest mismatches. Never `tgrep serve`, never write `serve.json`, never `--no-index`. Missing binary fails closed (`unsupported_capability: tgrep_binary_missing`). Detected `serve.json` fails closed (`tgrep_serve_detected`). Do not auto-install tgrep.
+4. **tgrep is argv-only.** Use an Atlas-owned `.atlas/indexes/tgrep/<atlas-id>/` index in the project (see `references/drivers.md`, Index location) rebuilt when the projection digest mismatches. Never `tgrep serve`, never write `serve.json`, never `--no-index`. Missing binary fails closed (`unsupported_capability: tgrep_binary_missing`). Detected `serve.json` fails closed (`tgrep_serve_detected`). Do not auto-install tgrep.
 5. **Partial results** need `--allow-partial`. Do not treat top-k truncation as incomplete corpus.
 6. **Defaults.** Leave recall disabled (grep) until the owner opts in. `atlas recall activate` defaults to `atlas:ranked` (published FTS5 + cheap fingerprint; product bench beats grep on speed and follow-up tokens). `atlas:tgrep` is an explicit advanced profile with limited benefits until serve/subset-rank (protostar `p-tgrep-serve-and-subset-rank`). Never `tgrep serve` without a new pin. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
 

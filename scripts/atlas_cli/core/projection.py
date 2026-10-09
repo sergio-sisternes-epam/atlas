@@ -14,7 +14,8 @@ from .paths import rel, store_root
 from .recall_config import schema_version
 from .schema import staging_dir_name
 
-SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
+# ".atlas" holds project-owned indexes (and mounts) when a store is its own project root.
+SKIP_TOP = frozenset({"templates", ".atlas-index", ".atlas", "mesh", "schema.d", ".git"})
 
 
 class ProjectionError(ValueError):

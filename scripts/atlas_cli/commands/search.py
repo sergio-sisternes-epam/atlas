@@ -5,9 +5,11 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 from ..core.frontmatter import FrontmatterError, read_page
+from ..core.index_location import warning_text
 from ..core.overlay import merge_overlays
 from ..core import recall_index
 from ..core import graph as graph_core
@@ -359,11 +361,13 @@ def _bm25_search(
     pages: list[ProjectedPage] | None = None
     db_path: Path | None = None
     ephemeral = False
-    fast_db = recall_index.matching_fast_path(root, schema)
-    if fast_db is not None:
+    legacy = False
+    fast_gen = recall_index.find_generation(root, schema=schema, fast_path=True)
+    if fast_gen is not None:
         try:
-            pages = recall_index.pages_from_db(fast_db)
-            db_path = fast_db
+            pages = recall_index.pages_from_db(fast_gen.db)
+            db_path = fast_gen.db
+            legacy = fast_gen.legacy
         except sqlite3.Error:
             pages = None
     if pages is None:
@@ -387,6 +391,7 @@ def _bm25_search(
                 {"pages": pages, "corpus_digest": ""}
             )
             ephemeral = True
+            legacy = False
             ranked, match_mode = _fts5_rank(db_path, rest, eligible)
     except sqlite3.Error as e:
         warnings.append(f"BM25 query failed ({e}); falling back to grep-mode search")
@@ -397,6 +402,10 @@ def _bm25_search(
 
     hits = _enrich_hits(ranked[:limit] if limit else ranked, pages, rest)
     meta_out = {"ephemeral": ephemeral, "fast_path": not ephemeral, "match": match_mode}
+    if not ephemeral:
+        meta_out.update(recall_index.index_location.describe(root, "fts5"))
+        if legacy:
+            meta_out["legacy_warning"] = recall_index.legacy_warning(root)
     return hits, warnings, meta_out
 
 
@@ -519,6 +528,8 @@ def run(
             if as_json:
                 print(json.dumps(payload, indent=2, default=str))
             else:
+                for item in payload.get("warnings") or []:
+                    print(f"warning: {warning_text(item)}", file=sys.stderr)
                 if not payload.get("ok"):
                     print(f"atlas recall run — FAIL: {payload.get('error')}")
                 else:
@@ -586,7 +597,12 @@ def run(
             r, query, staging_name, limit, include_exits, page_ver
         )
 
-    all_warnings = [w for w in [warning, *extra_warnings] if w]
+    all_warnings: list = [w for w in [warning, *extra_warnings] if w]
+    index_warnings: list[dict] = []
+    if mode_used == "sqlite-fts5" and bm25_meta.get("legacy_warning"):
+        index_warnings.append(bm25_meta["legacy_warning"])
+    if mode_used == "nanograph" and (nano_meta.get("index") or {}).get("warning"):
+        index_warnings.append(nano_meta["index"]["warning"])
 
     payload = {
         "root": str(r),
@@ -594,7 +610,7 @@ def run(
         "engine_configured": engine,
         "engine_used": mode_used,
         "warning": all_warnings[0] if all_warnings else None,
-        "warnings": all_warnings,
+        "warnings": [*all_warnings, *index_warnings],
         "include_exits": include_exits,
         "count": len(hits),
         "hits": hits,
@@ -610,6 +626,9 @@ def run(
         payload["ephemeral"] = bool(bm25_meta.get("ephemeral"))
         payload["fast_path"] = bool(bm25_meta.get("fast_path"))
         payload["match"] = bm25_meta.get("match") or "all"
+        if bm25_meta.get("index_dir"):
+            payload["index_dir"] = bm25_meta["index_dir"]
+            payload["index_location"] = bm25_meta["index_location"]
     elif mode_used == "nanograph":
         payload["score_orientation"] = "higher_better"
         payload["nanograph_index"] = nano_meta.get("index")
@@ -629,6 +648,8 @@ def run(
             print("include_exits: yes")
         for w in all_warnings:
             print(f"WARNING: {w}")
+        for item in index_warnings:
+            print(f"warning: {warning_text(item)}", file=sys.stderr)
         if not hits:
             print("no hits")
         else:

@@ -71,7 +71,8 @@ macOS arm64. Atlas does not install it.
   `NANOGRAPH_EMBED*` variable. Atlas never writes `.env.nano`.
 - **No embeddings, no network:** the export has no `Vector` fields and no
   `@embed`, and Atlas only uses BM25 and graph queries.
-- **Index:** `.atlas-index/nanograph/<generation>/`, where `<generation>`
+- **Index:** `.atlas/indexes/nanograph/<atlas-id>/<generation>/` under the
+  project root (see [Index location](#index-location)), where `<generation>`
   is the first 16 hex characters of the projection `corpus_digest`. A build
   writes `export/` (the `atlas graph export --format nanograph` files),
   `atlas.gq` (generated queries), `atlas.nano` (`nanograph init` then
@@ -79,7 +80,7 @@ macOS arm64. Atlas does not install it.
   (`version`, `corpus_digest`, `built_at`). A generation is reused while
   `ready.json` matches the digest and version; the two newest generations
   are kept and older ones deleted. Symlinked index paths are refused, and a
-  build never writes outside `.atlas-index/`.
+  build never writes outside `.atlas/indexes/nanograph/<atlas-id>/`.
 - **Queries:** `bm25_text($q)` ranks pages on `text`; rows with score 0 or
   less are dropped and scores are higher-better. Graph traversal uses one
   generated query per edge type and direction
@@ -114,9 +115,87 @@ Nothing selects nanograph implicitly: it is not a recall profile, not a
    and the `platforms` it runs on. Check the platform first in `detect()`.
 2. Register it in `driver_overlay.registry()` and fill its row in
    `PLATFORM_MATRIX`.
-3. Keep its index under `.atlas-index/<id>/`, use argv-only subprocesses
+3. Keep its index under `index_location.index_dir(store, "<driver-type>")`
+   (add the type to `DRIVER_TYPES`), use argv-only subprocesses
    with timeouts, and raise `DriverError` on any failure so the built-in
    fallback applies.
 4. Add tests that run on Linux CI with a fake binary, plus a live test that
    skips unless the real platform and binary are present.
 5. Do not make it a default; built-ins stay the default everywhere.
+
+## Index location
+
+Derived indexes belong to the consuming project, not to the store's git
+history. Every driver keeps its index under
+
+```text
+<project-root>/.atlas/indexes/<driver-type>/<atlas-id>/
+```
+
+with driver type first: `fts5` (the published recall index:
+`current.json` plus `generations/<gen_id>/`), `nanograph`
+(`<generation>/` as above, two newest kept) and `tgrep` (its index files).
+`.atlas/` already holds mounted stores as `.atlas/<host>/<owner>/<repo>`, so
+one project gets one index per store across the mesh. Temporary FTS5
+indexes for `--engine bm25` without a published generation still live in
+the system temporary directory. `scripts/atlas_cli/core/index_location.py`
+is the single source of truth.
+
+**Resolution rule** for a store directory `S` (resolved):
+
+1. **Mesh mode.** Walk up from the parent of `S` through its ancestors. At
+   each directory `D` holding `atlas-mesh.json`, load it (a malformed file
+   is skipped) and look for a row whose `path`, resolved against `D`,
+   equals `S`. The first match wins: the project root is `D`, the atlas id
+   is the row's `id` (`id_source: "mesh"`).
+2. **Standalone mode** (no row matches). The project root is the git
+   work-tree top level of `S` (`git rev-parse --show-toplevel`), or `S`
+   itself outside git. When `S` is that top level and `remote.origin.url`
+   normalises to `host/owner/repo`, that is the atlas id
+   (`id_source: "origin"`). Otherwise the id is
+   `local/<dir name>-<first 8 hex of sha256 of the resolved path of S>`
+   (`id_source: "local"`); a store in a subdirectory of a larger work tree
+   always gets a `local` id, so two stores in one repository never share an
+   index. In standalone mode the index sits inside the store's own work
+   tree at `.atlas/indexes/`; the ignore guard excludes it and projection
+   and validation skip `.atlas/`, so it never becomes content or a tracked
+   file.
+3. **Override.** `ATLAS_INDEX_ROOT`, when it is an absolute path, replaces
+   the project root (the id and mode are resolved as above). A relative
+   value is ignored with a warning. Intended for tests and unusual layouts.
+
+**Sanitising.** The atlas id is split on `/` and each segment must match
+`^[A-Za-z0-9][A-Za-z0-9._-]*$`; empty ids, absolute paths, backslashes,
+NUL, empty segments and `.` or `..` segments are refused with an error
+naming the id. Ids are validated, never re-normalised. The joined
+directory must stay under `.atlas/indexes/<driver-type>/`, and no existing
+path component from `.atlas/` downwards may be a symlink. Nested
+directories that mirror the mount layout (for example
+`.atlas/indexes/fts5/github.com/owner/repo/`) are intended.
+
+**Reporting.** Payloads that report an index (`recall index build`,
+`recall status`, compile and validate info, `--engine bm25` fast path,
+`atlas graph` fast path, `atlas graph drivers`, `nanograph_index`) carry
+`index_dir` (project-relative POSIX path) and
+`index_location: {"mode", "atlas_id", "id_source"}`.
+
+**Ignore guard.** `atlas compile` / `validate` (not `--dry-run`),
+`atlas recall index build` and every nanograph or tgrep build add
+`/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
+below its work-tree top level) to the project repository's
+`info/exclude` (`git rev-parse --git-path info/exclude`) unless an
+existing line such as `.atlas/`, `/.atlas/` or `.atlas/indexes/` already
+covers it, and report `atlas_indexes_ignored` when they add the line. A
+committed `.gitignore` is never edited and a non-git project root is left
+alone. For this release the store's legacy `/.atlas-index/` line is still
+added as before (`atlas_index_ignored`).
+
+**Deprecated: `.atlas-index/`.** The old in-store locations
+(`.atlas-index/recall/`, `.atlas-index/nanograph/`, `.atlas-index/tgrep/`)
+are read-only for 0.14.x and removed after it. When no usable index exists
+at the new location but one does at the old one, Atlas reads it without
+changing it and adds a `legacy_index_location` warning item (printed to
+stderr outside `--json`). The next build (`atlas recall index build`, a
+compile that publishes, or a nanograph or tgrep rebuild) writes only the
+new location, after which the warning disappears. Atlas never deletes the
+old directory; delete `.atlas-index/` yourself once you have rebuilt.

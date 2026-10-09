@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .scan import tokenise
+from .. import index_location
+from ..ignore_guard import ensure_indexes_ignored
+from ..index_location import IndexLocationError
 from ..projection import ProjectedPage, SKIP_TOP
-from ..recall_index import IndexError_, _reject_symlink_escape
 from ..schema import staging_dir_name
 
 PIN = "d55b022023518646c90742f4761488dc95633b73"
@@ -22,6 +24,7 @@ SERVE_DETECTED = "tgrep_serve_detected"
 NO_INDEX_FORBIDDEN = "tgrep_no_index_forbidden"
 TIMEOUT = "tgrep_timeout"
 INDEX_NAME = "tgrep"
+DRIVER_TYPE = "tgrep"
 DIGEST_NAME = "generation.json"
 INDEX_TIMEOUT_SEC = 120
 SEARCH_TIMEOUT_SEC = 30
@@ -37,10 +40,16 @@ def find_binary() -> Path | None:
     return Path(found) if found else None
 
 
-def capability(binary: Path | None | object = ...) -> dict[str, Any]:
+def capability(binary: Path | None | object = ..., store: Path | None = None) -> dict[str, Any]:
     resolved = find_binary() if binary is ... else binary
     present = bool(resolved)
-    return {
+    index = (index_location.INDEXES_REL / DRIVER_TYPE / "<atlas-id>").as_posix()
+    location = None
+    if store is not None:
+        where = index_location.describe(store, DRIVER_TYPE)
+        index = where["index_dir"] or index
+        location = where["index_location"]
+    out = {
         "id": "tgrep",
         "stages": ["coarse"],
         "supported": True,
@@ -48,13 +57,24 @@ def capability(binary: Path | None | object = ...) -> dict[str, Any]:
         "binary": str(resolved) if resolved else None,
         "requires": ["disk_only_indexed_search", "tgrep_binary"],
         "serve": False,
-        "index": f".atlas-index/{INDEX_NAME}",
+        "index": index,
         "reason": "ok" if present else "tgrep binary not on PATH",
     }
+    if location is not None:
+        out["index_dir"] = index
+        out["index_location"] = location
+    return out
 
 
 def index_dir(store: Path) -> Path:
-    return store / ".atlas-index" / INDEX_NAME
+    try:
+        return index_location.index_dir(store, DRIVER_TYPE)
+    except IndexLocationError as e:
+        raise TgrepError(f"tgrep_index_escape: {e}") from e
+
+
+def legacy_index_dir(store: Path) -> Path:
+    return index_location.legacy_dir(store, DRIVER_TYPE)
 
 
 def _rel(store: Path, raw: str) -> str | None:
@@ -135,22 +155,29 @@ def ensure_index(
     runner: Runner | None = None,
 ) -> tuple[Path, bool]:
     dest = index_dir(store)
+    base = index_location.indexes_base(store)
     try:
-        _reject_symlink_escape(store, dest)
-    except IndexError_ as e:
+        index_location.reject_symlink_escape(base, dest)
+    except IndexLocationError as e:
         raise TgrepError(f"tgrep_index_escape: {e}") from e
     _detect_serve(store, dest)
     if _load_digest(dest) == digest:
         return dest, False
+    legacy = legacy_index_dir(store)
+    if not legacy.is_symlink() and _load_digest(legacy) == digest:
+        # Deprecated in-store index: read-only, never rebuilt or removed here.
+        _detect_serve(store, legacy)
+        return legacy, False
     resolved = binary or find_binary()
     if resolved is None:
         raise TgrepError(MISSING)
+    ensure_indexes_ignored(store)
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
     try:
-        _reject_symlink_escape(store, dest)
-    except IndexError_ as e:
+        index_location.reject_symlink_escape(base, dest)
+    except IndexLocationError as e:
         raise TgrepError(f"tgrep_index_escape: {e}") from e
     args = ["index", str(store), "--index-path", str(dest), "--hidden", "--no-ignore", *_excludes(schema)]
     try:
@@ -206,6 +233,17 @@ def _parse_hits(stdout: str, store: Path, admitted: set[str]) -> list[dict[str, 
     return hits
 
 
+def _meta(store: Path, dest: Path, rebuilt: bool, binary: Path) -> dict[str, Any]:
+    meta: dict[str, Any] = {"rebuilt": rebuilt, "binary": str(binary), "ephemeral": rebuilt}
+    if dest == legacy_index_dir(store):
+        meta["index"] = dest.relative_to(store).as_posix()
+        meta["legacy_warning"] = index_location.legacy_warning(store, DRIVER_TYPE)
+    else:
+        meta["index"] = index_location.project_relative(store, dest)
+    meta["index_location"] = index_location.resolve(store).as_dict()
+    return meta
+
+
 def search(
     store: Path,
     pages: list[ProjectedPage],
@@ -224,14 +262,10 @@ def search(
     dest, rebuilt = ensure_index(
         store, digest, schema=schema, binary=resolved, runner=runner
     )
+    meta = _meta(store, dest, rebuilt, resolved)
     tokens = tokenise(query)
     if not tokens:
-        return [], {
-            "rebuilt": rebuilt,
-            "index": str(dest.relative_to(store)),
-            "binary": str(resolved),
-            "ephemeral": rebuilt,
-        }
+        return [], meta
     pattern = "|".join(re.escape(t) for t in tokens)
     admitted = {p.path for p in pages if p.role != "log"}
     args = [
@@ -255,9 +289,4 @@ def search(
     hits = _parse_hits(proc.stdout or "", store, admitted)
     if limit:
         hits = hits[:limit]
-    return hits, {
-        "rebuilt": rebuilt,
-        "index": str(dest.relative_to(store)),
-        "binary": str(resolved),
-        "ephemeral": rebuilt,
-    }
+    return hits, meta

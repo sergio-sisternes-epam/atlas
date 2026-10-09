@@ -204,10 +204,12 @@ class RecallConfigTests(unittest.TestCase):
         store.mkdir()
         outside = tmp / "outside-index"
         outside.mkdir()
-        (store / ".atlas-index").symlink_to(outside)
+        (store / ".atlas" / "indexes").mkdir(parents=True)
+        (store / ".atlas" / "indexes" / "tgrep").symlink_to(outside)
         with self.assertRaises(tgrep_driver.TgrepError) as ctx:
             tgrep_driver.ensure_index(store, "digest", binary=Path("/bin/echo"))
         self.assertIn("tgrep_index_escape", str(ctx.exception))
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_tgrep_serve_json_detected(self) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))
@@ -270,7 +272,8 @@ class RecallConfigTests(unittest.TestCase):
         store.mkdir()
         outside = tmp / "outside-index"
         outside.mkdir()
-        (store / ".atlas-index").symlink_to(outside)
+        (store / ".atlas").mkdir()
+        (store / ".atlas" / "indexes").symlink_to(outside)
         schema = {
             "schema_version": "2.0",
             "recall": {"version": 1, "enabled": True, "preset": "atlas:scan"},

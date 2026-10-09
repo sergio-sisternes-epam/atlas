@@ -76,7 +76,7 @@ SCHEMA_V1 = {
     "relations": {"recommended_kinds": ["implements", "derived_from", "supersedes"]},
 }
 
-VOLATILE = ("generation", "fast_path", "corpus_digest", "root")
+VOLATILE = ("generation", "fast_path", "corpus_digest", "root", "index_dir", "index_location")
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -295,6 +295,13 @@ def main() -> int:
                 check(f"fast-path-{label}-{q[0]}", p.get("fast_path") is want_fast)
         code, p = g("nodes", root=str(v2))
         check("v2-generation", bool(p.get("generation")))
+        check(
+            "v2-index-dir-reported",
+            str(p.get("index_dir") or "").startswith(".atlas/indexes/fts5/")
+            and (p.get("index_location") or {}).get("mode") == "standalone",
+            str({k: p.get(k) for k in ("index_dir", "index_location")}),
+        )
+        check("v2-no-legacy-index", not (v2 / ".atlas-index").exists())
 
         # --- partial corpus ----------------------------------------------------
         broken = tmp / "broken"

@@ -222,7 +222,7 @@ Search engine: grep until recall is enabled, and grep stays the default when no 
 
 Structural questions (which pages have `field=value`, what links to X and how, bounded neighbourhoods, exports) use read-only `atlas graph`, not `recall run`; see `references/graph.md`.
 
-Drivers: the optional nanograph driver (`--engine nanograph`, `--driver nanograph`) runs only on macOS arm64, is never the default, and falls back to the built-in driver with a `driver_note`; see `references/drivers.md`.
+Drivers: the optional nanograph driver (`--engine nanograph`, `--driver nanograph`) runs only on macOS arm64, is never the default, and falls back to the built-in driver with a `driver_note`; see `references/drivers.md`. Derived indexes live in the consuming project at `.atlas/indexes/<driver-type>/<atlas-id>/`, never in the store; the old in-store `.atlas-index/` is read-only until removal after 0.14.x.
 
 ## Core contract (summary)
 
