@@ -2,6 +2,12 @@
 
 ## Unreleased (targets 0.14.0)
 
+- FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)
+  are tokenised like the index's `unicode61` tokenizer instead of keeping
+  only ASCII letters, digits and `_`. `café`, `résumé`, `Grüße` and `東京`
+  are no longer cut to `caf`, `r AND sum` or an empty query, `cafe` and
+  `café` find each other, and `_` separates terms as it does in the index.
+  A contiguous CJK run stays one term, so `東京` is not found inside `東京都`.
 - Index freshness is decided by content: the corpus digest is now sha256
   over sorted `<relative path> NUL <sha256 of the bytes>` lines, and an
   index or generation counts as current only when its recorded digest

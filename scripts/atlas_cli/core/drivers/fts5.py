@@ -2,15 +2,48 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
+import unicodedata
 from typing import Any
 
-_SAFE = re.compile(r"[A-Za-z0-9_]+")
+# Mirrors SQLite's default ``unicode61`` tokenizer (the one ``pages_fts`` is
+# built with): token characters are Unicode letters and numbers (L*, N*),
+# private-use characters (Co) and, because ``remove_diacritics`` defaults to
+# 1, non-spacing marks (Mn) such as a decomposed acute accent, which unicode61
+# keeps inside the token and then folds away. Everything else separates
+# tokens, including ``_`` (so ``foo_bar`` is two tokens), spacing marks (Mc),
+# symbols such as emoji, and punctuation. Python's ``\w`` is not a match: it
+# keeps ``_`` and splits on Mn. Case and diacritics are left to FTS5, which
+# folds the quoted query terms the same way it folded the index, so ``café``
+# and ``cafe`` match each other. A contiguous CJK run is one token on both
+# sides, so ``東京`` does not match inside ``東京都`` (a unicode61 limitation).
+# Python's Unicode tables may be newer than SQLite's; the gap is only in
+# characters assigned since, which neither side is likely to meet.
+_TOKEN_CATEGORIES = frozenset({"Co", "Mn"})
+
+
+def _is_token_char(ch: str) -> bool:
+    cat = unicodedata.category(ch)
+    return cat[0] in "LN" or cat in _TOKEN_CATEGORIES
 
 
 def query_tokens(text: str) -> list[str]:
-    return _SAFE.findall(text)
+    """Split ``text`` into tokens the way unicode61 would (case and diacritics kept)."""
+    tokens: list[str] = []
+    current: list[str] = []
+    for ch in text or "":
+        if _is_token_char(ch):
+            current.append(ch)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _quote(token: str) -> str:
+    return '"' + token.replace('"', '""') + '"'
 
 
 def _operator(operator: str) -> str:
@@ -25,7 +58,7 @@ def escape_query(text: str, operator: str = "AND") -> str:
     tokens = query_tokens(text)
     if not tokens:
         return '""'
-    return f" {op} ".join(f'"{t}"' for t in tokens)
+    return f" {op} ".join(_quote(t) for t in tokens)
 
 
 _ALLOWED_TABLE = "atlas_allowed_ids"
