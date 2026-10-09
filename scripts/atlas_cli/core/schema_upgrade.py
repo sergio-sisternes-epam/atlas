@@ -44,10 +44,30 @@ KNOWN_ROOT_KEYS = frozenset(
 )
 COMPAT_ID = "atlas-compat-v1"
 LOCK_NAME = ".atlas-upgrade.lock"
+UPGRADE_LOCK_TAG = "schema-upgrade-2.0"
+INSTALL_LOCK_TAG = "schema-install"
 
 
 class UpgradeError(ValueError):
     pass
+
+
+def acquire_store_lock(root: Path, tag: str) -> Path:
+    """Create the store's upgrade/install lock exclusively; FileExistsError if held."""
+    lock = root / LOCK_NAME
+    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, f"{tag}\n".encode())
+    finally:
+        os.close(fd)
+    return lock
+
+
+def _lock_holder(lock: Path) -> str:
+    try:
+        return lock.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def preview(root: Path) -> dict[str, Any]:
@@ -129,17 +149,30 @@ def apply(root: Path) -> dict[str, Any]:
         )
     lock = root / LOCK_NAME
     if lock.is_file():
+        if _lock_holder(lock) == INSTALL_LOCK_TAG:
+            raise UpgradeError(f"schema install in progress ({LOCK_NAME}); retry when it finishes")
         schema, _ = load_schema(root)
         if schema and schema_version(schema) == "2.0":
             lock.unlink(missing_ok=True)
         else:
             raise UpgradeError("interrupted upgrade lock present; refusing to continue blindly")
-    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
-        try:
-            os.write(fd, b"schema-upgrade-2.0\n")
-        finally:
-            os.close(fd)
+        lock = acquire_store_lock(root, UPGRADE_LOCK_TAG)
+    except FileExistsError as e:
+        raise UpgradeError(f"another schema install or upgrade holds {LOCK_NAME}; retry") from e
+    # Installs take the same lock, so the overlay set is stable from here on.
+    # Recheck it before any write; nothing is written yet, so release on refusal.
+    try:
+        pre = preview(root)
+    except Exception:
+        lock.unlink(missing_ok=True)
+        raise
+    if not pre["ok"]:
+        lock.unlink(missing_ok=True)
+        raise UpgradeError(
+            "; ".join(pre["notes"] or pre.get("target_errors") or ["upgrade blocked"])
+        )
+    try:
         schema, err = load_schema(root)
         if schema is None:
             raise UpgradeError(err or "missing SCHEMA.json or CONTRACT.json")

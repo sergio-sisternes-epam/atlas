@@ -4,7 +4,8 @@
 The slot is the root key equal to contribution_id with '-' replaced by '_'.
 It must be an object, is never merged into the effective schema, and is
 ignored by core. Every other extra overlay root key is still rejected on
-SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too.
+SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, and
+rechecks them under the lock that `schema install` shares.
 
 Released overlays under fixtures/contributions/ are installed verbatim.
 """
@@ -23,7 +24,14 @@ ATLAS = ROOT / "scripts" / "atlas.py"
 FIXTURES = ROOT / "fixtures" / "contributions"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from atlas_cli.core.overlay import extension_key, merge_overlays  # noqa: E402
+from atlas_cli.core import schema_upgrade  # noqa: E402
+from atlas_cli.core.overlay import (  # noqa: E402
+    extension_key,
+    merge_overlays,
+    overlay_path,
+    write_json,
+    write_receipt,
+)
 from atlas_cli.core.recall_config import validate_contribution  # noqa: E402
 
 RELEASED = {
@@ -111,26 +119,29 @@ def main() -> int:
             eff = effective(s)
             check(f"p1-{fx}-not-merged", slot not in eff["merged"] and not eff["critical"], str(eff["critical"])[:200])
 
+        for fx, (_cid, slot) in RELEASED.items():
+            src = FIXTURES / fx
+
+            # P2: install on 1.0, upgrade to 2.0, compile.
+            s = store(f"p2-{fx}")
+            r = install(src, s)
+            check(f"p2-{fx}-install-1.0", r.returncode == 0, out(r)[:300])
+            pre = as_json(run(["schema", "upgrade", "--to", "2.0", "--root", str(s), "--json"]))
+            check(f"p2-{fx}-upgrade-preview-ok", pre.get("ok") is True, str(pre.get("target_errors")))
+            r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+            check(f"p2-{fx}-upgrade-apply", r.returncode == 0, out(r)[:300])
+            r = compile_(s)
+            check(f"p2-{fx}-compile-after-upgrade", r.returncode == 0, out(r)[-300:])
+
+            # P3: 1.0 store keeps installing and compiling the overlay as shipped.
+            s = store(f"p3-{fx}")
+            r = install(src, s)
+            check(f"p3-{fx}-install-1.0", r.returncode == 0, out(r)[:300])
+            r = compile_(s)
+            check(f"p3-{fx}-compile-1.0", r.returncode == 0, out(r)[-300:])
+            check(f"p3-{fx}-not-merged", slot not in effective(s)["merged"])
+
         v06 = FIXTURES / "atlas-tasks-v0.6.0"
-
-        # P2: install on 1.0, upgrade to 2.0, compile.
-        s = store("p2")
-        r = install(v06, s)
-        check("p2-install-1.0", r.returncode == 0, out(r)[:300])
-        pre = as_json(run(["schema", "upgrade", "--to", "2.0", "--root", str(s), "--json"]))
-        check("p2-upgrade-preview-ok", pre.get("ok") is True, str(pre.get("target_errors")))
-        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
-        check("p2-upgrade-apply", r.returncode == 0, out(r)[:300])
-        r = compile_(s)
-        check("p2-compile-after-upgrade", r.returncode == 0, out(r)[-300:])
-
-        # P3: 1.0 store keeps installing and compiling the overlay as shipped.
-        s = store("p3")
-        r = install(v06, s)
-        check("p3-install-1.0", r.returncode == 0, out(r)[:300])
-        r = compile_(s)
-        check("p3-compile-1.0", r.returncode == 0, out(r)[-300:])
-        check("p3-not-merged", "atlas_tasks" not in effective(s)["merged"])
 
         # N: everything except the one object slot is still rejected on 2.0.
         base = {"contribution_id": "atlas-tasks", "claimed_folders": ["tasks"]}
@@ -179,6 +190,80 @@ def main() -> int:
         pre = as_json(run(["schema", "upgrade", "--to", "2.0", "--root", str(s), "--json"]))
         errs = " ".join(pre.get("target_errors") or [])
         check("n3b-upgrade-blocked", pre.get("ok") is False and "overlay_extension" in errs, errs[:300])
+
+        # L: install and upgrade share .atlas-upgrade.lock.
+        lock_name = schema_upgrade.LOCK_NAME
+        s = store("l-install-blocked")
+        (s / lock_name).write_text(schema_upgrade.UPGRADE_LOCK_TAG + "\n")
+        r = install(v06, s)
+        check(
+            "l-install-refused-while-locked",
+            r.returncode == 2 and lock_name in out(r) and not overlay_path(s, "atlas-tasks").exists(),
+            out(r)[:300],
+        )
+        check("l-install-keeps-foreign-lock", (s / lock_name).is_file())
+
+        s = store("l-install-releases")
+        r = install(v06, s)
+        check("l-install-releases-on-success", r.returncode == 0 and not (s / lock_name).exists(), out(r)[:200])
+        s = store("l-install-releases-2.0", "2.0")
+        r = install(overlay("l-bad", {**base, "kva": {}}), s)
+        check("l-install-releases-on-refusal", r.returncode == 2 and not (s / lock_name).exists(), out(r)[:200])
+
+        s = store("l-upgrade-blocked")
+        (s / lock_name).write_text(schema_upgrade.INSTALL_LOCK_TAG + "\n")
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        schema = json.loads((s / "CONTRACT.json").read_text())
+        check(
+            "l-upgrade-refused-while-install-holds-lock",
+            r.returncode == 2
+            and "schema install in progress" in out(r)
+            and schema.get("schema_version") == "1.0"
+            and not overlay_path(s, schema_upgrade.COMPAT_ID).exists(),
+            out(r)[:300],
+        )
+
+        # R: an install that lands after the preview but before the lock is
+        # caught by the recheck under the lock, before any write.
+        def race(body: dict | None) -> Path:
+            s = store(f"r-{body['contribution_id'] if body else 'none'}")
+            original = schema_upgrade.acquire_store_lock
+
+            def acquire_then_install(root: Path, tag: str) -> Path:
+                if body is not None:
+                    cid = body["contribution_id"]
+                    write_json(overlay_path(root, cid), body)
+                    write_receipt(root, cid, [f"schema.d/{cid}.json", f"schema.d/{cid}.receipt.json"])
+                return original(root, tag)
+
+            schema_upgrade.acquire_store_lock = acquire_then_install
+            try:
+                schema_upgrade.apply(s)
+                return s
+            finally:
+                schema_upgrade.acquire_store_lock = original
+
+        try:
+            s = race({"contribution_id": "discuss", "kva": {"values": ["forming"]}})
+            check("r-upgrade-refused-after-late-install", False, "apply succeeded")
+        except schema_upgrade.UpgradeError as e:
+            s = stores / "r-discuss"
+            schema = json.loads((s / "CONTRACT.json").read_text())
+            check(
+                "r-upgrade-refused-after-late-install",
+                "kva" in str(e)
+                and schema.get("schema_version") == "1.0"
+                and not overlay_path(s, schema_upgrade.COMPAT_ID).exists()
+                and not (s / lock_name).exists(),
+                str(e)[:300],
+            )
+        body = json.loads((v06 / "SCHEMA.overlay.json").read_text())
+        try:
+            s = race(body)
+            r = compile_(s)
+            check("r-upgrade-ok-after-late-valid-install", r.returncode == 0, out(r)[-300:])
+        except schema_upgrade.UpgradeError as e:
+            check("r-upgrade-ok-after-late-valid-install", False, str(e)[:300])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

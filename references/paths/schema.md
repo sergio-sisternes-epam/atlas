@@ -103,6 +103,8 @@ python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <root> [--
 
 Install copies **new-type** templates only. It will not overwrite core `templates/work.md`.
 
+Install and `schema upgrade --apply` share the store lock `.atlas-upgrade.lock`. If the lock is present, install exits 2 and writes nothing. Retry when the other command finishes. Delete a leftover lock only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
+
 ### 4. Uninstall
 
 ```bash

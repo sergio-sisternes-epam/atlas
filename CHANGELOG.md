@@ -24,17 +24,26 @@
   example a generic `kva` root key) previews `ok=false` with the overlay
   errors in `target_errors`, and `--apply` refuses with zero writes.
   Previously the upgrade succeeded and the next compile failed `schema_v2`.
+- `schema install` now takes the store's `.atlas-upgrade.lock` while it
+  validates and writes. While the lock is held, by an upgrade or another
+  install, it exits 2 with zero writes. `schema upgrade --apply` rechecks
+  installed overlays after acquiring the lock and before any write, so an
+  install that races the upgrade can no longer leave a 2.0 store that fails
+  compile. When the lock is already held, apply refuses with a clear message
+  instead of a traceback.
 
 ### Docs
 
 - Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
-  documents the extension slot and the `overlay_extension` issue, and asks
-  packages to test overlays on both store versions. Path `configure` notes
-  that installed overlays can block the upgrade.
+  documents the extension slot, the `overlay_extension` issue and the
+  shared install/upgrade lock, and asks packages to test overlays on both
+  store versions. Path `configure` notes that installed overlays can block
+  the upgrade and that apply rechecks them under the lock.
 - `contribution-v1.schema.json` gains a `$comment` that describes the slot.
   Its `$id` and its closed shape are unchanged.
 - New fixtures `fixtures/contributions/` hold released overlays verbatim.
-  They are covered by `scripts/test_overlay_extension.py`.
+  `scripts/test_overlay_extension.py` installs and compiles every fixture on
+  SCHEMA 1.0 and 2.0 stores, and through a 1.0 → 2.0 upgrade.
 
 ### Unchanged
 

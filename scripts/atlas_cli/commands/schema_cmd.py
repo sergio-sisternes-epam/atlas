@@ -30,7 +30,14 @@ from ..core.schema import (
     load_schema,
     staging_dir_name,
 )
-from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
+from ..core.schema_upgrade import (
+    INSTALL_LOCK_TAG,
+    LOCK_NAME,
+    UpgradeError,
+    acquire_store_lock,
+    apply as upgrade_apply,
+    preview as upgrade_preview,
+)
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -119,6 +126,44 @@ def run_install(
     if id_err:
         _print(as_json, {"ok": False, "error": id_err, "root": str(r)})
         return 2
+    if not r.is_dir():
+        # No store yet, so no contract and no upgrade to coordinate with.
+        return _install_locked(r, ov, src_dir, cid, force, as_json)
+    # Share the upgrade lock so the host version cannot change between validation and write.
+    try:
+        lock = acquire_store_lock(r, INSTALL_LOCK_TAG)
+    except FileExistsError:
+        _print(
+            as_json,
+            {
+                "ok": False,
+                "error": (
+                    f"{LOCK_NAME} present: a schema upgrade or install is running or was "
+                    "interrupted; retry when it finishes (remove the lock only if no Atlas "
+                    "command is running)"
+                ),
+                "root": str(r),
+                "id": cid,
+            },
+        )
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
+        return 2
+    try:
+        return _install_locked(r, ov, src_dir, cid, force, as_json)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _install_locked(
+    r: Path,
+    ov: dict,
+    src_dir: Path | None,
+    cid: str,
+    force: bool,
+    as_json: bool,
+) -> int:
     host, _ = load_schema(r)
     if host is not None and schema_version(host) == "2.0":
         try:

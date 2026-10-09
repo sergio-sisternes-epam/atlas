@@ -9,6 +9,9 @@ Do not edit these files. Add a new directory for a new release instead.
 | `atlas-tasks-v0.6.0/` | atlas-tasks `v0.6.0`, `contributions/atlas-tasks/SCHEMA.overlay.json` | `atlas_tasks` |
 | `atlas-todo-v0.2.0/` | atlas-tasks `v0.2.0`, `contributions/atlas-todo/SCHEMA.overlay.json` | `atlas_todo` |
 
-`scripts/test_overlay_extension.py` installs each fixture on SCHEMA 1.0 and
-SCHEMA 2.0 stores and compiles them. See `references/paths/schema.md`
+For each fixture, `scripts/test_overlay_extension.py`:
+
+- installs and compiles it on a SCHEMA 2.0 store;
+- installs and compiles it on a SCHEMA 1.0 store;
+- installs it on a SCHEMA 1.0 store, upgrades the store to 2.0 and compiles. See `references/paths/schema.md`
 (Contribution overlays) for the extension slot rule.
