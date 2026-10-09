@@ -14,7 +14,10 @@ smokes:
     expect: "A description that cannot round-trip exits 2 with finding frame_description_not_round_trippable and writes staging/memory-migrate-operator-steps.md containing the original description verbatim and the next step: make the description a plain scalar the reader round-trips, then re-run atlas memory-migrate --operation apply --batch contract-file."
   - id: package-and-store-stamps
     source: "apm.yml; SKILL.md; scripts/atlas_cli/__init__.py; scripts/atlas_cli/core/schema.py"
-    expect: "Package and new write stamp are 0.13.0-beta.7 on CONTRACT.json with memory.layers schema/gist/memory. beta.3 and beta.4 readers remain current and apply is a no-op without restamping. beta.6 and unknown stamps fail closed; SCHEMA.json refuses current stamps. SCHEMA 2.0 behavior and the fleet pin v0.12.0 stay unchanged."
+    expect: "Package and new write stamp are 0.13.0 on CONTRACT.json with memory.layers schema/gist/memory. beta.3, beta.4 and beta.7 readers remain current and default apply (no batch or contract-file) is a no-op without restamping; only the opt-in apply --batch restamp rewrites atlas_release, and nothing else, to 0.13.0. beta.6 and unknown stamps fail closed; SCHEMA.json refuses current stamps including 0.13.0. SCHEMA 2.0 behaviour and the fleet pin v0.12.0 stay unchanged."
+  - id: opt-in-restamp
+    source: "scripts/atlas_cli/commands/memory_migrate.py; references/paths/memory-migrate.md; scripts/test_schema_layer_contract.py"
+    expect: "apply --batch restamp on a current CONTRACT.json stamped beta.3, beta.4 or beta.7 rewrites only atlas_release to 0.13.0 and touches no other byte or file; on 0.13.0 it is an idempotent zero-write no-op; pre-beta, in-beta, SCHEMA.json, symlinked CONTRACT.json and unknown stamps refuse (restamp_not_eligible) with zero writes. assess and inventory report atlas_release and restamp_eligible and write nothing."
   - id: no-contract-rename-on-description-failure
     source: "scripts/atlas_cli/commands/memory_migrate.py; scripts/test_schema_layer_contract.py"
     expect: "Failed description round-trip leaves frame.md and SCHEMA.json byte-for-byte in place, creates no CONTRACT.json or schema page, never drops the description, and never deletes the frame. Success deletes the leftover frame only after the new schema contains its original description."

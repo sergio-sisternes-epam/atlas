@@ -128,6 +128,13 @@ for new capability or a compatibility-breaking package or CLI contract.
    leaves it unchanged after verification passes.
 7. Give the EPAM Marketplace maintainer the source repository, immutable tag or
    compatible version range, description, and tags.
+8. After the release workflow has published the tag, re-pin `atlas` in the
+   public catalog repository `sergio-sisternes-epam/atlas-marketplace`: in
+   that repository, update the `atlas` entry under `marketplace.packages` in
+   `apm.yml` to the new version and `vX.Y.Z` ref, regenerate
+   `.claude-plugin/marketplace.json` with `apm pack` (APM CLI 0.30.0), and
+   open a pull request there. Only final releases are pinned in the catalog;
+   prerelease (beta) tags are not.
 
 ### Failed-tag recovery
 
@@ -141,7 +148,9 @@ If validation passed and only GitHub Release creation failed because of a
 provider outage or permission problem, rerun the failed workflow for the same
 tag after restoring the provider. Do not rebuild from a different commit.
 
-The source package workflow does not edit the marketplace catalog.
+The source package workflow does not edit the marketplace catalog; the
+catalog re-pin in step 8 is a separate, manual pull request in the catalog
+repository.
 
 Atlas is distributed directly from its immutable Git tag. `apm pack` exports
 the dependency bundle for this root-skill project, not the Atlas skill itself,

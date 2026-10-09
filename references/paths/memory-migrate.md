@@ -158,8 +158,10 @@ python3 <atlas-skill>/scripts/atlas.py memory-migrate \
 
 `assess` and `inventory` write nothing here either — the JSON output
 includes a `lineage` field (`pre-beta`, `in-beta`, `empty-beta2-init`, or
-`current`) and a `contract_file_eligible` flag, and nothing else changes
-on disk.
+`current`), a `contract_file_eligible` flag, the store's `atlas_release`
+value (`null` when absent), and a `restamp_eligible` flag (true only when
+`apply --batch restamp` below would write), and nothing else changes on
+disk.
 
 Eligibility (`apply`):
 
@@ -193,21 +195,25 @@ Eligibility (`apply`):
   and the listed `memory.layers` shapes remain in-beta even with zero
   content pages. `assess` then reports lineage `in-beta` and
   `contract_file_eligible: false`.
-- **current** — the contract shape written for this cut (`CONTRACT.json`,
-  `atlas_release` `0.13.0-beta.7`, `memory.layers`
+- **current** — the contract shape written by this release
+  (`CONTRACT.json`, `atlas_release` `0.13.0`, `memory.layers`
   `["schema", "gist", "memory"]`). An existing `CONTRACT.json` stamped
-  `atlas_release` `0.13.0-beta.3` or `0.13.0-beta.4` with the same
-  `memory.layers` is also accepted as current. `apply` is a no-op write
-  (exit 0) for all three stamps and never rewrites an existing current stamp.
-  Unknown stamps fail closed, including `0.13.0-beta.6`, which never wrote
-  a store stamp. `SCHEMA.json` cannot carry any current stamp.
+  `atlas_release` `0.13.0-beta.3`, `0.13.0-beta.4` or `0.13.0-beta.7` with
+  the same `memory.layers` stays current on read and needs no migration.
+  `apply` with no `--batch` or with `--batch contract-file` is a no-op
+  write (exit 0) for all four stamps and never rewrites an existing
+  current stamp; only the explicit `--batch restamp` below does. Unknown
+  stamps fail closed, including `0.13.0-beta.5`, `0.13.0-beta.6` (which
+  never wrote a store stamp), `0.13.0-rc.1` and `0.13.1`; a malformed
+  stamp never matches by prefix. `SCHEMA.json` cannot carry any current
+  stamp, including `0.13.0`.
 
 `apply` with no `--batch`, or batch text `"migrate everything"`, refuses
 and writes nothing — same unscoped-batch guard as the content-migration
 procedure above. On an eligible pre-beta contract, or an eligible empty
 unstamped full beta.2 init, passing `--batch contract-file` renames
 `SCHEMA.json` to `CONTRACT.json`, sets `atlas_release` to
-`0.13.0-beta.7` and `memory.layers` to `["schema", "gist", "memory"]`,
+`0.13.0` and `memory.layers` to `["schema", "gist", "memory"]`,
 and does not rewrite existing content pages. For that empty beta.2 init
 only, apply also aligns `templates` and `types.recommended` with a fresh
 current `atlas init`: `frame` and `page` are removed from
@@ -247,6 +253,39 @@ Stamps `0.13.0-beta` and `0.13.0-beta.2`, `memory.layers` of
 unstamped full beta.2 init that already has `frame`, `gist`, `page`, or
 `memory` content pages return `in_beta_not_legacy` and are not rewritten.
 An empty unstamped full beta.2 init is the eligible exception above.
+
+### Restamp a current store (CLI, opt-in)
+
+A store already on the current shape keeps working with its older
+accepted stamp (`0.13.0-beta.3`, `0.13.0-beta.4` or `0.13.0-beta.7`);
+moving it to `0.13.0` is optional and operator-chosen:
+
+```bash
+python3 <atlas-skill>/scripts/atlas.py memory-migrate \
+  --root <root> --operation apply --batch restamp --json
+```
+
+- **Eligible** — the contract file is `CONTRACT.json` (not a symlink),
+  lineage is `current`, `memory.layers` is `["schema", "gist", "memory"]`,
+  and `atlas_release` is `0.13.0-beta.3`, `0.13.0-beta.4` or
+  `0.13.0-beta.7`. Apply rewrites only the `atlas_release` value to
+  `0.13.0`; every other key, key order and value is kept, and the file is
+  serialised the same way as the contract-file batch (two-space JSON
+  indent, trailing newline). No page, template or other file is touched.
+- **Already `0.13.0`** — exit 0, note `already at current stamp`, writes
+  nothing. Re-running restamp is idempotent.
+- **Anything else** — a pre-beta, in-beta or `empty-beta2-init` store,
+  `SCHEMA.json`, a `CONTRACT.json` symlink, or an unknown stamp: exit
+  non-zero (finding id `restamp_not_eligible`, or `schema_present` for a
+  symlinked contract file) and write nothing. Pre-beta stores use
+  `--batch contract-file`, which now writes `0.13.0` directly.
+
+Restamp only once every reader of the store runs Atlas 0.13.0. After a
+restamp, compile the store with an Atlas 0.13.0 package: older packages
+(`0.13.0-beta.13` and earlier, including CI pinned to an older
+`atlas_ref`) do not know the `0.13.0` stamp and fail closed with
+`stamp_shape`. Compile and `scripts/atlas_optimise.py` only read the
+stamp; neither writes nor changes it.
 
 ### Out of scope
 
