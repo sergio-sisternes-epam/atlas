@@ -424,6 +424,51 @@ relates_to:
         self.assertIn("'ref': abcdef1234567890", history_only)
         self.assertNotIn("new.md", history_only)
 
+    def test_quoted_relates_to_key_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "quoted-history.md",
+            """
+type: document
+title: Quoted history
+created: 2026-10-05
+'relates_to':
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nQuoted history page has enough prose and no live link.",
+        )
+        page(
+            root / "quoted-live.md",
+            '''
+type: document
+title: Quoted live
+created: 2026-10-05
+"relates_to":
+  - path: old.md
+    kind: related
+''',
+            "## Content\n\nSee [old](old.md). This quoted live page has enough prose.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("quoted-history.md", opt._referrers(store, "old.md"))
+        self.assertIn("quoted-live.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["quoted-history.md", "quoted-live.md"])
+        history = (root / "quoted-history.md").read_text(encoding="utf-8")
+        live = (root / "quoted-live.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history)
+        self.assertNotIn("new.md", history)
+        self.assertIn("path: new.md", live)
+        self.assertNotIn("path: old.md", live)
+
     def test_nested_ref_text_does_not_freeze_live_path(self) -> None:
         import atlas_optimise as opt
 

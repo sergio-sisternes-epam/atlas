@@ -297,9 +297,15 @@ def _single_line_value(lines: list[str], key: str) -> tuple[int, str] | None:
     return None
 
 
+_RELATES_BLOCK = re.compile(
+    r"""^(?:relates_to|(['"])relates_to\1)\s*:\s*$"""
+)
+
+
 def _relates_block(lines: list[str]) -> tuple[int, int] | None:
+    """Return the block under relates_to, including a quoted SCHEMA 2.0 key."""
     for i, line in enumerate(lines):
-        if re.match(r"^relates_to:\s*$", line):
+        if _RELATES_BLOCK.match(line.rstrip("\r\n")):
             j = i + 1
             while j < len(lines) and (lines[j].startswith((" ", "\t", "-")) or not lines[j].strip()):
                 if lines[j].strip() == "---":
