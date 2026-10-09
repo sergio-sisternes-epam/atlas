@@ -31,6 +31,12 @@ from ..core.recall_index import (
     load_current,
 )
 from ..core.schema import find_contract_path, load_schema
+from ..core.schema_upgrade import (
+    RECALL_LOCK_TAG,
+    acquire_store_lock,
+    lock_held_message,
+    release_store_lock,
+)
 from ..core.drivers import tgrep as tgrep_driver
 
 
@@ -219,8 +225,34 @@ def run_validate(root: str | None, config: str | None, as_json: bool = False) ->
     return 0 if not errs else 2
 
 
+def _locked(r: Path, as_json: bool, body) -> int:
+    """Run a recall contract read-modify-write under the shared store lock.
+
+    The contract is read and validated only inside ``body``, after the lock is
+    taken. On an exception, keep the lock: a partial write needs an operator to
+    check the store.
+    """
+    if not r.is_dir():
+        return body()
+    try:
+        lock = acquire_store_lock(r, RECALL_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r)})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r)})
+        return 2
+    code = body()
+    release_store_lock(lock)
+    return code
+
+
 def run_activate(root: str | None, profile: str, as_json: bool = False) -> int:
     r = store_root(root)
+    return _locked(r, as_json, lambda: _activate_locked(r, profile, as_json))
+
+
+def _activate_locked(r: Path, profile: str, as_json: bool) -> int:
     schema, err = _effective(r)
     if schema is None:
         _print(as_json, {"ok": False, "error": err, "root": str(r)})
@@ -249,6 +281,10 @@ def run_activate(root: str | None, profile: str, as_json: bool = False) -> int:
 
 def run_disable(root: str | None, as_json: bool = False) -> int:
     r = store_root(root)
+    return _locked(r, as_json, lambda: _disable_locked(r, as_json))
+
+
+def _disable_locked(r: Path, as_json: bool) -> int:
     schema, err = load_schema(r)
     if schema is None:
         _print(as_json, {"ok": False, "error": err, "root": str(r)})

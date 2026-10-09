@@ -26,6 +26,13 @@ FORBIDDEN_CORE = frozenset(
     }
 )
 CONTRIB_MERGE = frozenset({"bindings", "presets"})
+# Root keys owned by core or the contribution envelope; never usable as an extension slot.
+RESERVED_ROOT_KEYS = (
+    META_KEYS
+    | FORBIDDEN_CORE
+    | CONTRIB_MERGE
+    | frozenset({"templates", "types", "relations", "required_root_fields", "atlas_release"})
+)
 ALLOW_UNION = frozenset({"types"})
 RESERVED_CORE_TYPES = frozenset(
     {
@@ -43,6 +50,23 @@ RESERVED_CORE_TYPES = frozenset(
         "memory",
     }
 )
+
+
+def extension_key(cid: str) -> str | None:
+    """Return the one package-metadata slot a contribution may carry, or None.
+
+    The slot is the contribution_id with '-' replaced by '_' (``atlas-tasks`` ->
+    ``atlas_tasks``). Its value must be a JSON object; it is never merged into
+    the effective contract and core never reads it. Ids whose slot would equal a
+    core or contribution-envelope key get no slot.
+    """
+    cid = str(cid or "").strip()
+    if validate_id(cid):
+        return None
+    key = cid.replace("-", "_")
+    if key in RESERVED_ROOT_KEYS:
+        return None
+    return key
 
 
 def overlay_dir(root: Path) -> Path:
@@ -224,6 +248,7 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
     src_by = src_tmpl.get("by_type") if isinstance(src_tmpl, dict) else None
     live = frozenset(src_by.keys()) if isinstance(src_by, dict) else frozenset()
     core_type_names = RESERVED_CORE_TYPES | live
+    host_v2 = isinstance(core, dict) and str(core.get("schema_version") or "").strip() == "2.0"
 
     for cid in list_overlays(root):
         ov, err = load_overlay(root, cid)
@@ -245,9 +270,35 @@ def merge_overlays(core: dict[str, Any], root: Path) -> tuple[dict[str, Any], li
         if claimed and not isinstance(claimed, list):
             critical.append(_issue("overlay_claimed", relp, "claimed_folders must be a list"))
 
+        ext_key = extension_key(cid)
         for key, val in ov.items():
             if key in META_KEYS:
                 continue
+            if ext_key is not None and key == ext_key and key not in core:
+                if isinstance(val, dict):
+                    owner = extra_owners.get(key)
+                    if owner and owner != cid:
+                        critical.append(
+                            _issue(
+                                "overlay_key_clash",
+                                relp,
+                                f"two overlays claim extra key '{key}' ({owner} and {cid})",
+                            )
+                        )
+                        continue
+                    # Package metadata: ownership is recorded, the value is not merged.
+                    extra_owners[key] = cid
+                    continue
+                if host_v2:
+                    critical.append(
+                        _issue(
+                            "overlay_extension",
+                            relp,
+                            f"extension metadata '{key}' must be an object",
+                        )
+                    )
+                    continue
+                # SCHEMA 1.0: a non-object value keeps the generic extra-key behaviour.
             if key in FORBIDDEN_CORE:
                 critical.append(
                     _issue("overlay_core_clash", relp, f"overlay must not set core key '{key}'")

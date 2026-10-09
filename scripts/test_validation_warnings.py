@@ -74,6 +74,34 @@ def main() -> int:
                     f"stderr={result.stderr!r}"
                 )
 
+        # schema_type_contract reports the store's actual contract file name.
+        typed = tmp / "typed"
+        init = run(["init", "--root", str(typed), "--json"])
+        if init.returncode != 0:
+            failures.append(f"typed init: exit={init.returncode} stderr={init.stderr!r}")
+        else:
+            contract = json.loads((typed / "CONTRACT.json").read_text(encoding="utf-8"))
+            contract["types"]["recommended"].append("widget")
+            (typed / "CONTRACT.json").write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+            for name in ("CONTRACT.json", "SCHEMA.json"):
+                if name == "SCHEMA.json":
+                    (typed / "CONTRACT.json").rename(typed / "SCHEMA.json")
+                result = run(["validate", "--root", str(typed), "--json"])
+                try:
+                    payload = json.loads(result.stdout)
+                except json.JSONDecodeError as error:
+                    failures.append(f"schema_type_contract {name}: invalid JSON ({error})")
+                    continue
+                paths = [
+                    issue.get("path")
+                    for issue in payload.get("warnings", [])
+                    if issue.get("id") == "schema_type_contract"
+                ]
+                passed = paths == [name]
+                print(f"[{'PASS' if passed else 'FAIL'}] schema_type_contract path {name}")
+                if not passed:
+                    failures.append(f"schema_type_contract {name}: paths={paths} stderr={result.stderr!r}")
+
         if failures:
             print("\n" + "\n".join(failures))
             return 1

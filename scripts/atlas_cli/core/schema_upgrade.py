@@ -4,13 +4,30 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .jsonutil import StrictJsonError, load_strict
-from .overlay import SCHEMA_D, overlay_path, receipt_path, write_json, write_receipt
-from .recall_config import default_recall_block, schema_version, validate_store_v2
+from .overlay import (
+    SCHEMA_D,
+    list_overlays,
+    load_overlay,
+    merge_overlays,
+    overlay_path,
+    receipt_path,
+    write_json,
+    write_receipt,
+)
+from .recall_config import (
+    RecallConfigError,
+    default_recall_block,
+    schema_version,
+    validate_contribution,
+    validate_store_v2,
+)
 from .schema import find_contract_path, load_schema
 
 KNOWN_ROOT_KEYS = frozenset(
@@ -37,10 +54,80 @@ KNOWN_ROOT_KEYS = frozenset(
 )
 COMPAT_ID = "atlas-compat-v1"
 LOCK_NAME = ".atlas-upgrade.lock"
+UPGRADE_LOCK_TAG = "schema-upgrade-2.0"
+INSTALL_LOCK_TAG = "schema-install"
+UNINSTALL_LOCK_TAG = "schema-uninstall"
+NEW_LOCK_TAG = "schema-new"
+MEMORY_RUNG_LOCK_TAG = "schema-memory-rung"
+INIT_FORCE_LOCK_TAG = "init-force"
+MEMORY_MIGRATE_LOCK_TAG = "memory-migrate-apply"
+RECALL_LOCK_TAG = "recall-config"
 
 
 class UpgradeError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class StoreLock:
+    path: Path
+    content: str
+
+
+def acquire_store_lock(root: Path, tag: str) -> StoreLock:
+    """Create the store's upgrade/install lock exclusively; FileExistsError if held.
+
+    The lock carries a unique token so that only its owner ever removes it.
+    """
+    path = root / LOCK_NAME
+    content = f"{tag} {uuid.uuid4().hex}\n"
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, content.encode())
+    finally:
+        os.close(fd)
+    return StoreLock(path, content)
+
+
+def release_store_lock(lock: StoreLock) -> bool:
+    """Remove the lock only if it is still the one this process created."""
+    try:
+        if lock.path.read_text(encoding="utf-8") != lock.content:
+            return False
+    except OSError:
+        return False
+    lock.path.unlink(missing_ok=True)
+    return True
+
+
+def lock_held_message(root: Path) -> str:
+    """Explain an existing lock. Locks are never reclaimed automatically."""
+    try:
+        holder = (root / LOCK_NAME).read_text(encoding="utf-8").split()[0]
+    except (OSError, IndexError):
+        holder = ""
+    if holder == INSTALL_LOCK_TAG:
+        what = "a schema install is running or was interrupted"
+    elif holder == UPGRADE_LOCK_TAG:
+        what = "a schema upgrade is running or was interrupted"
+    elif holder == UNINSTALL_LOCK_TAG:
+        what = "a schema uninstall is running or was interrupted"
+    elif holder == NEW_LOCK_TAG:
+        what = "a schema new is running or was interrupted"
+    elif holder == MEMORY_RUNG_LOCK_TAG:
+        what = "a schema memory-rung is running or was interrupted"
+    elif holder == INIT_FORCE_LOCK_TAG:
+        what = "an init --force is running or was interrupted"
+    elif holder == MEMORY_MIGRATE_LOCK_TAG:
+        what = "a memory-migrate apply is running or was interrupted"
+    elif holder == RECALL_LOCK_TAG:
+        what = "a recall activate/disable is running or was interrupted"
+    else:
+        what = "an Atlas command that writes the contract file or schema.d/ is running or was interrupted"
+    return (
+        f"{LOCK_NAME} present: {what}; retry when it finishes. Remove the lock only if "
+        "no Atlas command is running and the contract file and schema.d/ have been checked"
+    )
 
 
 def preview(root: Path) -> dict[str, Any]:
@@ -57,6 +144,12 @@ def preview(root: Path) -> dict[str, Any]:
     overlay = _compat_overlay(schema)
     target = _target_schema(schema)
     v2_errs = validate_store_v2(target) if not unknown else []
+    if not unknown and not v2_errs:
+        # Installed overlays must also hold under 2.0 rules, or compile fails after upgrade.
+        merged, critical, _ = merge_overlays(target, root)
+        v2_errs = [f"installed overlays: {i['path']}: {i['id']}: {i['msg']}" for i in critical]
+        v2_errs += [f"installed overlays: {e}" for e in validate_store_v2(merged)]
+        v2_errs += _overlay_envelope_errors(root)
     return {
         "ok": version != "2.0" and not unknown and not v2_errs,
         "from": version,
@@ -68,6 +161,25 @@ def preview(root: Path) -> dict[str, Any]:
         "notes": notes,
         "overlay": overlay,
     }
+
+
+def _overlay_envelope_errors(root: Path) -> list[str]:
+    """Check every installed overlay against contribution-v1, as a 2.0 install would."""
+    errs: list[str] = []
+    for cid in list_overlays(root):
+        if cid == COMPAT_ID:
+            # Replaced by the overlay this upgrade writes.
+            continue
+        ov, err = load_overlay(root, cid)
+        if err or ov is None:
+            continue  # already reported by merge_overlays
+        relp = f"{SCHEMA_D}/{cid}.json"
+        try:
+            cerrs = validate_contribution(ov)
+        except RecallConfigError as e:
+            cerrs = [str(e)]
+        errs += [f"installed overlays: {relp}: overlay_contribution: {e}" for e in cerrs]
+    return errs
 
 
 def _target_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -115,19 +227,27 @@ def apply(root: Path) -> dict[str, Any]:
         raise UpgradeError(
             "; ".join(pre["notes"] or pre.get("target_errors") or ["upgrade blocked"])
         )
-    lock = root / LOCK_NAME
-    if lock.is_file():
-        schema, _ = load_schema(root)
-        if schema and schema_version(schema) == "2.0":
-            lock.unlink(missing_ok=True)
-        else:
-            raise UpgradeError("interrupted upgrade lock present; refusing to continue blindly")
-    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    # Any existing lock is held; it is never reclaimed from contract state.
     try:
-        try:
-            os.write(fd, b"schema-upgrade-2.0\n")
-        finally:
-            os.close(fd)
+        lock = acquire_store_lock(root, UPGRADE_LOCK_TAG)
+    except FileExistsError as e:
+        raise UpgradeError(lock_held_message(root)) from e
+    # Every other writer of schema.d/ or the contract file on an existing store takes the
+    # same lock (schema install/uninstall/new, schema memory-rung --set, init --force,
+    # memory-migrate --operation apply, recall activate/disable), so the overlay set and
+    # contract are stable from here on.
+    # Recheck it before any write; nothing is written yet, so release on refusal.
+    try:
+        pre = preview(root)
+    except Exception:
+        release_store_lock(lock)
+        raise
+    if not pre["ok"]:
+        release_store_lock(lock)
+        raise UpgradeError(
+            "; ".join(pre["notes"] or pre.get("target_errors") or ["upgrade blocked"])
+        )
+    try:
         schema, err = load_schema(root)
         if schema is None:
             raise UpgradeError(err or "missing SCHEMA.json or CONTRACT.json")
@@ -155,12 +275,10 @@ def apply(root: Path) -> dict[str, Any]:
         tmp.write_text(json.dumps(target, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, contract_path)
     except Exception:
-        if lock.exists():
-            # leave lock for fail-closed detection
-            pass
+        # Leave the lock: a partial upgrade needs an operator to check the store.
         raise
     else:
-        lock.unlink(missing_ok=True)
+        release_store_lock(lock)
     return {
         "ok": True,
         "from": pre["from"],

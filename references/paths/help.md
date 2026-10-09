@@ -125,8 +125,9 @@ When references are absent, unreadable, irrelevant, or only partial:
      mount). Reject `../` mesh paths, symlink escapes, and any checkout
      outside the consumer repo. Reason: resolved path is not the
      registered in-repository checkout.
-   - That path contains a readable, valid `SCHEMA.json`. Reason: not an
-     Atlas store (`SCHEMA.json` missing or invalid).
+   - That path contains exactly one readable, valid contract file
+     (`CONTRACT.json` or `SCHEMA.json`). Reason: not an Atlas store
+     (contract file missing, duplicated, or invalid).
 
    Resolve only proves a registered path exists. It does not prove the
    tree is in-repo or a store. If `atlas resolve` itself fails closed on

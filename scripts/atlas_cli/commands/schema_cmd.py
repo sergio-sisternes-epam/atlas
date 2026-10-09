@@ -7,6 +7,7 @@ from pathlib import Path
 from ..core.overlay import (
     SCHEMA_D,
     added_types,
+    extension_key,
     load_overlay,
     load_receipt,
     overlay_by_type,
@@ -30,7 +31,18 @@ from ..core.schema import (
     load_schema,
     staging_dir_name,
 )
-from ..core.schema_upgrade import UpgradeError, apply as upgrade_apply, preview as upgrade_preview
+from ..core.schema_upgrade import (
+    INSTALL_LOCK_TAG,
+    MEMORY_RUNG_LOCK_TAG,
+    NEW_LOCK_TAG,
+    UNINSTALL_LOCK_TAG,
+    UpgradeError,
+    acquire_store_lock,
+    apply as upgrade_apply,
+    lock_held_message,
+    preview as upgrade_preview,
+    release_store_lock,
+)
 
 
 def _print(as_json: bool, payload: dict) -> None:
@@ -56,6 +68,30 @@ def run_new(
     if err:
         _print(as_json, {"ok": False, "error": err, "root": str(r)})
         return 2
+    if not r.is_dir():
+        # No store yet, so no contract and no upgrade to coordinate with.
+        return _new_locked(r, cid, claims, as_json)
+    # Share the upgrade lock so an upgrade's overlay recheck stays valid until it writes.
+    try:
+        lock = acquire_store_lock(r, NEW_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r), "id": cid})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
+        return 2
+    # On an exception, keep the lock: a partial write needs an operator to check the store.
+    code = _new_locked(r, cid, claims, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _new_locked(
+    r: Path,
+    cid: str,
+    claims: tuple[str, ...] | list[str] | None,
+    as_json: bool,
+) -> int:
     dest = overlay_path(r, cid)
     if dest.is_file():
         _print(as_json, {"ok": False, "error": f"{SCHEMA_D}/{cid}.json already exists", "root": str(r)})
@@ -119,7 +155,34 @@ def run_install(
     if id_err:
         _print(as_json, {"ok": False, "error": id_err, "root": str(r)})
         return 2
+    if not r.is_dir():
+        # No store yet, so no contract and no upgrade to coordinate with.
+        return _install_locked(r, ov, src_dir, cid, force, as_json)
+    # Share the upgrade lock so the host version cannot change between validation and write.
+    try:
+        lock = acquire_store_lock(r, INSTALL_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r), "id": cid})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
+        return 2
+    # On an exception, keep the lock: a partial install needs an operator to check the store.
+    code = _install_locked(r, ov, src_dir, cid, force, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _install_locked(
+    r: Path,
+    ov: dict,
+    src_dir: Path | None,
+    cid: str,
+    force: bool,
+    as_json: bool,
+) -> int:
     host, _ = load_schema(r)
+    notes: list[str] = []
     if host is not None and schema_version(host) == "2.0":
         try:
             cerrs = validate_contribution(ov)
@@ -129,6 +192,13 @@ def run_install(
         if cerrs:
             _print(as_json, {"ok": False, "error": "; ".join(cerrs), "root": str(r), "id": cid})
             return 2
+        ext = extension_key(cid)
+        if ext is not None and isinstance(ov.get(ext), dict):
+            notes.append(
+                f"note: extension slot '{ext}' accepted. While this overlay is installed, "
+                "this SCHEMA 2.0 store needs Atlas >= 0.13.1 to compile. Before using an older "
+                "Atlas, reinstall a slot-free overlay or uninstall it (see path schema)."
+            )
     dest = overlay_path(r, cid)
     _, by_err = overlay_by_type(ov)
     if by_err:
@@ -183,17 +253,17 @@ def run_install(
                     written.append(f"templates/{tname}.md")
                     copied.append(tname)
     rec = write_receipt(r, cid, written + [f"{SCHEMA_D}/{cid}.receipt.json"], types=added_types(ov))
-    _print(
-        as_json,
-        {
-            "ok": True,
-            "root": str(r),
-            "id": cid,
-            "overlay": rel(r, dest),
-            "receipt": rel(r, rec),
-            "templates_copied": copied,
-        },
-    )
+    payload = {
+        "ok": True,
+        "root": str(r),
+        "id": cid,
+        "overlay": rel(r, dest),
+        "receipt": rel(r, rec),
+        "templates_copied": copied,
+    }
+    if notes:
+        payload["notes"] = notes
+    _print(as_json, payload)
     return 0
 
 
@@ -203,6 +273,24 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
     if err:
         _print(as_json, {"ok": False, "error": err, "root": str(r)})
         return 2
+    if not r.is_dir():
+        return _uninstall_locked(r, cid, as_json)
+    # Share the upgrade lock so an upgrade's overlay recheck stays valid until it writes.
+    try:
+        lock = acquire_store_lock(r, UNINSTALL_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r), "id": cid})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
+        return 2
+    # On an exception, keep the lock: a partial uninstall needs an operator to check the store.
+    code = _uninstall_locked(r, cid, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _uninstall_locked(r: Path, cid: str, as_json: bool) -> int:
     dest = overlay_path(r, cid)
     if not dest.is_file():
         _print(as_json, {"ok": False, "error": f"no overlay {cid}", "root": str(r)})
@@ -321,6 +409,24 @@ def run_memory_rung(
     if value not in ("info", "warn", "error"):
         _print(as_json, {"ok": False, "error": f"unsupported --set {rung}", "root": str(r)})
         return 2
+    if not r.is_dir():
+        return _memory_rung_locked(r, value, as_json)
+    # Share the upgrade lock so an upgrade never overwrites this contract-file write.
+    try:
+        lock = acquire_store_lock(r, MEMORY_RUNG_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r)})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r)})
+        return 2
+    # On an exception, keep the lock: a partial write needs an operator to check the store.
+    code = _memory_rung_locked(r, value, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _memory_rung_locked(r: Path, value: str, as_json: bool) -> int:
     schema, err = load_schema(r)
     if err or schema is None:
         _print(as_json, {"ok": False, "error": err or "missing contract file", "root": str(r)})
