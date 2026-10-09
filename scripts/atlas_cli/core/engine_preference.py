@@ -287,6 +287,7 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force
         gen = fresh.generation.pointer.get("generation")
         rebuilt = fresh.rebuilt
         lock_warnings = list(fresh.warnings)
+        build_note = None
     else:
         from . import graph
         from .driver_overlay import get_driver
@@ -298,6 +299,7 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force
         gen = info.get("generation")
         rebuilt = not info.get("reused", True)
         lock_warnings = list(info.get("warnings") or [])
+        build_note = info.get("driver_note")
     where = index_location.describe(store, driver_type)
     out = {
         "driver": ENGINE_DRIVERS[engine],
@@ -308,6 +310,8 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force
     }
     if lock_warnings:
         out["warnings"] = lock_warnings
+    if build_note:
+        out["driver_note"] = build_note
     return out
 
 
@@ -354,6 +358,7 @@ def refresh_preferred(store: Path, schema: dict[str, Any] | None) -> list[dict[s
         "engine_requested": pref.requested,
         "engine_source": pref.source,
     }
-    if eff.note:
-        item["driver_note"] = eff.note
+    notes = [n for n in (eff.note, res.get("driver_note")) if n]
+    if notes:
+        item["driver_note"] = "; ".join(notes)
     return [item]

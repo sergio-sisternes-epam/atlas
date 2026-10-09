@@ -281,7 +281,10 @@ def build_store(ref: StoreRef, force: bool = False) -> dict[str, Any]:
                 except (index_location.IndexLocationError, OSError):
                     pass
             else:
+                notes = [n for n in (res.get("driver_note"), out.get("driver_note")) if n]
                 res.update(out)
+                if notes:
+                    res["driver_note"] = "; ".join(notes)
                 try:
                     res["index_location"] = index_location.describe(ref.path, out["driver_type"])["index_location"]
                 except (index_location.IndexLocationError, OSError):

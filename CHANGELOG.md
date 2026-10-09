@@ -36,6 +36,19 @@
   exit 2 without writing. The lock and temp-file patterns are added to
   `info/exclude`. Mount's row upsert and store removal now also write
   atomically.
+- nanograph runs in isolation: every nanograph call (`--version`, `init`,
+  `load`, `run`) runs in a private, empty, 0700 `atlas-nanograph-*`
+  temporary directory that is removed afterwards, so nanograph never loads
+  `.env.nano` or `.env` from your project, store or home directory. `init`
+  reads a private schema copy; `nanograph.toml` / `.env.nano` that `init`
+  scaffolds into an inferred project directory are removed (existing files
+  are kept and reported in `driver_note`), and generations are scrubbed of
+  `.env.nano`, `.env` and `nanograph.toml` before `load` and before
+  publishing. Previously `init` wrote both files into the published
+  generation.
+- `atlas graph neighbours --driver nanograph` now reports nanograph build
+  warnings such as `atlas_indexes_ignore_failed` in `warnings` (and once on
+  stderr in text mode), as recall does; the exit code is unchanged.
 
 - CLI bounds: `atlas graph nodes --limit`, `atlas graph neighbours
   --max-nodes/--max-edges` must be at least 1 and `--hops` must be 1..3;

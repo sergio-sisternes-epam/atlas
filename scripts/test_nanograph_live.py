@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 os.environ.pop("ATLAS_NANOGRAPH_BIN", None)
 
-from atlas_cli.core import driver_overlay  # noqa: E402
+from atlas_cli.core import driver_overlay, index_location  # noqa: E402
 from atlas_cli.core.driver_overlay import normalise_machine  # noqa: E402
 from atlas_cli.core.drivers.nanograph import NanographDriver  # noqa: E402
 from test_graph import PAGES, SCHEMA_V1  # noqa: E402
@@ -93,6 +93,12 @@ def main() -> int:
             strip = lambda d: {k: v for k, v in d.items() if k != "driver_used"}  # noqa: E731
             check(f"neighbours-live-parity-{label}", strip(nano) == strip(native[1]), f"{nano} != {native[1]}")
         check("no-env-nano", not list(store.rglob(".env.nano")))
+        # nanograph init scaffolds nanograph.toml as well; a published generation never keeps it.
+        gens = [p.parent for p in index_location.indexes_base(store).rglob("ready.json")]
+        check("generation-published", bool(gens))
+        leftovers = [str(p) for g in gens for p in g.rglob("*") if p.name in (".env.nano", ".env", "nanograph.toml")]
+        check("no-nanograph-toml-in-generation", not leftovers, str(leftovers))
+        check("no-nanograph-toml", not list(store.rglob("nanograph.toml")))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

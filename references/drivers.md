@@ -72,11 +72,34 @@ macOS arm64. Atlas does not install it.
   `nanograph binary not found`, `nanograph version unreadable`,
   `nanograph version <v> below minimum 1.3.0`, `ok`.
 - **Process rules:** argv only, never a shell; timeouts of 10 s
-  (`--version`), 120 s (`init`, `load`) and 30 s (`run`); the working
-  directory is the index generation directory. The environment is
+  (`--version`), 120 s (`init`, `load`) and 30 s (`run`); every path on
+  argv is absolute. The environment is
   allow-listed (see [External driver environment](#external-driver-environment)),
   for the `--version` probe as well as `init`, `load` and `run`. Atlas never
   writes `.env.nano`.
+- **Working directory and env-file isolation:** nanograph loads `.env.nano`
+  and then `.env` from its working directory at startup (and reads
+  `nanograph.toml` from there). So every call (`--version`, `init`, `load`,
+  `run`) runs in its own private, empty directory that Atlas creates with
+  `tempfile.mkdtemp(prefix="atlas-nanograph-")` under the system temp
+  directory (mode 0700) and removes afterwards. Atlas refuses the call if
+  that directory holds `.env.nano` or `.env`. nanograph therefore never
+  reads env files from your home, project or store directories, and a
+  secret in a project `.env` never reaches it.
+- **Scaffolding clean-up:** `nanograph init` writes `nanograph.toml` and
+  `.env.nano` (when missing) into the directory it infers: the common
+  ancestor of `--db` and `--schema`, or its working directory when that
+  ancestor is the filesystem root. Atlas passes `init` a copy of the schema
+  in the private working directory (the generation keeps `export/schema.pg`
+  for provenance), so the ancestor is normally the root and the files land
+  in the private directory. When it is a real directory (for example
+  `TMPDIR` inside the project), Atlas computes it the same way, records
+  which of the two files already exist there, and after `init` deletes only
+  the ones `init` created. Your own files are never deleted; when one sits in
+  the inferred directory Atlas reports a `driver_note`. Before `load` and
+  again before publishing, Atlas removes any `.env.nano`, `.env` or
+  `nanograph.toml` from the whole temporary generation directory, so a
+  published generation never contains them.
 - **No embeddings, no network:** the export has no `Vector` fields and no
   `@embed`, and Atlas only uses BM25 and graph queries.
 - **Index:** `.atlas/indexes/nanograph/<atlas-id>/<generation>/` under the

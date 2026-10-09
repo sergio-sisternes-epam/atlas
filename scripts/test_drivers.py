@@ -51,14 +51,54 @@ def opt(args, name):
     return args[args.index(name) + 1] if name in args else None
 
 
+def common_ancestor_dir(cwd, db, schema):
+    # Mirrors nanograph 1.3.0 infer_init_project_dir: lexical common ancestor, else cwd.
+    left = db if os.path.isabs(db) else os.path.join(cwd, db)
+    right = schema if os.path.isabs(schema) else os.path.join(cwd, schema)
+    lp = [p for p in left.split(os.sep) if p]
+    rp = [p for p in right.split(os.sep) if p]
+    shared = []
+    for a, b in zip(lp, rp):
+        if a != b:
+            break
+        shared.append(a)
+    return os.sep + os.path.join(*shared) if shared else cwd
+
+
+def load_env_files(cwd):
+    # Like nanograph: .env.nano then .env from the working directory, existing vars win.
+    loaded = []
+    for name in (".env.nano", ".env"):
+        path = os.path.join(cwd, name)
+        if not os.path.isfile(path):
+            continue
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key not in os.environ:
+                os.environ[key] = value.strip()
+                loaded.append(key)
+    return loaded
+
+
 args = sys.argv[1:]
+CWD = os.getcwd()
+ENV_IN_CWD = sorted(n for n in (".env.nano", ".env") if os.path.lexists(os.path.join(CWD, n)))
+LOADED = load_env_files(CWD)
 with open(os.path.realpath(__file__) + ".calls", "a", encoding="utf-8") as fh:
     fh.write(json.dumps(args) + "\n")
 if LOG:
     with open(LOG, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "argv": args,
-            "cwd": os.getcwd(),
+            "cwd": CWD,
+            "cwd_mode": os.stat(CWD).st_mode & 0o777,
+            "cwd_entries": sorted(os.listdir(CWD)),
+            "env_in_cwd": ENV_IN_CWD,
+            "loaded": LOADED,
             "openai": "OPENAI_API_KEY" in os.environ,
             "gemini": "GEMINI_API_KEY" in os.environ,
             "embed": any(k.startswith("NANOGRAPH_EMBED") for k in os.environ),
@@ -76,6 +116,12 @@ if cmd == "init":
     os.makedirs(db, exist_ok=True)
     with open(os.path.join(db, "schema-path"), "w") as fh:
         fh.write(os.path.abspath(opt(args, "--schema")))
+    project = common_ancestor_dir(CWD, db, opt(args, "--schema"))
+    for name, text in (("nanograph.toml", "[db]\ndefault_path = \"atlas.nano\"\n"), (".env.nano", "FAKE_SCAFFOLD_ENV=1\n")):
+        target = os.path.join(project, name)
+        if not os.path.exists(target):
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(text)
     sys.exit(0)
 if cmd == "load":
     assert opt(args, "--mode") == "overwrite"
@@ -393,9 +439,12 @@ def main() -> int:
         check(
             "init-argv",
             bool(inits)
-            and inits[0]["argv"] == ["init", "--db", str(building / "atlas.nano"), "--schema", str(building / "export" / "schema.pg")],
+            and inits[0]["argv"][:4] == ["init", "--db", str(building / "atlas.nano"), "--schema"]
+            # init reads a schema copy in its private working directory, never the generation's export/.
+            and inits[0]["argv"][4:] == [str(Path(inits[0]["cwd"]) / "schema.pg")],
             str(inits[:1]),
         )
+        check("init-private-schema-only", bool(inits) and inits[0]["cwd_entries"] == ["schema.pg"], str(inits[:1]))
         check(
             "load-argv",
             bool(loads)
@@ -413,15 +462,26 @@ def main() -> int:
             all({"PATH", "HOME"} <= set(e["env_keys"]) for e in probes + runs),
             str([e["env_keys"] for e in probes[:1]]),
         )
+        tmp_root = Path(tempfile.gettempdir()).resolve()
+        cwds = {e["cwd"] for e in entries}
         check(
-            "cwd-index",
+            "cwd-private",
             all(
-                e["cwd"] == str(building if e["argv"][:1] in (["init"], ["load"]) else base / gen)
+                Path(e["cwd"]).name.startswith("atlas-nanograph-")
+                and Path(e["cwd"]).parent == tmp_root
+                and e["cwd_mode"] == 0o700
+                and not e["env_in_cwd"]
+                and not e["loaded"]
                 for e in entries
-                if e["argv"] != ["--version"]
-            ),
+            )
+            and len(cwds) == len(entries),
+            str([(e["argv"][:1], e["cwd"], oct(e["cwd_mode"]), e["env_in_cwd"], e["loaded"]) for e in entries][:6]),
         )
+        check("cwd-private-removed", not any(Path(c).exists() for c in cwds), str(sorted(c for c in cwds if Path(c).exists())))
         check("no-env-nano", not list(store.rglob(".env.nano")))
+        project_root = index_location.resolve(store).project_root
+        scaffolding = [p for p in project_root.rglob("*") if p.name in (".env.nano", ".env", "nanograph.toml")]
+        check("no-scaffolding-in-indexes", not scaffolding, str(scaffolding))
         check("store-untouched", snapshot(store) == before)
 
         # --- neighbours parity with native-graph -------------------------------

@@ -10,18 +10,29 @@ atomic replace of ``current.json`` (see core/index_publish.py), so readers
 never see a half-built generation. A ready generation in the deprecated in-store
 ``.atlas-index/nanograph/`` is reused read-only for 0.14.x. Any failure raises
 DriverError so callers fall back to the built-in driver.
+
+Every nanograph process runs with its working directory set to a private,
+empty ``atlas-nanograph-*`` temporary directory (mode 0700, removed
+afterwards), because nanograph loads ``.env.nano`` and ``.env`` from its
+working directory and ``init`` scaffolds ``nanograph.toml`` and ``.env.nano``
+into an inferred project directory. ``init`` reads a schema copy from that
+private directory; scaffolding ``init`` writes elsewhere is removed unless it
+was already there, and a generation is scrubbed of those files before
+``load`` and again before it is published.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .. import driver_overlay, graph, index_location, index_publish
 from ..driver_overlay import BaseDriver, Detection, DriverError
@@ -45,12 +56,75 @@ QUERIES_NAME = "atlas.gq"
 DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
 CURRENT_NAME = "current.json"
+# nanograph loads these from its working directory at startup.
+ENV_FILES = (".env.nano", ".env")
+# ``nanograph init`` writes these into the directory it infers (if missing).
+SCAFFOLD_FILES = ("nanograph.toml", ".env.nano")
+# Never present in a published generation.
+FORBIDDEN_FILES = frozenset({".env.nano", ".env", "nanograph.toml"})
+PRIVATE_PREFIX = "atlas-nanograph-"
+_PATH_OPTIONS = frozenset({"--db", "--schema", "--data", "--query"})
 _GEN_NAME = re.compile(r"[0-9a-f]{16}(?:-[0-9a-f]{8})?")
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 def query_ident(edge_type: str) -> str:
     return edge_type[:1].lower() + edge_type[1:]
+
+
+def infer_init_project_dir(cwd: Path, db: str, schema: str) -> Path:
+    """Where ``nanograph init`` writes ``nanograph.toml`` / ``.env.nano`` (nanograph 1.3.0).
+
+    The lexical common ancestor of ``--db`` and ``--schema`` (each resolved
+    against ``cwd`` when relative), or ``cwd`` when that ancestor is the
+    filesystem root or there is none.
+    """
+    left = Path(db) if Path(db).is_absolute() else cwd / db
+    right = Path(schema) if Path(schema).is_absolute() else cwd / schema
+    shared: list[str] = []
+    for a, b in zip(left.parts, right.parts):
+        if a != b:
+            break
+        shared.append(a)
+    if not shared:
+        return cwd
+    common = Path(*shared)
+    return common if common.parent != common else cwd
+
+
+def scrub_generation(root: Path) -> list[str]:
+    """Remove every ``.env.nano``, ``.env`` and ``nanograph.toml`` under ``root`` (no symlinks followed)."""
+    removed: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
+        for name in [*filenames, *dirnames]:
+            if name not in FORBIDDEN_FILES:
+                continue
+            target = here / name
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+                dirnames.remove(name)
+            else:
+                target.unlink()
+            removed.append(target.relative_to(root).as_posix())
+    return removed
+
+
+@contextlib.contextmanager
+def private_cwd() -> Iterator[Path]:
+    """A fresh, empty, 0700 working directory under the system temp dir, removed afterwards."""
+    path = Path(tempfile.mkdtemp(prefix=PRIVATE_PREFIX))
+    try:
+        path.chmod(0o700)
+        yield path.resolve()
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _check_private_cwd(cwd: Path) -> None:
+    present = [name for name in ENV_FILES if os.path.lexists(cwd / name)]
+    if present:
+        raise DriverError(f"private working directory is not clean ({', '.join(present)})")
 
 
 def generate_queries(page_edge_types: list[str]) -> str:
@@ -101,6 +175,7 @@ class NanographDriver(BaseDriver):
 
     def __init__(self) -> None:
         self.last_index: dict[str, Any] | None = None
+        self.build_notes: list[str] = []
         self._detection: Detection | None = None
 
     # --- detection ------------------------------------------------------
@@ -141,16 +216,19 @@ class NanographDriver(BaseDriver):
         if not binary:
             return Detection(False, "nanograph binary not found")
         try:
-            proc = subprocess.run(
-                [binary, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=VERSION_TIMEOUT,
-                env=external_driver_env(),
-                shell=False,
-            )
+            with private_cwd() as cwd:
+                _check_private_cwd(cwd)
+                proc = subprocess.run(
+                    [binary, "--version"],
+                    cwd=str(cwd),
+                    capture_output=True,
+                    text=True,
+                    timeout=VERSION_TIMEOUT,
+                    env=external_driver_env(),
+                    shell=False,
+                )
             match = _VERSION.search(f"{proc.stdout}\n{proc.stderr}") if proc.returncode == 0 else None
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, DriverError):
             match = None
         if match is None:
             return Detection(False, "nanograph version unreadable", None, binary)
@@ -169,8 +247,16 @@ class NanographDriver(BaseDriver):
 
     # --- subprocess -----------------------------------------------------
 
-    def _exec(self, args: list[str], cwd: Path, timeout: int) -> str:
+    def _exec(self, args: list[str], timeout: int, cwd: Path | None = None) -> str:
+        """Run nanograph in ``cwd`` (a private directory from :func:`private_cwd`; a fresh one when ``None``)."""
+        if cwd is None:
+            with private_cwd() as fresh:
+                return self._exec(args, timeout, fresh)
         det = self._ready()
+        for i, arg in enumerate(args[:-1]):
+            if arg in _PATH_OPTIONS and not Path(args[i + 1]).is_absolute():
+                raise DriverError(f"{args[0]} {arg} path must be absolute")
+        _check_private_cwd(cwd)
         argv = [str(det.binary), *args]
         try:
             proc = subprocess.run(
@@ -193,14 +279,14 @@ class NanographDriver(BaseDriver):
     def _run_query(self, gen_dir: Path, name: str, params: dict[str, str]) -> list[Any]:
         args = [
             "run",
-            "--db", str(gen_dir / DB_NAME),
-            "--query", str(gen_dir / QUERIES_NAME),
+            "--db", os.path.abspath(gen_dir / DB_NAME),
+            "--query", os.path.abspath(gen_dir / QUERIES_NAME),
             "--name", name,
             "--format", "json",
         ]
         for key, value in params.items():
             args += ["--param", f"{key}={value}"]
-        out = self._exec(args, gen_dir, RUN_TIMEOUT)
+        out = self._exec(args, RUN_TIMEOUT)
         try:
             data = json.loads(out)
         except json.JSONDecodeError as e:
@@ -223,13 +309,30 @@ class NanographDriver(BaseDriver):
             m.group(1) for m in re.finditer(r"^edge (\w+): Page -> Page$", schema_text, re.M)
         )
         (index_dir / QUERIES_NAME).write_text(generate_queries(page_types), encoding="utf-8")
-        db = index_dir / DB_NAME
+        db = os.path.abspath(index_dir / DB_NAME)
+        with private_cwd() as cwd:
+            # init reads a private schema copy, so the db/schema common ancestor is never the generation.
+            schema = cwd / "schema.pg"
+            shutil.copyfile(export_dir / "schema.pg", schema)
+            _check_private_cwd(cwd)
+            project = infer_init_project_dir(cwd, db, str(schema))
+            existed = {name: os.path.lexists(project / name) for name in SCAFFOLD_FILES}
+            try:
+                self._exec(["init", "--db", db, "--schema", str(schema)], BUILD_TIMEOUT, cwd)
+            finally:
+                for name, was_there in existed.items():
+                    if not was_there and project != cwd:
+                        with contextlib.suppress(FileNotFoundError):
+                            (project / name).unlink()
+            kept = [name for name, was_there in existed.items() if was_there and project != cwd]
+            if kept:
+                self.build_notes.append(
+                    f"nanograph init inferred {project} as its project directory and left the existing "
+                    f"{', '.join(kept)} there untouched"
+                )
+        scrub_generation(index_dir)
         self._exec(
-            ["init", "--db", str(db), "--schema", str(export_dir / "schema.pg")], index_dir, BUILD_TIMEOUT
-        )
-        self._exec(
-            ["load", "--db", str(db), "--data", str(export_dir / "seed.jsonl"), "--mode", "overwrite"],
-            index_dir,
+            ["load", "--db", db, "--data", os.path.abspath(export_dir / "seed.jsonl"), "--mode", "overwrite"],
             BUILD_TIMEOUT,
         )
         ready = {
@@ -356,6 +459,7 @@ class NanographDriver(BaseDriver):
                 return legacy
 
         lock_warnings: list[dict[str, Any]] = []
+        self.build_notes = []
 
         def build(lock: index_publish.BuildLock) -> Path:
             guarded = ensure_indexes_ignored(store)
@@ -372,6 +476,7 @@ class NanographDriver(BaseDriver):
             try:
                 graph.export_nanograph(source, tmp_dir / "export")
                 self.build(tmp_dir / "export", tmp_dir)
+                scrub_generation(tmp_dir)
                 index_publish.ensure_owned(lock)
                 index_publish.publish_dir(tmp_dir, dest)
             except BaseException:
@@ -418,6 +523,8 @@ class NanographDriver(BaseDriver):
         }
         if lock_warnings:
             self.last_index["warnings"] = lock_warnings
+        if self.build_notes:
+            self.last_index["driver_note"] = "; ".join(self.build_notes)
         return gen_dir
 
     def _prune(self, base: Path, keep: Path) -> None:

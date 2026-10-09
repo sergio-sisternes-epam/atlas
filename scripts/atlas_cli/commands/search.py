@@ -671,7 +671,12 @@ def run(
             w for w in (nano_meta.get("index") or {}).get("warnings") or [] if w.get("level") == "warning" and w.get("code")
         ]
 
-    notes = [n for n in (_driver_note(requested, steps, _ENGINE_OF.get(mode_used, mode_used)), bm25_meta.get("note")) if n]
+    nano_note = (nano_meta.get("index") or {}).get("driver_note") if mode_used == "nanograph" else None
+    notes = [
+        n
+        for n in (_driver_note(requested, steps, _ENGINE_OF.get(mode_used, mode_used)), bm25_meta.get("note"), nano_note)
+        if n
+    ]
     payload = {
         "root": str(r),
         "query": query,

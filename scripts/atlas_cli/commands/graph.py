@@ -212,8 +212,16 @@ def run_neighbours(
                 except driver_overlay.DriverError as e:
                     note = f"nanograph {e}"
                 nano_index = getattr(nano, "last_index", None) or {}
-                if result is not None and nano_index.get("warning"):
-                    warnings.append(nano_index["warning"])
+                if result is not None:
+                    if nano_index.get("warning"):
+                        warnings.append(nano_index["warning"])
+                    # Build warnings (for example atlas_indexes_ignore_failed), as recall reports them.
+                    warnings += [
+                        w
+                        for w in nano_index.get("warnings") or []
+                        if isinstance(w, dict) and w.get("level") == "warning" and w.get("code")
+                    ]
+                    note = nano_index.get("driver_note")
         if result is None:
             result = driver_overlay.get_driver("native-graph").neighbours(
                 r, page, kinds, direction, hops, source=source, **options
