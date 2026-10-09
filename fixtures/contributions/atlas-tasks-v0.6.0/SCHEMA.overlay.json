@@ -1,0 +1,25 @@
+{
+  "contribution_id": "atlas-tasks",
+  "claimed_folders": [
+    "tasks"
+  ],
+  "templates": {
+    "by_type": {
+      "task-list": {
+        "frontmatter": {
+          "required": ["type", "title", "created", "task_id"],
+          "recommended": ["tasks", "task_list", "description"]
+        },
+        "sections": {
+          "required": [],
+          "recommended": ["Members"]
+        }
+      }
+    }
+  },
+  "atlas_tasks": {
+    "extends_core_type": "task",
+    "extension_mode": "skill-enforced-frontmatter",
+    "note": "Atlas SCHEMA forbids overlay redeclaration of core templates.by_type.task (overlay_core_type). This overlay claims tasks/ and adds type task-list. Skills enforce task_* / assignees / parent / sub_tasks / task_list / relates_to (dependency/blocks) on type:task, and task_id / tasks / task_list on type:task-list. task_id is atlas://<atlas_id>/tasks/<ULID>; files are <ULID>-<file-safe-name>.md (tasks) or .task-list.md (non-root lists); root tasks/index.md is type task-list. Blocked is derived from kind:dependency edges. No depends_on (v0.4). No kebab task_id / display_slug (v0.5). Filename ULID-plus-name + task lists (v0.6). Hierarchy same-Atlas; dependency/blocks may cross via atlas:// fail-closed. Hard cut v0.3: no todo/."
+  }
+}

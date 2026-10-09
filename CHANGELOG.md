@@ -31,6 +31,125 @@
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
 - `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
 
+## 0.13.1 - 2026-10-09
+
+### Fixed
+
+- Atlas overlays may carry one package-metadata **extension slot**.
+  Its root key is the `contribution_id` with `-` replaced by `_`
+  (`atlas-tasks` → `atlas_tasks`). Since v0.10.0, `schema install` on a
+  contract envelope 2.0 (`schema_version` 2.0) store rejected such overlays
+  with `$: Unevaluated properties are not allowed`, although the overlay docs
+  allowed extra root keys and SCHEMA 1.0 stores accepted them. As a result,
+  released atlas-tasks overlays (v0.2.0 to v0.6.1) could not be installed on
+  2.0 stores. The slot must be a JSON object (`overlay_extension`
+  otherwise). It is never merged into the effective contract and core never
+  reads it. A second overlay that claims the same key is still an
+  `overlay_key_clash`. Ids whose slot would equal a core or envelope key,
+  such as `memory` or `atlas-release`, get no slot.
+- On SCHEMA 2.0, every other extra overlay root key is still rejected,
+  including `x-` prefixed keys and another package's slot. The error now
+  adds a hint that names the allowed extension key.
+- `schema upgrade --to 2.0` now checks installed overlays against the 2.0
+  rules. A store whose overlays would fail compile after the upgrade (for
+  example a generic `kva` root key) previews `ok=false` with the overlay
+  errors in `target_errors`, and `--apply` refuses with zero writes.
+  Previously the upgrade succeeded and the next compile failed `schema_v2`.
+  The upgrade also validates every installed overlay against
+  `contribution-v1` (the 2.0 envelope), as a 2.0 `schema install` would, so
+  an overlay such as `"claimed_folders": [1]` now blocks it with the overlay
+  path in `target_errors`.
+- `schema install` now takes the store's `.atlas-upgrade.lock` while it
+  validates and writes. While the lock is held, by an upgrade or another
+  install, it exits 2 with zero writes. `schema upgrade --apply` rechecks
+  installed overlays after acquiring the lock and before any write, so an
+  install that races the upgrade can no longer leave a 2.0 store that fails
+  compile. When the lock is already held, apply refuses with a clear message
+  instead of a traceback. `schema uninstall` now takes the same lock for its
+  whole read and delete, and exits 2 with zero writes while it is held, so it
+  can no longer remove an overlay, such as `atlas-compat-v1`, after an
+  upgrade's recheck. `schema new`, `schema memory-rung --set`,
+  `init --force` on an existing store and `memory-migrate --operation apply`
+  (both the `contract-file` and `restamp` batches), `recall activate` and
+  `recall disable` also write `schema.d/` or the contract file, so they now
+  take the same lock and exit 2 with zero writes while it is held. Recall
+  activate and disable read the contract file only after taking the lock, so
+  they can no longer lose a concurrent `schema memory-rung --set`,
+  `init --force` or `memory-migrate` write on a 2.0 store. Previously `schema new atlas-compat-v1` could run
+  after an upgrade's recheck, and the upgrade then overwrote that overlay
+  and its receipt and still reported success.
+- The lock now carries a unique token. A command that takes it only
+  removes a lock whose token matches the one it wrote. Apply no longer reclaims an
+  existing lock when the contract already reads 2.0: since v0.10.0 that let
+  a second, concurrent upgrade delete the first upgrade's live lock. Every
+  existing lock is treated as held. A lock left by an interrupted run must
+  be removed by an operator; the error message says when that is safe.
+- The `schema_type_contract` warning now names the store's contract file
+  (`CONTRACT.json` on current stores) instead of always `SCHEMA.json`.
+
+### Docs
+
+- Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
+  documents the extension slot, its minimum reader and rollback steps, the
+  `overlay_extension` issue and the shared store lock and the verbs that take it,
+  and asks packages to test overlays on both store versions. Path `configure` notes
+  that installed overlays can block the upgrade, that apply rechecks them
+  under the lock, and that a kept slot needs Atlas >= 0.13.1 after the
+  upgrade.
+- Path `schema` gains step 3a "Shipping an Atlas overlay in an APM
+  package": `apm install` a pinned tag only installs the package and never
+  mounts its overlay; locate the package root
+  (`apm_modules/<owner>/<pkg>/`, `apm.lock.yaml`), run `schema install` on
+  the named store, re-run it (with `--force` when required keys change)
+  after an upgrade, and use `schema uninstall` because `apm uninstall`
+  leaves the overlay in the store. The step notes that the `schema` verbs
+  and file names mean the store contract, not the `*.schema.md` memory
+  layer; the CLI verbs and file names stay as they are in this release.
+  SKILL.md and help `getting-started` link to it.
+- `contribution-v1.schema.json` gains a `$comment` that describes the slot
+  and says it is never merged into the effective contract. Its `$id` and
+  its closed shape are unchanged.
+- Paths `help`, `init`, `ci` (SKILL.md) and `references/README.md` now
+  name the store's contract file, `CONTRACT.json` or `SCHEMA.json`, where
+  they named only `SCHEMA.json`, as the CLI already does: the help
+  enrichment root needs exactly one readable, valid contract file, and
+  `store init` fails closed on an existing `atlas` branch without one.
+- SKILL.md and the four-level disclosure scenario no longer name a
+  `gist_without_schema` compile gate. Uncovered gists fail `schema_folder`.
+- New fixtures `fixtures/contributions/` hold released overlays verbatim.
+  `scripts/test_overlay_extension.py` installs and compiles every fixture on
+  SCHEMA 1.0 and 2.0 stores, and through a 1.0 → 2.0 upgrade.
+
+### Compatibility
+
+- **Minimum reader for extension slots on SCHEMA 2.0.** Atlas v0.13.0 and
+  earlier merge the slot as a generic root key, so their compile fails
+  `schema_v2` (`'atlas_tasks' was unexpected`) on a SCHEMA 2.0 store that
+  holds an overlay with a slot. That covers a slot overlay installed by
+  v0.13.1 and one kept through a v0.13.1 `schema upgrade --to 2.0`. The
+  contract stamp does not record this, so such a store needs Atlas >= 0.13.1
+  to compile. On a 2.0 store, `schema install` prints a note when it
+  accepts a slot.
+- To roll back or mix versions on such a store, first reinstall a slot-free
+  overlay (atlas-tasks >= 0.6.2) with `schema install`, or `schema uninstall`
+  the overlay. Older readers then compile it again.
+- SCHEMA 1.0 stores are unaffected: older readers accept extra overlay root
+  keys there.
+
+### Unchanged
+
+- The contract stamp stays `0.13.0`: `atlas init` still writes
+  `atlas_release` `0.13.0`, and a `0.13.1` stamp still fails closed. No
+  store migration is needed. v0.13.0 readers are unaffected, except on
+  SCHEMA 2.0 stores that hold an extension-slot overlay (see
+  Compatibility).
+- SCHEMA 1.0 stores keep accepting generic extra overlay root keys as
+  before. The only difference is that the extension slot is no longer
+  copied into the effective SCHEMA.
+- Apart from the package version, help baselines and CI ref pins, which
+  move to `0.13.1` / `v0.13.1`, the `schema install` note and the
+  `schema_type_contract` finding path above, no release surface changes.
+
 ## 0.13.0 - 2026-10-09
 
 Final 0.13.0 release. Over v0.12.0 the beta series ships:

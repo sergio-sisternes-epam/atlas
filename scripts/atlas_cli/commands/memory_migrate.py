@@ -53,6 +53,12 @@ from ..core.schema import (
     skill_root,
     staging_dir_name,
 )
+from ..core.schema_upgrade import (
+    MEMORY_MIGRATE_LOCK_TAG,
+    acquire_store_lock,
+    lock_held_message,
+    release_store_lock,
+)
 from .init import _by_type_block
 from .validate import MD_LINK, WIKILINK
 
@@ -618,6 +624,28 @@ def run(
     as_json: bool = False,
 ) -> int:
     r = store_root(root)
+    if operation != "apply" or not r.is_dir():
+        return _run(r, operation, batch, as_json)
+    # Apply rewrites the contract file: share the upgrade lock so neither
+    # overwrites the other, and read the contract only under it.
+    try:
+        lock = acquire_store_lock(r, MEMORY_MIGRATE_LOCK_TAG)
+    except (FileExistsError, OSError) as e:
+        msg = lock_held_message(r) if isinstance(e, FileExistsError) else f"cannot lock store: {e}"
+        _print(as_json, {"ok": False, "root": str(r), "operation": operation, "error": msg})
+        return 2
+    # On an exception, keep the lock: a partial migration needs an operator to check the store.
+    code = _run(r, operation, batch, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _run(
+    r: Path,
+    operation: str,
+    batch: str | None,
+    as_json: bool,
+) -> int:
     contract_path, find_err = find_contract_path(r)
     if find_err or contract_path is None:
         payload = {

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       atlas_tag:
-        description: Atlas release tag to build the docs against, for example v0.13.0
+        description: Atlas release tag to build the docs against, for example v0.13.1
         required: true
         type: string
 

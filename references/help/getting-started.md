@@ -1,7 +1,7 @@
 ---
 name: atlas/help/getting-started
 description: Bundled first-use baseline. No Atlas mount required.
-package_version: 0.13.0
+package_version: 0.13.1
 ---
 
 # Getting started with Atlas
@@ -52,6 +52,11 @@ Then install CLI dependencies in the environment that will run Atlas:
 ```text
 python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 ```
+
+Skill packages that contribute types to Atlas (a `contributions/<id>/`
+folder) install the same way, pinned to a tag. `apm install` never changes an
+Atlas store: mounting the Atlas overlay is a separate `schema install` on a
+store you name. See module **schema**, step 3a.
 
 ## Shortest useful first journey
 

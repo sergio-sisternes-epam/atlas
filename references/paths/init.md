@@ -38,8 +38,8 @@ root: <set after resolve>
    python3 <atlas-skill>/scripts/atlas.py resolve <atlas_id>
    ```
 
-   CLI `atlas init --root` only writes SCHEMA files. Store bootstrap is `atlas store init`.
-3. **shared:** creates or reuses branch `atlas` on the consumer. Missing branch → empty orphan tree, then SCHEMA (not a copy of the default branch). Existing `atlas` without `SCHEMA.json` → fail closed. Mesh `id` is the consumer, `ref` is `atlas`, `strategy` is `shared`. `.gitmodules` records `branch = atlas`. Then the GitHub driver (ruleset blocking direct push) if the host is GitHub; self-hosted prints a warning and continues. Push the empty `atlas` branch **before** the ruleset so the first push is not blocked.
+   CLI `atlas init --root` only writes local store files (the contract file `CONTRACT.json`, `templates/`, `index.md`, `log.md`). Store bootstrap is `atlas store init`.
+3. **shared:** creates or reuses branch `atlas` on the consumer. Missing branch → empty orphan tree, then the contract file (not a copy of the default branch). Existing `atlas` without a contract file (`CONTRACT.json` or `SCHEMA.json`) → fail closed. Mesh `id` is the consumer, `ref` is `atlas`, `strategy` is `shared`. `.gitmodules` records `branch = atlas`. Then the GitHub driver (ruleset blocking direct push) if the host is GitHub; self-hosted prints a warning and continues. Push the empty `atlas` branch **before** the ruleset so the first push is not blocked.
 4. **dedicated:** mount that existing remote (today’s path). Never create the host. Mesh `strategy` is `dedicated`. Missing mesh `strategy` on older files is also dedicated.
 5. If clone/mount fails because the remote does not exist: tell the human to create the repository themselves, then retry. Do not create it.
 6. Set card `root`. Further query/persist is skill atlas on that root.

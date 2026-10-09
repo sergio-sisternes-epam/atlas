@@ -42,6 +42,7 @@ Other paths may call `atlas compile` as a tool. They must not hand-edit the stor
 | Empty folder, no contract file | `init` then, if this is a skill store, `schema install` |
 | Project idea, not a skill yet | `schema new <id>` then `schema install` a local overlay file when types exist |
 | Skill contribution into a store | `schema install <source>` |
+| Contribution shipped in an APM package | `apm install <owner>/<pkg>#vX.Y.Z`, then `schema install <pkg-root>/contributions/<id>` (step 3a) |
 | Overlay required-keys changed | `schema install … --force` |
 | Remove a contribution | `schema uninstall <id>` |
 | Check merge / clashes only | `compile` |
@@ -103,6 +104,45 @@ python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <root> [--
 
 Install copies **new-type** templates only. It will not overwrite core `templates/work.md`.
 
+These verbs share the store lock `.atlas-upgrade.lock`: `schema install`, `schema uninstall`, `schema new`, `schema memory-rung --set`, `schema upgrade --apply`, `init --force`, `memory-migrate --operation apply` (both batches), `recall activate` and `recall disable`. If the lock is present, each exits 2 and writes nothing. Atlas never removes a lock it did not create, whatever the contract version. Retry when the other command finishes. A lock left by an interrupted run of any of these verbs stays until an operator deletes it. Delete it only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
+
+### 3a. Shipping an Atlas overlay in an APM package
+
+`SCHEMA.overlay.json`, `schema.d/` and the `schema` verbs predate the contract/schema-layer split: here 'schema' means the store contract, not the `*.schema.md` memory layer. The CLI verbs and file names stay as they are in this release.
+
+A package ships its Atlas overlay inside its APM skill package at `contributions/<id>/SCHEMA.overlay.json` (plus optional `templates/<newtype>.md`).
+
+`apm install` only installs the skill package. It never mounts the overlay into any Atlas store. Mounting is a separate, explicit `schema install` against the store the user names (`--root`). Do not install into a store the user did not name; ask if unclear.
+
+1. Install the package pinned to a tag:
+
+   ```bash
+   apm install <owner>/<pkg>#vX.Y.Z
+   ```
+
+   Example: `apm install sergio-sisternes-epam/atlas-tasks#v0.6.2`. A marketplace install (`apm install <plugin>@<marketplace>`) works too, if the package is listed in a marketplace you added. Do not assume any particular package is listed.
+
+2. Locate the package root (verified with APM 0.33; APM 0.30+ uses the same layout):
+   - `apm_modules/<owner>/<pkg>/` in the project where you ran `apm install`. This is the full package, always present after a project install. Prefer it.
+   - The deployed skill copy, e.g. `.agents/skills/<pkg>/` for the `agent-skills` target. It exists only when the package's targets overlap the project's targets (otherwise APM skips deployment with a warning). Do not rely on it.
+   - `apm.lock.yaml` records `resolved_ref`, `resolved_commit` and `version` for each dependency, plus the `deployments` paths. Use it to confirm which tag you are about to mount.
+   - Check that `<pkg-root>/contributions/<id>/SCHEMA.overlay.json` exists before installing.
+
+3. Mount and compile:
+
+   ```bash
+   python3 <atlas-skill>/scripts/atlas.py schema install <pkg-root>/contributions/<id> --root <store>
+   python3 <atlas-skill>/scripts/atlas.py compile --root <store>
+   ```
+
+**Upgrade.** After `apm install <owner>/<pkg>#vNEW` or `apm update`, the store keeps the old overlay until you re-run `schema install` from the new package root. Add `--force` when that overlay's required frontmatter keys changed (install exits 2 otherwise). Then compile.
+
+**Remove.** `apm uninstall <owner>/<pkg>` removes the package from `apm_modules/` and the deployed skill copy, but leaves `schema.d/<id>.json` and its receipt in every store. Remove the contribution with `schema uninstall <id> --root <store>`, then compile.
+
+**Extension slot.** An Atlas overlay may carry at most one package-metadata root key: the `contribution_id` with `-` replaced by `_` (see "Root keys an overlay may carry" below). Atlas never reads it. Packages keep their descriptive and operational contract (folders, statuses, commands) in their README, not in the slot.
+
+**Receipt.** Record the package ref (tag or commit from `apm.lock.yaml`) on the Exit receipt `source:` line.
+
 ### 4. Uninstall
 
 ```bash
@@ -110,6 +150,8 @@ python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <root>
 ```
 
 Deletes `schema.d/<id>.json` and paths on that overlay’s receipt (overlay + templates the CLI copied). Does **not** delete pages the agent authored later. Compile may still see those pages; unknown `type` stays legal under OKF. If they used types that lived only on the overlay, the CLI prints a warning.
+
+Uninstall takes the store lock (see step 3). While it is held, uninstall exits 2 and deletes nothing.
 
 ### 5. Compile (always)
 
@@ -124,6 +166,7 @@ Effective SCHEMA = the store's single core contract file (`SCHEMA.json` or `CONT
 | `overlay_core_clash` | Overlay set a forbidden core key | 2 |
 | `overlay_core_type` | Overlay redeclared a core `by_type` | 2 |
 | `overlay_key_clash` | Two overlays claim the same extra key or type | 2 |
+| `overlay_extension` | Extension slot is not a JSON object (2.0 store) | 2 |
 | `overlay_undeclared_root` | Receipt lists a path outside claimed prefixes / `schema.d/` | 2 |
 | `overlay_receipt` | Installed overlay has no receipt | 2 |
 | `overlay_json` / `overlay_id` | Unreadable overlay or id ≠ filename | 2 |
@@ -180,7 +223,18 @@ contributions/<id>/
   templates/<newtype>.md    # optional; copied on install for new types only
 ```
 
-Extra root keys (for example `kva`) are allowed if they are **not** already on core SCHEMA and **not** used by another overlay.
+Root keys an overlay may carry:
+
+- **Contract keys**: `contribution_id`, `claimed_folders`, `templates`, `types`, `bindings`, `presets`.
+- **One extension slot** for package metadata. Its key is the `contribution_id` with `-` replaced by `_` (`atlas-tasks` → `atlas_tasks`, `discuss` → `discuss`). The value must be a JSON object. Atlas checks that it is an object and that no other overlay claims the same key. It is **never** merged into the effective contract and core never reads it. Ids whose slot would equal a core or envelope key (`memory`, `atlas-release`, `templates`, …) get no slot. Do not make agent behaviour depend on the slot. Keep the package's operational contract in its own docs.
+  - **Minimum reader.** The slot is accepted from Atlas 0.13.1. Older readers merge it as a generic root key, so on a contract envelope 2.0 (`schema_version` 2.0) store their compile fails `schema_v2` (`'<slot>' was unexpected`). The contract stamp stays `0.13.0` and does not record this. A 2.0 store that holds an Atlas overlay with a slot, installed directly or kept through `schema upgrade --to 2.0`, needs Atlas >= 0.13.1 to compile. On a 2.0 store, `schema install` prints a note when it accepts a slot.
+  - **Roll back or mix versions.** Before running Atlas < 0.13.1 on such a store, reinstall a slot-free release of the overlay (atlas-tasks >= 0.6.2) with `schema install`, or `schema uninstall` it. Then compile with the older Atlas.
+  - 1.0 stores (`schema_version` 1.0) are unaffected: older readers accept extra overlay root keys there.
+- **Other extra root keys** (for example `kva`):
+  - On a 1.0 store, they are allowed if they are **not** already in the core contract file and **not** used by another overlay.
+  - On a 2.0 store, `schema install` rejects them (`contribution-v1`). `schema upgrade --to 2.0` blocks until they are removed.
+
+Test an Atlas overlay on both a 1.0 store and a `init --schema-version 2.0` store before you release it.
 
 ## Worked sequences
 
@@ -202,6 +256,13 @@ Extra root keys (for example `kva`) are allowed if they are **not** already on c
 
 Same as skill store, but `--root` is the **host**. Do not dump skill folders at the host root; only claimed prefixes plus `schema.d/`.
 
+**Shipping an Atlas overlay in an APM package** (step 3a)
+
+1. `apm install <owner>/<pkg>#vX.Y.Z` (pinned tag)
+2. Find the package root under `apm_modules/<owner>/<pkg>/`; confirm the tag in `apm.lock.yaml`
+3. `schema install <pkg-root>/contributions/<id> --root <store>`
+4. `compile --root <store>`
+
 ## Exit receipt
 
 ```text
@@ -209,6 +270,7 @@ skill: atlas
 path: schema
 root: …
 verb: init | schema new | schema install | schema uninstall | compile
+source: <owner>/<pkg>#vX.Y.Z | local    # optional; schema install only (step 3a)
 compile: exit N
 ```
 

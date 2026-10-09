@@ -1,7 +1,7 @@
 ---
 name: atlas
 description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, atlas restamp, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0
+version: 0.13.1
 activation_card: on
 ---
 
@@ -151,12 +151,12 @@ still copies into staging; do not use it for strategy moves.
 | **atlas-optimise** | Operator-chosen fill and tidy of a named target: evidence-gated gist and schema fill, four-layer tidy repair, subject clustering, per-folder task list, dry-run first; not on install or compile | `references/paths/atlas-optimise.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
-| **schema** | Init, overlay install/new/uninstall; compile merge | `references/paths/schema.md` |
+| **schema** | Init, overlay install/new/uninstall; compile merge; Atlas overlays from APM packages (step 3a) | `references/paths/schema.md` |
 | **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection | `references/paths/configure.md` |
-| **ci** | Assess, install, or repair CI for a `SCHEMA.json` mount | `references/paths/ci.md` |
+| **ci** | Assess, install, or repair CI for a mount with a contract file (`CONTRACT.json` or `SCHEMA.json`) | `references/paths/ci.md` |
 | **history** | Read one store path at a git rev; a `relates_to.ref` edge is not a tip hop | `references/paths/history.md` |
 | **version-hint** | Add one living-page `relates_to.ref` hint; grain stays deferred | `references/paths/version-hint.md` |
-| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary | `references/paths/prune.md` |
+| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary | `references/paths/prune.md`
 | **help** | Explain installed modules without running them | `references/paths/help.md` |
 | **getting-started** | First-use purpose, prerequisites, first journey, storage choices | `references/paths/getting-started.md` |
 
@@ -168,7 +168,7 @@ modules; they are not CLI verbs.
 
 1. **Formal lookup = path `recall` + `atlas recall run`** - B17 card `path: recall`, load `references/paths/recall.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path recall. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas recall run --engine grep` under their own card. That is not path recall. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
-3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. On the current shape its new closed gates are `gist_without_schema`/`schema_folder` for uncovered gists, `schema_missing_from_index`, and exact-substring `stale_upper_page`; a second schema or a schema-only folder is not a compile failure. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
+3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. On the current shape its new closed gates are `schema_folder` for uncovered gists, `schema_missing_from_index`, and exact-substring `stale_upper_page`; a second schema or a schema-only folder is not a compile failure. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
 5. **Work cluster** - pages with a `work_id` link `work/<work_id>.md` with `kind: implements`.
 6. **`log.md`** - append only for structural store changes (not every experience).

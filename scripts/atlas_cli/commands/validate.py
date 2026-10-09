@@ -1259,7 +1259,7 @@ def run(
             warnings.append(
                 {
                     "id": "schema_type_contract",
-                    "path": "SCHEMA.json",
+                    "path": contract_name,
                     "msg": f"recommended type '{tname}' has no templates.by_type frontmatter.required and is not types.unconstrained",
                 }
             )
