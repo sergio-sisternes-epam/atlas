@@ -238,6 +238,8 @@ def query_nodes(
     include_exits: bool = False,
     limit: int | None = None,
 ) -> dict[str, Any]:
+    if limit is not None and limit < 1:
+        raise GraphError("--limit must be at least 1")
     reveal = include_exits or asks_for_exit(wheres)
     nodes = [
         node_record(p)
@@ -248,7 +250,7 @@ def query_nodes(
     ]
     nodes.sort(key=lambda n: n["path"])
     truncated = False
-    if limit is not None and limit >= 0 and len(nodes) > limit:
+    if limit is not None and len(nodes) > limit:
         nodes = nodes[:limit]
         truncated = True
     return {"nodes": nodes, "truncated": truncated}
@@ -290,17 +292,22 @@ def query_neighbours(
     direction: str = "both",
     hops: int = 1,
     wheres: list[tuple[str, str]] | None = None,
-    max_nodes: int = DEFAULT_MAX_NODES,
-    max_edges: int = DEFAULT_MAX_EDGES,
+    max_nodes: int | None = DEFAULT_MAX_NODES,
+    max_edges: int | None = DEFAULT_MAX_EDGES,
     include_exits: bool = False,
     adjacency: Callable[[str, str, frozenset[str]], list[tuple[str, str, str]]] | None = None,
 ) -> dict[str, Any]:
     """Bounded BFS. ``adjacency(page_id, direction, kinds)`` may replace the
-    in-memory edge lookup (drivers); it returns (other, kind, outgoing|incoming)."""
+    in-memory edge lookup (drivers); it returns (other, kind, outgoing|incoming).
+    ``None`` leaves a cap unbounded; a cap below 1 raises ``GraphError``."""
     if direction not in ("in", "out", "both"):
         raise GraphError("--direction must be in, out or both")
     if hops < 1 or hops > MAX_HOPS:
         raise GraphError(f"--hops must be between 1 and {MAX_HOPS}")
+    if max_nodes is not None and max_nodes < 1:
+        raise GraphError("--max-nodes must be at least 1")
+    if max_edges is not None and max_edges < 1:
+        raise GraphError("--max-edges must be at least 1")
     wheres = wheres or []
     by_id = {p.page_id: p for p in pages}
     seed_page = _resolve_page(by_id, seed)
@@ -336,11 +343,11 @@ def query_neighbours(
                     key = (other, current, kind)
                 is_new_node = other not in hop_of
                 if is_new_node and where_matches(other_page.meta, wheres):
-                    if max_nodes and len(nodes) >= max_nodes:
+                    if max_nodes is not None and len(nodes) >= max_nodes:
                         truncated = True
                         break
                 if key not in edge_keys:
-                    if max_edges and len(edges) >= max_edges:
+                    if max_edges is not None and len(edges) >= max_edges:
                         truncated = True
                         break
                     edge_keys.add(key)

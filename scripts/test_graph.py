@@ -252,6 +252,33 @@ def main() -> int:
         check("neighbours-hops-4", code == 2)
         code, p = g("neighbours", "nope.md")
         check("neighbours-unknown", code == 2)
+
+        # --- CLI bounds (Click usage errors, exit 2) ------------------------
+        bounded = [
+            (("nodes", "--limit", "-1"), "--limit"),
+            (("nodes", "--limit", "0"), "--limit"),
+            (("neighbours", "work/hub.md", "--max-nodes", "0"), "--max-nodes"),
+            (("neighbours", "work/hub.md", "--max-nodes", "-5"), "--max-nodes"),
+            (("neighbours", "work/hub.md", "--max-edges", "0"), "--max-edges"),
+            (("neighbours", "work/hub.md", "--max-edges", "-5"), "--max-edges"),
+            (("neighbours", "work/hub.md", "--hops", "0"), "--hops"),
+            (("neighbours", "work/hub.md", "--hops", "-1"), "--hops"),
+        ]
+        for args, opt in bounded:
+            proc = run(["graph", *args, "--root", r1, "--json"])
+            check(
+                f"bound-{args[0]}{'-'.join(args[-2:])}",
+                proc.returncode == 2
+                and f"Invalid value for '{opt}'" in proc.stderr
+                and "Usage:" in proc.stderr,
+                proc.stdout + proc.stderr,
+            )
+        code, p = g("neighbours", "work/hub.md", "--direction", "in", "--max-nodes", "1")
+        check(
+            "neighbours-cap-truncates",
+            code == 0 and p.get("truncated") is True and len(p.get("nodes", [])) == 1,
+            str(p),
+        )
         code, p = g("neighbours", "cycle/c1.md", "--hops", "3")
         paths = [n["path"] for n in p.get("nodes", [])]
         edge_keys = [(e["from"], e["to"], e["kind"]) for e in p.get("edges", [])]
@@ -472,6 +499,24 @@ def main() -> int:
             ok = False
             print(e)
         check("edge-type-map-valid-identifiers", ok)
+
+        api_pages = graph_core.load_source(v1)["pages"]
+        for cap in ({"max_nodes": 0}, {"max_edges": 0}, {"max_nodes": -5}):
+            try:
+                graph_core.query_neighbours(api_pages, "work/hub.md", **cap)
+                raised = False
+            except ValueError:
+                raised = True
+            check(f"api-neighbours-{'-'.join(f'{k}{v}' for k, v in cap.items())}-raises", raised)
+        capped = graph_core.query_neighbours(api_pages, "work/hub.md", direction="in", max_nodes=1)
+        check("api-neighbours-cap-truncates", capped["truncated"] is True and len(capped["nodes"]) == 1, str(capped))
+        for bad in (0, -1):
+            try:
+                graph_core.query_nodes(api_pages, wheres=[], limit=bad)
+                raised = False
+            except ValueError:
+                raised = True
+            check(f"api-nodes-limit{bad}-raises", raised)
 
         code, p = export("nanograph", v1 / "exports")
         check("export-inside-store-refused", code == 2 and not (v1 / "exports").exists(), str(p))

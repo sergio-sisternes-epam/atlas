@@ -32,8 +32,10 @@ and never build or publish a recall index. The one exception is the opt-in
 
 Every JSON payload carries `ok`, `root`, `verb`, `generation`,
 `corpus_digest`, `fast_path`, `complete` and `count`. Usage errors (unknown
-page, malformed `--where`, `--hops` above 3, `--out` inside the store) exit
-2 with `ok: false` and `error`.
+page, malformed `--where`, `--out` inside the store) exit 2 with `ok: false`
+and `error`. Out-of-range numbers (`--hops` outside 1..3; `--limit`,
+`--max-nodes` or `--max-edges` below 1) are Click usage errors: exit 2 with
+a message on stderr and no JSON payload.
 
 ## Exit-state rule
 
@@ -55,7 +57,8 @@ atlas graph nodes --root R [--where field=value]... [--path PREFIX] [--include-e
 booleans as `true`/`false`, numbers via `str()`, strings stripped. Several
 `--where` options are ANDed. A list-valued field matches when any element
 equals the value. A missing field never matches. `--where` without `=`
-exits 2. `--limit` cuts the sorted list and sets `truncated: true`.
+exits 2. `--limit N` (N at least 1) cuts the sorted list and sets
+`truncated: true`.
 
 Node record:
 
@@ -101,7 +104,7 @@ atlas graph neighbours PAGE --root R [--kind K]... [--direction in|out|both] [--
 
 Breadth-first and cycle-safe from the seed PAGE (unknown PAGE exits 2).
 Defaults: `--direction both`, `--hops 1` (above 3 exits 2), 200 nodes, 500
-edges; `truncated: true` when a cap bites.
+edges; each cap must be at least 1, and `truncated: true` when a cap bites.
 
 - **Direction** is relative to the traversal step: `out` follows edges the
   current page authored; `in` follows edges other pages authored towards

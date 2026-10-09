@@ -15,9 +15,10 @@ Need knowledge from an Atlas (skill process memory or project store).
 | Name | Layer | Job |
 |------|--------|-----|
 | `path: recall` | B17 protocol | Card, form the ask, search, rewrite once, select, read, hop, receipt |
-| `atlas recall run` | CLI tool | Ranked hits + traffic payload |
+| `atlas recall run` | CLI tool | Ranked hits + traffic payload (text and topic questions) |
+| `atlas graph nodes\|edges\|neighbours` | CLI tool | Read-only structure (structural questions) |
 
-Card `path` is always `recall` for retrieval. The process is always `atlas recall run`. Do not add a peer path named search. SCHEMA 2.0 recall (`--profile`, `--allow-partial`) is configured on path `configure`, not here.
+Card `path` is always `recall` for retrieval. **Routing inside this path:** text and topic questions use `atlas recall run`; structural questions (which pages link to X, neighbours of a page, children of a work hub, nodes by frontmatter field) use `atlas graph nodes|edges|neighbours` instead — see `references/graph.md`. Do not add a peer path named search or graph. SCHEMA 2.0 recall (`--profile`, `--allow-partial`) is configured on path `configure`, not here.
 
 ## Enter (required — Atlas `activation_card: on`)
 
@@ -52,6 +53,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    ```bash
    python3 <atlas-skill>/scripts/atlas.py recall run "<query>" --root <root> --json
    ```
+   For a structural question, run the matching `atlas graph nodes|edges|neighbours … --root <root> --json` here instead (`references/graph.md`).
    Run this step regardless of whether the hot list or abstraction walk already answered the ask — the exit receipt always records `recall_cmd`. Stopping at the gist (step 3) decides whether the parent memory page is opened, not whether search runs.
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
 
@@ -244,6 +246,8 @@ the progressive memory walk. `stopped_at: gap` means an honest gap — nothing
 relevant was found. `stopped_at: frame` is the shipped `SCHEMA.json` name;
 `stopped_at: schema` is the current `CONTRACT.json` name. A hub is never a stop
 level in this walk.
+
+For a structural question, `recall_cmd` records the `atlas graph …` command that ran.
 
 Claiming “checked the Atlas” without `recall_cmd` ⇒ incomplete Exit.
 

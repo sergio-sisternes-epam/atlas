@@ -524,7 +524,8 @@ _EXITS_HELP = "include kva/status terminated|deprecated|superseded pages"
 @click.option("--where", "where", multiple=True, help="field=value on top-level frontmatter (repeatable, ANDed)")
 @click.option("--path", "path_prefix", default=None, help="store-relative path prefix")
 @click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
-@click.option("--limit", type=int, default=None, help="max nodes")
+# min=1: 0 has no documented meaning for nodes and would only return an empty list.
+@click.option("--limit", type=click.IntRange(min=1), default=None, help="max nodes (at least 1)")
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_nodes_cmd(
@@ -579,10 +580,10 @@ def graph_edges_cmd(
     default="both",
     show_default=True,
 )
-@click.option("--hops", type=int, default=1, show_default=True, help="1..3")
+@click.option("--hops", type=click.IntRange(min=1, max=3), default=1, show_default=True, help="1..3")
 @click.option("--where", "where", multiple=True, help="filter returned nodes (traversal passes through)")
-@click.option("--max-nodes", type=int, default=200, show_default=True)
-@click.option("--max-edges", type=int, default=500, show_default=True)
+@click.option("--max-nodes", type=click.IntRange(min=1), default=200, show_default=True)
+@click.option("--max-edges", type=click.IntRange(min=1), default=500, show_default=True)
 @click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
 @click.option(

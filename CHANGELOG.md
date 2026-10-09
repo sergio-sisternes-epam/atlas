@@ -2,6 +2,11 @@
 
 ## Unreleased (targets 0.14.0)
 
+- CLI bounds: `atlas graph nodes --limit`, `atlas graph neighbours
+  --max-nodes/--max-edges` must be at least 1 and `--hops` must be 1..3;
+  other values are Click usage errors (exit 2). A negative limit is no
+  longer treated as unlimited, and the in-process graph API raises
+  `ValueError` for a cap or limit below 1 instead of disabling it.
 - Security: every external driver subprocess (nanograph's `--version`
   probe, `init`, `load` and `run`) now gets an allow-listed environment from
   one helper (`core/drivers/subprocess_env.py`): only `PATH`, `HOME`, temp,
