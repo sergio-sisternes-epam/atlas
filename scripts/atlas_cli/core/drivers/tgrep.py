@@ -146,6 +146,15 @@ def _load_digest(dest: Path) -> str | None:
     return str(digest) if digest else None
 
 
+def _new_state(dest: Path, digest: str) -> str:
+    """``fresh`` | ``stale`` (any index directory exists) | ``missing`` for the new location."""
+    if _load_digest(dest) == digest:
+        return index_location.FRESH
+    if dest.exists() or dest.is_symlink():
+        return index_location.STALE
+    return index_location.MISSING
+
+
 def ensure_index(
     store: Path,
     digest: str,
@@ -162,10 +171,14 @@ def ensure_index(
     except IndexLocationError as e:
         raise TgrepError(f"tgrep_index_escape: {e}") from e
     _detect_serve(store, dest)
-    if _load_digest(dest) == digest:
-        return dest, False
     legacy = legacy_index_dir(store)
-    if not legacy.is_symlink() and _load_digest(legacy) == digest:
+    choice = index_location.choose_source(
+        _new_state(dest, digest),
+        lambda: not legacy.is_symlink() and _load_digest(legacy) == digest,
+    )
+    if choice == index_location.USE_NEW:
+        return dest, False
+    if choice == index_location.USE_LEGACY:
         # Deprecated in-store index: read-only, never rebuilt or removed here.
         _detect_serve(store, legacy)
         return legacy, False

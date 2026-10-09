@@ -27,7 +27,9 @@ c. ``ATLAS_INDEX_ROOT`` (an absolute path) replaces ``project_root``; the
 
 The index directory is ``project_root/.atlas/indexes/<driver-type>/<id path>``
 where ``<id path>`` is the validated atlas id split on ``/``. The legacy
-in-store ``.atlas-index/`` layout is read-only for 0.14.x and removed after.
+in-store ``.atlas-index/`` layout is read-only for 0.14.x and removed after;
+it is read only while the new location holds no index at all (see
+:func:`choose_source`).
 """
 
 from __future__ import annotations
@@ -277,6 +279,33 @@ def legacy_dir(store: Path, driver_type: str) -> Path:
     """Deprecated in-store location (``.atlas-index/...``); read-only for 0.14.x."""
     _check_type(driver_type)
     return Path(store) / LEGACY_DIR / LEGACY_NAMES[driver_type]
+
+
+# Index states and selections for :func:`choose_source`.
+FRESH = "fresh"
+STALE = "stale"
+MISSING = "missing"
+USE_NEW = "new"
+USE_LEGACY = "legacy"
+BUILD = "build"
+
+
+def choose_source(new_state: str, legacy_fresh: Any) -> str:
+    """Shared fts5/nanograph/tgrep rule: which index a reader uses.
+
+    ``new_state`` describes the new location: :data:`FRESH` (a usable index
+    for the current corpus), :data:`STALE` (any index exists there, usable or
+    not) or :data:`MISSING` (no index at all). ``legacy_fresh`` is a
+    zero-argument callable returning whether the legacy ``.atlas-index/``
+    index is fresh; it is called only for :data:`MISSING`, so legacy is never
+    read once a new-location index exists. Returns :data:`USE_NEW`,
+    :data:`USE_LEGACY` (read only) or :data:`BUILD` (always the new location).
+    """
+    if new_state == FRESH:
+        return USE_NEW
+    if new_state == MISSING and legacy_fresh():
+        return USE_LEGACY
+    return BUILD
 
 
 def project_relative(store: Path, path: Path) -> str:

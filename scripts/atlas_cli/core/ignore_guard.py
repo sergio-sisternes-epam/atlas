@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 INDEX_DIR = ".atlas-index"
+MESH_LOCK_CODE = "atlas_mesh_lock_ignore_failed"
 INDEXES_DIR = ".atlas/indexes"
 _GLOB_SPECIAL = re.compile(r"([*?\[\]\\])")
 
@@ -50,6 +51,15 @@ class GuardResult:
                 "path": self.path,
                 "msg": f"added '{self.line}' to git info/exclude so {self.note} untracked",
                 "line": self.line,
+            }
+        if self.status == FAILED and self.code == MESH_LOCK_CODE:
+            return {
+                "code": self.code,
+                "level": "warning",
+                "message": (
+                    f"could not add atlas-mesh.json.lock* and temp-file rules to {self.path or 'info/exclude'}: "
+                    f"{self.reason}; add them to .gitignore or info/exclude yourself"
+                ),
             }
         if self.status == FAILED:
             target = self.path or "info/exclude"
@@ -250,10 +260,12 @@ def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
     ``atlas-mesh.json.lock`` (and its ``.takeover`` / ``.stale-*`` siblings)
     and ``.atlas-mesh.json.*.tmp`` are short-lived, but a crash can leave
     one behind; this keeps them out of commits. Anchored at the project
-    directory. Never raises; callers treat ``failed`` as a warning.
+    directory. Never raises; callers surface ``failed`` as the
+    ``atlas_mesh_lock_ignore_failed`` warning (:meth:`GuardResult.item`).
     """
-    code = "atlas_mesh_lock_ignore_failed"
+    code = MESH_LOCK_CODE
     pattern = "/" + MESH_PATTERNS[0]
+    exclude: Path | None = None
     try:
         if shutil.which("git") is None or not project.is_dir():
             return GuardResult(NOT_GIT, code, pattern)
@@ -281,8 +293,10 @@ def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
         with exclude.open("a", encoding="utf-8") as fh:
             fh.write(lead + "".join(f"{line}\n" for line in missing))
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), missing[0])
+    except OSError as e:
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))
     except Exception as e:  # noqa: BLE001 - a guard never fails the command
-        return GuardResult(FAILED, code, pattern, reason=str(e) or type(e).__name__)
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=str(e) or type(e).__name__)
 
 
 def ensure_index_ignored(store: Path) -> dict[str, Any] | None:

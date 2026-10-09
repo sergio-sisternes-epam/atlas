@@ -152,9 +152,15 @@ location cannot be written (read-only file system, permissions, unsafe
 path), bm25 also answers from a temporary index (`ephemeral: true`) and says
 why in `driver_note`.
 
-**Legacy.** A fresh deprecated `.atlas-index/` index is still read in place
-with a `legacy_index_location` warning; when it is stale, Atlas builds the new
-location and never writes to `.atlas-index/`.
+**Legacy.** The deprecated `.atlas-index/` location is read only when the new
+`.atlas/indexes/<driver-type>/<atlas-id>/` location holds no index at all (no
+`current.json` pointer and no published generation; for tgrep, no index
+directory). Then a fresh legacy index is read in place with a
+`legacy_index_location` warning. Once any new-location index exists, a stale
+one (corpus digest, nanograph version or index format changed) is rebuilt at
+the new location and legacy is not read, even when it is fresh. A stale
+legacy index is never refreshed: Atlas builds the new location and never
+writes to `.atlas-index/`. The rule is the same for fts5, nanograph and tgrep.
 
 **Fallback** never fails recall: nanograph -> bm25 -> grep, bm25 -> grep
 (FTS5 unavailable). Availability comes from the driver overlay (nanograph:
@@ -255,6 +261,14 @@ file, without writing. The lock and the `.atlas-mesh.json.*.tmp` temp
 files are short-lived; in a git work tree the writer also adds
 `/atlas-mesh.json.lock*` and `/.atlas-mesh.json.*.tmp` (anchored at the
 project directory) to `info/exclude` so a leftover never gets committed.
+When those rules cannot be added (an unreadable or unwritable
+`info/exclude`, `info` that is not a directory, or a failing `git
+rev-parse`), every mesh writer (`index set`/`unset`, `mount`, `store init`
+/ `rehost` and their store removal) still writes the mesh and keeps its exit
+code, and adds the warning item `atlas_mesh_lock_ignore_failed` to the
+payload's `warnings`: `could not add atlas-mesh.json.lock* and temp-file
+rules to <path>: <reason>; add them to .gitignore or info/exclude
+yourself` (one stderr line outside `--json`).
 
 **Deprecated:** `atlas recall index build` still works for 0.14.x as an alias
 of `atlas index build` for the store at `--root`, with the same payload plus

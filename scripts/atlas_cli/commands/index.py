@@ -438,7 +438,7 @@ def _write(
         "mesh_file": _rel(loc, result.path),
         "project": str(project),
     }
-    warnings: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = list(result.warnings)
     info: list[dict[str, Any]] = []
     if value is not None:
         warn = unavailable_warning(value)

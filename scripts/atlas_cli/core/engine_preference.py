@@ -201,6 +201,9 @@ def _fts5_freshness(store: Path, schema: dict[str, Any] | None) -> dict[str, Any
         fresh = recall_index.usable_pointer(cur) and bool(digest) and cur.get("corpus_digest") == digest
         state = "fresh" if fresh else "stale"
         return {**out, "freshness": state, "generation": cur.get("generation"), "digest": _short(cur.get("corpus_digest"))}
+    if recall_index.has_new_index(root):
+        cur = cur or {}
+        return {**out, "freshness": "stale", "generation": cur.get("generation"), "digest": _short(cur.get("corpus_digest"))}
     legacy = recall_index._read_pointer(recall_index.legacy_root(store) / recall_index.CURRENT_NAME)
     if legacy and legacy.get("complete") and recall_index._legacy_pointer_db(store, legacy.get("db")) is not None:
         return {
@@ -233,8 +236,7 @@ def _nanograph_freshness(store: Path) -> dict[str, Any]:
         if gen is not None:
             ready = driver._read_ready(gen) or {}
             return {**out, "freshness": "fresh", "generation": gen.name, "digest": _short(ready.get("corpus_digest"))}
-    has_new = bool(pointer) or (base.is_dir() and any(c.is_dir() and not c.name.startswith(".") for c in base.iterdir()))
-    if has_new:
+    if driver.has_new_index(base):
         return {
             **out,
             "freshness": "stale",

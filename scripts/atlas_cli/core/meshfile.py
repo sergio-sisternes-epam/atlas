@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import tempfile
@@ -38,13 +39,28 @@ class MeshLockTimeout(MeshFileError):
     """Another writer held ``atlas-mesh.json.lock`` for longer than the wait budget."""
 
 
+@dataclass(frozen=True)
+class MeshWrite:
+    """Result of a mesh row write: the file and any non-fatal warning items.
+
+    ``warnings`` holds ``atlas_mesh_lock_ignore_failed`` when the lock and
+    temp-file ignore rules could not be added; the write itself still happened.
+    """
+
+    path: Path
+    warnings: tuple[dict[str, Any], ...] = ()
+
+
 @contextmanager
-def mesh_lock(project: Path) -> Iterator[Any]:
+def mesh_lock(project: Path, warnings: list[dict[str, Any]] | None = None) -> Iterator[Any]:
     """Serialise every mesh mutation on ``<project>/atlas-mesh.json.lock`` (owner-token lock).
 
     Waits up to :data:`MESH_LOCK_WAIT_SECONDS`, taking over a stale lock
     (older than :data:`MESH_LOCK_STALE_SECONDS` or a dead pid on this host);
     raises :class:`MeshLockTimeout` otherwise. Nothing is written without it.
+    When the ignore rules for the lock cannot be added, the
+    ``atlas_mesh_lock_ignore_failed`` warning item is appended to
+    ``warnings`` (if given) and the caller carries on.
     """
     from .ignore_guard import ensure_mesh_lock_ignored
     from .owned_lock import OwnedLock
@@ -65,7 +81,9 @@ def mesh_lock(project: Path) -> Iterator[Any]:
             )
         time.sleep(MESH_LOCK_POLL_SECONDS)
     try:
-        ensure_mesh_lock_ignored(project)
+        item = ensure_mesh_lock_ignored(project).item()
+        if item and item.get("level") == "warning" and warnings is not None:
+            warnings.append(item)
         yield lock
     finally:
         lock.release()
@@ -284,10 +302,12 @@ def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
     return []
 
 
-def upsert(project: Path, row: dict[str, str]) -> Path:
+def upsert(project: Path, row: dict[str, str]) -> MeshWrite:
     """Add or replace a store row (keeping its ``recall`` block) under the mesh lock."""
-    with mesh_lock(project) as lock:
-        return _upsert_locked(lock, project, row)
+    warnings: list[dict[str, Any]] = []
+    with mesh_lock(project, warnings) as lock:
+        fp = _upsert_locked(lock, project, row)
+    return MeshWrite(fp, tuple(warnings))
 
 
 def _upsert_locked(lock: Any, project: Path, row: dict[str, str]) -> Path:
@@ -318,6 +338,7 @@ class RecallWrite:
     previous: str | None
     value: str | None
     changed: bool
+    warnings: tuple[dict[str, Any], ...] = ()
 
 
 def detect_indent(text: str) -> str | int:
@@ -389,15 +410,18 @@ def set_recall_engine(project: Path, target: str | None, value: str | None) -> R
     is not valid JSON, or a result that fails validation, raises
     :class:`MeshFileError` and nothing is written. The file is re-read and
     written under the mesh lock (:func:`mesh_lock`), so concurrent writers
-    never lose each other's changes.
+    never lose each other's changes. ``RecallWrite.warnings`` carries any
+    ``atlas_mesh_lock_ignore_failed`` warning; it never stops the write.
     """
     fp = mesh_path(project)
     if not fp.is_file():
         raise MeshFileError(f"{fp} not found")
     if value is not None and value not in RECALL_ENGINES:
         raise MeshFileError(f"engine {value!r} is not allowed; allowed values: {', '.join(RECALL_ENGINES)}")
-    with mesh_lock(project) as lock:
-        return _set_recall_engine_locked(lock, fp, target, value)
+    warnings: list[dict[str, Any]] = []
+    with mesh_lock(project, warnings) as lock:
+        result = _set_recall_engine_locked(lock, fp, target, value)
+    return dataclasses.replace(result, warnings=tuple(warnings))
 
 
 def _set_recall_engine_locked(lock: Any, fp: Path, target: str | None, value: str | None) -> RecallWrite:
@@ -458,9 +482,10 @@ def known_ids(project: Path) -> set[str]:
     return {str(s.get("id")) for s in doc.get("stores") or [] if s.get("id")}
 
 
-def remove_store(project: Path, atlas_id: str) -> Path:
+def remove_store(project: Path, atlas_id: str) -> MeshWrite:
     """Drop a store row under the mesh lock (re-read, validate, atomic write)."""
-    with mesh_lock(project) as lock:
+    warnings: list[dict[str, Any]] = []
+    with mesh_lock(project, warnings) as lock:
         doc = load(project)
         doc["stores"] = [s for s in doc.get("stores") or [] if s.get("id") != atlas_id]
         errs = validate_doc(doc)
@@ -468,4 +493,4 @@ def remove_store(project: Path, atlas_id: str) -> Path:
             raise MeshFileError("; ".join(errs))
         fp = mesh_path(project)
         _write_locked(lock, fp, doc, indent=2)
-        return fp
+    return MeshWrite(fp, tuple(warnings))

@@ -424,6 +424,32 @@ class NanographDriver(BaseDriver):
             return None
         return gen_dir if self._reusable(gen_dir, digest, version) else None
 
+    @staticmethod
+    def has_new_index(base: Path) -> bool:
+        """Any index at the new location: a ``current.json`` pointer or a published generation directory."""
+        if (base / CURRENT_NAME).exists() or (base / CURRENT_NAME).is_symlink():
+            return True
+        if not base.is_dir():
+            return False
+        return any(
+            _GEN_NAME.fullmatch(child.name) and (child.is_dir() or child.is_symlink()) for child in base.iterdir()
+        )
+
+    def _choose_legacy(self, store: Path, base: Path, digest: str, version: str | None) -> Path | None:
+        """The legacy generation to read, only when the new location has no index (no fresh one was found)."""
+        found: list[Path] = []
+
+        def legacy_fresh() -> bool:
+            gen = self._legacy_generation(store, digest, version)
+            if gen is not None:
+                found.append(gen)
+            return gen is not None
+
+        state = index_location.STALE if self.has_new_index(base) else index_location.MISSING
+        if index_location.choose_source(state, legacy_fresh) == index_location.USE_LEGACY:
+            return found[0]
+        return None
+
     def index_state(self, store: Path, digest: str) -> dict[str, Any]:
         """Read-only freshness of the new-location index for ``digest`` (no build)."""
         det = self.detect()
@@ -433,7 +459,7 @@ class NanographDriver(BaseDriver):
         gen = self._current(base, digest, det.version)
         if gen is not None:
             return {"fresh": True, "generation": gen.name}
-        legacy = self._legacy_generation(store, digest, det.version)
+        legacy = self._choose_legacy(store, base, digest, det.version)
         if legacy is not None:
             return {"fresh": True, "generation": legacy.name, "legacy": True}
         return {"fresh": False, "reason": "missing or stale"}
@@ -455,7 +481,7 @@ class NanographDriver(BaseDriver):
         where = index_location.describe(store, "nanograph")
         gen_dir = None if force else self._current(base, digest, det.version)
         if gen_dir is None and allow_legacy and not force:
-            legacy = self._legacy_generation(store, digest, det.version)
+            legacy = self._choose_legacy(store, base, digest, det.version)
             if legacy is not None:
                 self.last_index = {
                     "generation": legacy.name,

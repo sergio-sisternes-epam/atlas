@@ -7,6 +7,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from ..core.auth import AuthResult, resolve_auth
 from ..core.authstore import lookup
@@ -52,6 +53,7 @@ def _mount(
     parent: Path,
     as_json: bool,
     strategy: str,
+    warnings: list[Any],
 ) -> int:
     return cmd_mount.run(
         pointer,
@@ -62,7 +64,24 @@ def _mount(
         as_json,
         True,
         strategy,
+        warnings_out=warnings,
     )
+
+
+def _add_warnings(warnings: list[Any], items: Any) -> None:
+    """Append mesh writer warning items (e.g. ``atlas_mesh_lock_ignore_failed``) once each."""
+    for item in items:
+        if item not in warnings:
+            warnings.append(item)
+
+
+def _print_warnings(prefix: str, warnings: list[Any], as_json: bool) -> None:
+    for item in warnings:
+        if isinstance(item, dict):
+            if not as_json:
+                print(f"{prefix}: warning: {item.get('message')}", file=sys.stderr)
+        else:
+            print(f"{prefix}: {item}", file=sys.stderr)
 
 
 def run_init(
@@ -145,7 +164,7 @@ def _init_shared(
         return _fail(err or "shared branch setup failed", as_json)
 
     dest = cmd_mount.default_mount(parent, atlas_id)
-    warnings: list[str] = []
+    warnings: list[Any] = []
     auth = _auth_for(atlas_id, ssh)
     token = cmd_mount._explicit_git_token(auth)
     if status == "created":
@@ -173,6 +192,7 @@ def _init_shared(
             parent,
             as_json,
             "shared",
+            warnings,
         )
         if rc != 0:
             return rc
@@ -220,7 +240,7 @@ def _init_shared(
             warnings.append(warn)
 
     try:
-        upsert(
+        written = upsert(
             parent,
             {
                 "id": atlas_id,
@@ -232,8 +252,8 @@ def _init_shared(
         )
     except MeshFileError as e:
         return _fail(str(e), as_json)
-    for line in warnings:
-        print(f"atlas store init: {line}", file=sys.stderr)
+    _add_warnings(warnings, written.warnings)
+    _print_warnings("atlas store init", warnings, as_json)
     return _ok(
         as_json,
         {
@@ -260,7 +280,8 @@ def _init_dedicated(
         parsed = parse_pointer(remote)
     except IdentityError as e:
         return _fail(str(e), as_json)
-    rc = _mount(remote, None, None, ssh, parent, as_json, "dedicated")
+    warnings: list[Any] = []
+    rc = _mount(remote, None, None, ssh, parent, as_json, "dedicated", warnings)
     if rc != 0:
         return rc
     dest = cmd_mount.default_mount(parent, parsed.atlas_id)
@@ -276,7 +297,7 @@ def _init_dedicated(
         created_schema = True
     landed = cmd_mount._persistable_ref(current_branch(dest))
     try:
-        upsert(
+        written = upsert(
             parent,
             {
                 "id": parsed.atlas_id,
@@ -288,6 +309,8 @@ def _init_dedicated(
         )
     except MeshFileError as e:
         return _fail(str(e), as_json)
+    _add_warnings(warnings, written.warnings)
+    _print_warnings("atlas store init", warnings, as_json)
     return _ok(
         as_json,
         {
@@ -297,6 +320,7 @@ def _init_dedicated(
             "ref": landed,
             "path": str(dest),
             "schema": created_schema,
+            "warnings": warnings,
         },
     )
 
@@ -337,6 +361,7 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
         run_git(["fetch", "origin", f"{SHARED_BRANCH}:{SHARED_BRANCH}"], cwd=parent)
 
     dest = cmd_mount.default_mount(parent, dest_id)
+    warnings: list[Any] = []
     if dest.resolve() != src_path.resolve():
         rc = _mount(
             dest_id,
@@ -346,6 +371,7 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
             parent,
             as_json,
             "shared",
+            warnings,
         )
         if rc != 0:
             return rc
@@ -353,16 +379,15 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
         if code != 0:
             return _fail(err or "could not remove previous submodule", as_json)
         try:
-            remove_store(parent, src_id)
+            _add_warnings(warnings, remove_store(parent, src_id).warnings)
         except MeshFileError as e:
             return _fail(str(e), as_json)
 
-    warnings: list[str] = []
     _, warn = protect_atlas_branch(dest_id)
     if warn:
         warnings.append(warn)
     try:
-        upsert(
+        written = upsert(
             parent,
             {
                 "id": dest_id,
@@ -374,13 +399,13 @@ def _rehost_to_shared(parent: Path, source: dict, ssh: bool, as_json: bool) -> i
         )
     except MeshFileError as e:
         return _fail(str(e), as_json)
+    _add_warnings(warnings, written.warnings)
     row_errs = strategy_errors(
         {"id": dest_id, "ref": SHARED_BRANCH, "strategy": "shared"}
     )
     if row_errs:
         return _fail("; ".join(row_errs), as_json)
-    for line in warnings:
-        print(f"atlas store rehost: {line}", file=sys.stderr)
+    _print_warnings("atlas store rehost", warnings, as_json)
     return _ok(
         as_json,
         {
@@ -431,7 +456,8 @@ def _rehost_to_dedicated(
     if code != 0:
         return _fail(err or "history push to dedicated remote failed", as_json)
     dest = cmd_mount.default_mount(parent, dest_id)
-    rc = _mount(remote, dest_branch, None, ssh, parent, as_json, "dedicated")
+    warnings: list[Any] = []
+    rc = _mount(remote, dest_branch, None, ssh, parent, as_json, "dedicated", warnings)
     if rc != 0:
         return rc
     if dest.resolve() != src_path.resolve():
@@ -439,12 +465,12 @@ def _rehost_to_dedicated(
         if code != 0:
             return _fail(err or "could not remove previous submodule", as_json)
         try:
-            remove_store(parent, src_id)
+            _add_warnings(warnings, remove_store(parent, src_id).warnings)
         except MeshFileError as e:
             return _fail(str(e), as_json)
     landed = cmd_mount._persistable_ref(current_branch(dest), dest_branch)
     try:
-        upsert(
+        written = upsert(
             parent,
             {
                 "id": dest_id,
@@ -456,6 +482,8 @@ def _rehost_to_dedicated(
         )
     except MeshFileError as e:
         return _fail(str(e), as_json)
+    _add_warnings(warnings, written.warnings)
+    _print_warnings("atlas store rehost", warnings, as_json)
     return _ok(
         as_json,
         {
@@ -464,6 +492,7 @@ def _rehost_to_dedicated(
             "id": dest_id,
             "from": src_id,
             "path": str(dest),
+            "warnings": warnings,
         },
     )
 

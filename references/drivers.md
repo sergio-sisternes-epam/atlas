@@ -345,10 +345,16 @@ or `failed` (with the reason; `n/a` outside git) by asking git itself
 
 **Deprecated: `.atlas-index/`.** The old in-store locations
 (`.atlas-index/recall/`, `.atlas-index/nanograph/`, `.atlas-index/tgrep/`)
-are read-only for 0.14.x and removed after it. When no usable index exists
-at the new location but one does at the old one, Atlas reads it without
-changing it and adds a `legacy_index_location` warning item (printed to
-stderr outside `--json`). The next build (`atlas index build`, a
+are read-only for 0.14.x and removed after it. The old location is read
+only when the new location holds no index at all: no `current.json`
+pointer and no published generation directory (fts5, nanograph), or no
+index directory (tgrep). Then a fresh old index is read without changing
+it and a `legacy_index_location` warning item is added (printed to stderr
+outside `--json`). Once any new-location index exists, a stale one (for
+example after a corpus, nanograph version or index format change) is
+rebuilt at the new location and the old one is not read, even when it is
+fresh. One helper, `index_location.choose_source`, applies this rule for
+all three drivers. The next build (`atlas index build`, a
 compile that publishes, or a nanograph or tgrep rebuild) writes only the
 new location, after which the warning disappears. Atlas never deletes the
 old directory; delete `.atlas-index/` yourself once you have rebuilt.

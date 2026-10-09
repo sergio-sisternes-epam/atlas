@@ -77,14 +77,30 @@ def _new_pointer(store: Path) -> tuple[Path | None, dict[str, Any] | None]:
     return root, _read_pointer(root / CURRENT_NAME)
 
 
+def has_new_index(root: Path) -> bool:
+    """Any index at the new location: a ``current.json`` pointer or a published generation directory."""
+    pointer = root / CURRENT_NAME
+    if pointer.exists() or pointer.is_symlink():
+        return True
+    gens = root / "generations"
+    if not gens.is_dir():
+        return False
+    return any(
+        not child.name.startswith(index_publish.TMP_PREFIX) and (child.is_dir() or child.is_symlink())
+        for child in gens.iterdir()
+    )
+
+
 def _candidates(store: Path) -> list[Generation]:
-    """Usable published generations, new location first, then the legacy one."""
+    """Usable published generations: the new location's, else (no new index at all) the legacy one."""
     out: list[Generation] = []
     root, cur = _new_pointer(store)
     if root is not None and usable_pointer(cur):
         db = _pointer_db(root, cur.get("db"))
         if db is not None:
             out.append(Generation(db, cur, False))
+    if root is not None and has_new_index(root):
+        return out
     legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
     if legacy and legacy.get("complete"):
         db = _legacy_pointer_db(store, legacy.get("db"))
@@ -248,8 +264,9 @@ def ensure_fresh(
     sha256 of each file, see :func:`projection.content_digest`), computed once:
     from ``projection`` when given, else from raw bytes without parsing. A hit
     refreshes the pointer's cheap fingerprint in place. Otherwise a fresh
-    legacy ``.atlas-index/`` generation is used when the new location has none
-    (read only), else the store is projected (once) and a generation is built
+    legacy ``.atlas-index/`` generation is used (read only) when the new
+    location holds no index at all (no pointer, no generation); a stale
+    new-location index is always rebuilt, never bypassed. Else the store is projected (once) and a generation is built
     under the lock and published atomically. Raises
     :class:`IndexLocationError` (unsafe path), :class:`IndexNotBuilt`
     (incomplete corpus), :class:`index_publish.IndexBusy`, ``OSError`` or
@@ -282,12 +299,21 @@ def ensure_fresh(
             raise IndexNotBuilt("incomplete")
     digest = str(projection["corpus_digest"])
     current = _read_pointer(root / CURRENT_NAME)
-    if allow_legacy and not force and not (usable_pointer(current) and _pointer_db(root, (current or {}).get("db"))):
-        legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
-        if legacy and legacy.get("complete") and legacy.get("corpus_digest") == digest:
-            db = _legacy_pointer_db(store, legacy.get("db"))
-            if db is not None:
-                return Freshness(Generation(db, legacy, True), False)
+    if allow_legacy and not force:
+        found: list[Generation] = []
+
+        def legacy_fresh() -> bool:
+            legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
+            if legacy and legacy.get("complete") and legacy.get("corpus_digest") == digest:
+                db = _legacy_pointer_db(store, legacy.get("db"))
+                if db is not None:
+                    found.append(Generation(db, legacy, True))
+            return bool(found)
+
+        # No fresh new-location generation here: any new index is stale and is rebuilt, never bypassed.
+        state = index_location.STALE if has_new_index(root) else index_location.MISSING
+        if index_location.choose_source(state, legacy_fresh) == index_location.USE_LEGACY:
+            return Freshness(found[0], False)
     previous = str((current or {}).get("generation") or "") or None
     lock_warnings: list[dict[str, Any]] = []
 
@@ -441,8 +467,8 @@ def find_generation(
     With ``fast_path`` the current digest is the content digest of the store's
     raw bytes (no projection); a generation whose cheap fingerprint differs is
     skipped first without hashing, but a matching fingerprint alone never makes
-    it current. The new location is preferred; the legacy location is only
-    consulted when the new one has no match, and is never modified.
+    it current. The legacy location is only consulted when the new location
+    holds no index at all, and is never modified.
     """
     fingerprint: str | None = None
     current: str | None = digest

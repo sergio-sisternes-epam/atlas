@@ -46,8 +46,21 @@
   concurrent writers no longer lose updates. A stale lock (60 s, or a dead
   pid) is taken over; a held lock makes a writer wait up to 10 s and then
   exit 2 without writing. The lock and temp-file patterns are added to
-  `info/exclude`. Mount's row upsert and store removal now also write
+  `info/exclude`; when they cannot be (an unwritable or unreadable
+  `info/exclude`, or `info` that is not a directory), every mesh writer
+  (`index set`/`unset`, `mount`, `store init`/`rehost` and their store
+  removal) reports the warning `atlas_mesh_lock_ignore_failed` in
+  `warnings` (once on stderr in text mode), still writes the mesh and keeps
+  its exit code. Mount's row upsert and store removal now also write
   atomically.
+- The deprecated `.atlas-index/` location is read only when the new
+  `.atlas/indexes/<driver-type>/<atlas-id>/` location holds no index at all
+  (no `current.json` and no published generation; for tgrep, no index
+  directory). A stale new-location index (corpus, nanograph version or
+  index format change) is now rebuilt instead of losing to a fresh legacy
+  index, for fts5 (including the fast path and an old-format pointer),
+  nanograph and tgrep alike, and `atlas index show` / `status` report it as
+  `stale`, not `legacy-only`.
 - nanograph runs in isolation: every nanograph call (`--version`, `init`,
   `load`, `run`) runs in a private, empty, 0700 `atlas-nanograph-*`
   temporary directory that is removed afterwards, so nanograph never loads
