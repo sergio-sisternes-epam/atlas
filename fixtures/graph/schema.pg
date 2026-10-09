@@ -1,0 +1,30 @@
+node Page {
+  slug: String @key
+  title: String @index
+  description: String?
+  body: String
+  text: String @index
+  role: String
+  growth: Bool?
+  consolidation: Bool?
+  type: String?
+  kva: String?
+  status: String?
+  work_id: String?
+  star_kind: String?
+  kva_role: String?
+  origin: String?
+  sensitivity: String?
+}
+
+node External {
+  slug: String @key
+}
+
+edge DerivedFrom: Page -> Page
+edge DerivedFromExternal: Page -> External
+edge Follows: Page -> Page
+edge Implements: Page -> Page
+edge KvaTerminate: Page -> Page
+edge Related: Page -> Page
+edge Supersedes: Page -> Page

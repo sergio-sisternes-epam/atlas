@@ -3,14 +3,28 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 from ..core.frontmatter import FrontmatterError, read_page
+from ..core.index_location import warning_text
 from ..core.overlay import merge_overlays
+from ..core import recall_index
+from ..core import graph as graph_core
+from ..core.driver_overlay import DriverError, get_driver
+from ..core.drivers import fts5 as fts5_driver
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.projection import ProjectedPage, ProjectionError, project_store
 from ..core.recall import run_recall
-from ..core.recall_config import recall_enabled, schema_version
+from ..core.engine_preference import (
+    EnginePreferenceError,
+    effective_engine,
+    ignored_notice,
+    resolve_engine,
+)
+from ..core.recall_config import DEFAULT_WEIGHTS, fts5_available, recall_enabled, schema_version
 from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
@@ -44,16 +58,6 @@ _FIELD_TOKEN = re.compile(
     r"(?:^|\s)(type|kva|status|work_id|path):([^\s]+)",
     re.I,
 )
-
-
-def _search_engine(schema: dict | None) -> str:
-    if not schema:
-        return "grep"
-    query = schema.get("query") or {}
-    eng = str(query.get("search_engine") or "grep").strip().lower()
-    if eng in ("grep", "bm25", "rg"):
-        return "grep" if eng == "rg" else eng
-    return "grep"
 
 
 def _tokenise(q: str) -> list[str]:
@@ -286,11 +290,229 @@ def _grep_search(
     return results[:limit], warnings
 
 
-def _bm25_search(root: Path, query: str, staging_dir: str, limit: int) -> tuple[list[dict], str | None]:
-    index_dir = root / ".atlas-index"
-    if not index_dir.is_dir():
-        return [], "BM25 index not present (.atlas-index/); falling back to grep-mode search"
-    return [], "BM25 engine not yet implemented in this CLI build; falling back to grep-mode search"
+def _bm25_eligible(
+    root: Path,
+    page: ProjectedPage,
+    filters: dict[str, str],
+    prefix: Path | None,
+    include_exits: bool,
+) -> bool:
+    if page.role == "log":
+        return False
+    meta = page.meta
+    for key in ("type", "kva", "status", "work_id"):
+        if filters.get(key) and str(meta.get(key) or "").strip() != filters[key]:
+            return False
+    asked_exit = (
+        str(filters.get("kva") or "").lower() in EXIT_STATES
+        or str(filters.get("status") or "").lower() in EXIT_STATES
+    )
+    if not include_exits and not asked_exit and _is_exit(meta):
+        return False
+    if prefix is not None and not _under_prefix(root / page.path, prefix):
+        return False
+    return True
+
+
+def _fts5_rank(
+    db_path: Path, text: str, eligible: set[str], limit: int = 0
+) -> tuple[list[dict], str]:
+    conn = recall_index.open_db(db_path)
+    try:
+        return fts5_driver.search_eligible(conn, text, limit, dict(DEFAULT_WEIGHTS), eligible)
+    finally:
+        conn.close()
+
+
+def _bm25_search(
+    root: Path,
+    schema: dict | None,
+    query: str,
+    limit: int,
+    include_exits: bool,
+    persist: bool = False,
+) -> tuple[list[dict] | None, list[str], dict]:
+    """Rank with SQLite FTS5. Returns (None, warnings, {}) when grep must take over.
+
+    ``persist`` (engine chosen by --engine or a preference): make the
+    project-owned index fresh first (build + atomic publish when the corpus
+    changed). Without it, use a matching published index or a temporary one.
+    When the index location cannot be written the temporary index is used and
+    ``meta["note"]`` says why.
+    """
+    warnings: list[str] = []
+    if not fts5_available():
+        warnings.append(
+            "BM25 needs SQLite FTS5, which this Python's sqlite3 lacks; falling back to grep-mode search"
+        )
+        return None, warnings, {}
+    filters, rest = _split_filters(query)
+    prefix, path_warn = _path_constraint(root, filters.get("path"))
+    if path_warn:
+        warnings.append(path_warn)
+    meta_out = {"ephemeral": False, "fast_path": False, "match": "all"}
+    if prefix is not None and not prefix.exists():
+        return [], warnings, meta_out
+
+    pages: list[ProjectedPage] | None = None
+    db_path: Path | None = None
+    ephemeral = False
+    legacy = False
+    generation: str | None = None
+    rebuilt = False
+    note: str | None = None
+    guard_warnings: list[dict] = []
+    if persist:
+        try:
+            fresh = recall_index.ensure_fresh(root, schema, guard_ignore=True)
+            pages = recall_index.pages_from_db(fresh.generation.db)
+            db_path = fresh.generation.db
+            legacy = fresh.generation.legacy
+            generation = fresh.generation.pointer.get("generation")
+            rebuilt = fresh.rebuilt
+            guard_warnings = [w for w in fresh.warnings if w.get("level") == "warning" and w.get("code")]
+        except ProjectionError as e:
+            warnings.append(f"BM25 projection failed ({e}); falling back to grep-mode search")
+            return None, warnings, {}
+        except Exception as e:  # noqa: BLE001 - unwritable/unsafe/busy index -> temporary index
+            pages = None
+            note = f"index not written ({e}); used a temporary index"
+    else:
+        fast_gen = recall_index.find_generation(root, schema=schema, fast_path=True)
+        if fast_gen is not None:
+            try:
+                pages = recall_index.pages_from_db(fast_gen.db)
+                db_path = fast_gen.db
+                legacy = fast_gen.legacy
+                generation = fast_gen.pointer.get("generation")
+            except sqlite3.Error:
+                pages = None
+    if pages is None:
+        try:
+            projection = project_store(root, schema, allow_partial=False)
+        except ProjectionError as e:
+            warnings.append(f"BM25 projection failed ({e}); falling back to grep-mode search")
+            return None, warnings, {}
+        pages = projection["pages"]
+        db_path = recall_index.build_ephemeral(projection)
+        ephemeral = True
+
+    eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+    try:
+        try:
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible, limit)
+        except sqlite3.Error:
+            if ephemeral:
+                raise
+            db_path = recall_index.build_ephemeral(
+                {"pages": pages, "corpus_digest": ""}
+            )
+            ephemeral = True
+            legacy = False
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible, limit)
+    except sqlite3.Error as e:
+        warnings.append(f"BM25 query failed ({e}); falling back to grep-mode search")
+        return None, warnings, {}
+    finally:
+        if ephemeral and db_path is not None:
+            db_path.unlink(missing_ok=True)
+
+    hits = _enrich_hits(ranked[:limit] if limit else ranked, pages, rest)
+    meta_out = {"ephemeral": ephemeral, "fast_path": not ephemeral, "match": match_mode}
+    if note:
+        meta_out["note"] = note
+    if not ephemeral:
+        meta_out.update(recall_index.index_location.describe(root, "fts5"))
+        meta_out["generation"] = generation
+        if persist:
+            meta_out["index_rebuilt"] = rebuilt
+        if legacy:
+            meta_out["legacy_warning"] = recall_index.legacy_warning(root)
+    if guard_warnings:
+        meta_out["index_warnings"] = guard_warnings
+    return hits, warnings, meta_out
+
+
+def _enrich_hits(ranked: list[dict], pages: list[ProjectedPage], text: str) -> list[dict]:
+    tokens = _tokenise(text)
+    by_id = {p.page_id: p for p in pages}
+    hits: list[dict] = []
+    for h in ranked:
+        page = by_id.get(h["path"])
+        if page is not None:
+            h["title"] = page.title or Path(page.path).stem
+            h["snippet"] = _snippet(page.body, tokens)
+            h["relates_to"] = _relates_preview(page.meta)
+            for key in ("kva", "status", "work_id", "growth"):
+                val = _present(page.meta, key)
+                if val is not None:
+                    h[key] = val
+        else:
+            h["relates_to"] = []
+        hits.append(h)
+    return hits
+
+
+def _nanograph_search(
+    root: Path,
+    query: str,
+    limit: int,
+    include_exits: bool,
+) -> tuple[list[dict] | None, list[str], dict]:
+    """Rank with the optional nanograph driver.
+
+    Returns (None, [], {"note": ...}) when the caller must fall back to sqlite-fts5.
+    """
+    driver = get_driver("nanograph")
+    det = driver.detect()
+    if not det.available:
+        return None, [], {"unavailable": det.reason}
+    warnings: list[str] = []
+    filters, rest = _split_filters(query)
+    prefix, path_warn = _path_constraint(root, filters.get("path"))
+    if path_warn:
+        warnings.append(path_warn)
+    try:
+        source = graph_core.load_source(root)
+        if prefix is not None and not prefix.exists():
+            return [], warnings, {"index": None}
+        pages = source["pages"]
+        eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+        ranked = driver.bm25_search(root, rest, 0, source=source)
+    except (graph_core.GraphError, DriverError) as e:
+        return None, [], {"error": str(e)}
+    ranked = [h for h in ranked if h["path"] in eligible]
+    hits = _enrich_hits(ranked[:limit] if limit else ranked, pages, rest)
+    return hits, warnings, {"index": driver.last_index}
+
+
+def _fail(as_json: bool, payload: dict) -> int:
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(payload["error"])
+    return 2
+
+
+PROFILE_ENGINE_ERROR = (
+    "--engine cannot be used while this store's recall profile is enabled: the profile "
+    "is authoritative for ranking. Pass --profile <name> to pick another profile for this "
+    "request, or run `atlas recall disable` to use --engine. Engine preferences "
+    "(ATLAS_RECALL_ENGINE, atlas-mesh.json recall.engine) are ignored on profile stores."
+)
+
+_ENGINE_OF = {"nanograph": "nanograph", "sqlite-fts5": "bm25", "grep": "grep"}
+
+
+def _driver_note(requested: str, steps: list[tuple[str, str, str]], used: str) -> str | None:
+    """``steps`` are (engine, "unavailable"|"failed", reason) in fallback order."""
+    if not steps:
+        return None
+    parts = []
+    for i, (eng, kind, reason) in enumerate(steps):
+        prefix = "preferred engine " if i == 0 else ""
+        parts.append(f"{prefix}{eng} {kind}: {reason}")
+    return "; ".join(parts) + f"; used {used}"
 
 
 def run(
@@ -322,29 +544,16 @@ def run(
             return 2
         effective = merged
     if engine_override and profile:
-        payload = {
-            "ok": False,
-            "error": "conflicting flags: --engine and --profile",
-            "root": str(r),
-            "query": query,
-        }
-        if as_json:
-            print(json.dumps(payload, indent=2))
-        else:
-            print(payload["error"])
-        return 2
+        return _fail(
+            as_json,
+            {"ok": False, "error": "conflicting flags: --engine and --profile", "root": str(r), "query": query},
+        )
+    try:
+        pref = resolve_engine(r, engine_override, schema)
+    except EnginePreferenceError as e:
+        return _fail(as_json, {"ok": False, "error": str(e), "root": str(r), "query": query})
     if engine_override and recall_enabled(effective):
-        payload = {
-            "ok": False,
-            "error": "--engine cannot be used while recall is enabled; disable recall or pass --profile",
-            "root": str(r),
-            "query": query,
-        }
-        if as_json:
-            print(json.dumps(payload, indent=2))
-        else:
-            print(payload["error"])
-        return 2
+        return _fail(as_json, {"ok": False, "error": PROFILE_ENGINE_ERROR, "root": str(r), "query": query})
     use_smr = bool(profile) or recall_enabled(effective)
     if use_smr:
         payload, code = run_recall(
@@ -356,9 +565,19 @@ def run(
             limit=limit,
         )
         if not payload.get("legacy"):
+            if payload.get("ok"):
+                payload["engine_requested"] = pref.requested
+                payload["engine_source"] = pref.source
+                preset = (payload.get("recall") or {}).get("preset")
+                if pref.is_preference and pref.requested != "bm25":
+                    payload.setdefault("info", []).append(ignored_notice(str(preset), pref))
             if as_json:
                 print(json.dumps(payload, indent=2, default=str))
             else:
+                for item in payload.get("warnings") or []:
+                    print(f"warning: {warning_text(item)}", file=sys.stderr)
+                for item in payload.get("info") or []:
+                    print(f"info: {warning_text(item)}", file=sys.stderr)
                 if not payload.get("ok"):
                     print(f"atlas recall run — FAIL: {payload.get('error')}")
                 else:
@@ -384,53 +603,132 @@ def run(
             print("--allow-partial requires SCHEMA 2.0 recall")
         return 2
     staging_name = staging_dir_name(schema)
-    engine = (engine_override or _search_engine(schema)).lower()
-    if engine not in ("grep", "bm25"):
-        engine = "grep"
+    requested = pref.requested
+    persist = pref.persist
 
     warning: str | None = None
     extra_warnings: list[str] = []
-    mode_used = engine
+    mode_used = requested
     page_ver = schema_version(effective) if effective else "1.0"
 
-    if engine == "bm25":
-        hits, warning = _bm25_search(r, query, staging_name, limit)
-        if warning:
+    bm25_meta: dict = {}
+    nano_meta: dict = {}
+    hits: list[dict] | None = None
+    steps: list[tuple[str, str, str]] = []
+    engine = requested
+    if requested != "grep":
+        eff = effective_engine(requested)
+        steps = [(eng, "unavailable", reason) for eng, reason in eff.unavailable]
+        engine = eff.engine
+        if ("bm25", "sqlite3 lacks FTS5") in eff.unavailable:
+            warning = "BM25 needs SQLite FTS5, which this Python's sqlite3 lacks; falling back to grep-mode search"
+    _, free_text = _split_filters(query)
+    has_terms = bool(fts5_driver.query_tokens(free_text))
+    if engine == "nanograph" and has_terms:
+        hits, extra_warnings, nano_meta = _nanograph_search(r, query, limit, include_exits)
+        if hits is not None:
+            mode_used = "nanograph"
+        else:
+            if nano_meta.get("unavailable"):
+                steps.append(("nanograph", "unavailable", nano_meta["unavailable"]))
+            else:
+                steps.append(("nanograph", "failed", nano_meta.get("error") or "error"))
+            engine = "bm25"
+    if hits is None and engine == "bm25" and has_terms:
+        bm25_hits, bm25_warnings, bm25_meta = _bm25_search(
+            r, schema, query, limit, include_exits, persist=persist
+        )
+        if bm25_hits is None:
+            warning = bm25_warnings[-1] if bm25_warnings else None
+            extra_warnings = [w for w in bm25_warnings if w != warning]
+            if warning:
+                steps.append(("bm25", "failed", warning))
             mode_used = "grep"
-            hits, extra_warnings = _grep_search(
+            hits, grep_warnings = _grep_search(
                 r, query, staging_name, limit, include_exits, page_ver
             )
-    else:
+            extra_warnings += [w for w in grep_warnings if w not in extra_warnings]
+        else:
+            hits = bm25_hits
+            extra_warnings = bm25_warnings
+            mode_used = "sqlite-fts5"
+    elif hits is None:
+        mode_used = "grep"
         hits, extra_warnings = _grep_search(
             r, query, staging_name, limit, include_exits, page_ver
         )
 
-    all_warnings = [w for w in [warning, *extra_warnings] if w]
+    all_warnings: list = [w for w in [warning, *extra_warnings] if w]
+    index_warnings: list[dict] = []
+    if mode_used == "sqlite-fts5" and bm25_meta.get("legacy_warning"):
+        index_warnings.append(bm25_meta["legacy_warning"])
+    if mode_used == "nanograph" and (nano_meta.get("index") or {}).get("warning"):
+        index_warnings.append(nano_meta["index"]["warning"])
+    if mode_used == "sqlite-fts5":
+        index_warnings += list(bm25_meta.get("index_warnings") or [])
+    if mode_used == "nanograph":
+        index_warnings += [
+            w for w in (nano_meta.get("index") or {}).get("warnings") or [] if w.get("level") == "warning" and w.get("code")
+        ]
 
+    nano_note = (nano_meta.get("index") or {}).get("driver_note") if mode_used == "nanograph" else None
+    notes = [
+        n
+        for n in (_driver_note(requested, steps, _ENGINE_OF.get(mode_used, mode_used)), bm25_meta.get("note"), nano_note)
+        if n
+    ]
     payload = {
         "root": str(r),
         "query": query,
-        "engine_configured": engine,
+        "engine_requested": requested,
+        "engine_source": pref.source,
+        "engine_configured": requested,
         "engine_used": mode_used,
         "warning": all_warnings[0] if all_warnings else None,
-        "warnings": all_warnings,
+        "warnings": [*all_warnings, *index_warnings],
         "include_exits": include_exits,
         "count": len(hits),
         "hits": hits,
         "agentic_guidance": AGENTIC_GUIDANCE if mode_used == "grep" else None,
         "discipline": DISCIPLINE if mode_used == "grep" else None,
     }
+    if requested in ("bm25", "nanograph"):
+        payload["driver_used"] = mode_used
+    if notes:
+        payload["driver_note"] = "; ".join(notes)
+    if mode_used == "sqlite-fts5":
+        payload["score_orientation"] = "lower_better"
+        payload["ephemeral"] = bool(bm25_meta.get("ephemeral"))
+        payload["fast_path"] = bool(bm25_meta.get("fast_path"))
+        payload["match"] = bm25_meta.get("match") or "all"
+        if bm25_meta.get("index_dir"):
+            payload["index_dir"] = bm25_meta["index_dir"]
+            payload["index_location"] = bm25_meta["index_location"]
+        if bm25_meta.get("generation"):
+            payload["generation"] = bm25_meta["generation"]
+        if "index_rebuilt" in bm25_meta:
+            payload["index_rebuilt"] = bm25_meta["index_rebuilt"]
+    elif mode_used == "nanograph":
+        payload["score_orientation"] = "higher_better"
+        payload["nanograph_index"] = nano_meta.get("index")
 
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
         print(f"atlas recall run — root={r}")
         print(f"query: {query}")
-        print(f"engine: configured={engine} used={mode_used}")
+        print(f"engine: requested={requested} ({pref.source}) used={mode_used}")
+        if payload.get("driver_note"):
+            print(f"driver: {mode_used} ({payload['driver_note']})")
+        if mode_used == "sqlite-fts5":
+            index_kind = "temporary" if payload.get("ephemeral") else "published"
+            print(f"index: {index_kind}  match: {payload.get('match')}")
         if include_exits:
             print("include_exits: yes")
         for w in all_warnings:
             print(f"WARNING: {w}")
+        for item in index_warnings:
+            print(f"warning: {warning_text(item)}", file=sys.stderr)
         if not hits:
             print("no hits")
         else:

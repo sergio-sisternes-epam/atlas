@@ -11,7 +11,10 @@ from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
 from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
+from ..core import index_location
+from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
 from ..core.recall_index import IndexError_, publish_generation
+from ..core.engine_preference import refresh_preferred
 from ..core.schema import (
     by_type_map,
     compute_stamp_shape,
@@ -33,7 +36,15 @@ from ..core.schema import (
 IGNORE_RE = re.compile(r"<!--\s*atlas-ignore:\s*([a-z0-9_\-]+)\s*-->", re.I)
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
-NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
+NON_BLOCKING_WARNING_IDS = {
+    "atlas_uri_unmounted",
+    # Preferred recall engine index work never changes compile exit codes.
+    "preferred_engine_invalid",
+    "preferred_index_failed",
+    # A failed ignore guard is reported, never fatal: the index is still built.
+    "atlas_indexes_ignore_failed",
+    "atlas_index_ignore_failed",
+}
 
 # Memory layers (frame / gist / page, original shipped 0.13.0-beta;
 # frame / gist / memory, 0.13.0-beta.2; schema / gist / memory, beta.3) are
@@ -121,7 +132,7 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
 def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
     """Dirs that contain concept .md files (not only index/log) should have index.md."""
     need: list[Path] = []
-    skip_top = {staging_dir, "templates", "mesh", ".atlas-index", "schema.d"}
+    skip_top = {staging_dir, "templates", "mesh", ".atlas-index", ".atlas", "schema.d"}
     for d in sorted(root.rglob("*")):
         if not d.is_dir():
             continue
@@ -1124,13 +1135,26 @@ def run(
             try:
                 index_info = publish_generation(r, schema, focused=False)
             except (IndexError_, Exception) as e:
+                try:
+                    index_path = index_location.describe(r, "fts5")["index_dir"]
+                except Exception:
+                    index_path = None
                 critical.append(
                     {
                         "id": "recall_index",
-                        "path": ".atlas-index/recall",
+                        "path": index_path or ".atlas/indexes/fts5",
                         "msg": f"failed to publish recall generation: {e}",
                     }
                 )
+
+    if not dry_run and not focused and not critical:
+        for item in refresh_preferred(r, schema):
+            (warnings if item.get("level") == "warning" else info).append(item)
+
+    if not dry_run:
+        for ignored in (ensure_indexes_ignored(r), ensure_index_ignored(r)):
+            if ignored:
+                (warnings if ignored.get("level") == "warning" else info).append(ignored)
 
     result = {
         "root": str(r),

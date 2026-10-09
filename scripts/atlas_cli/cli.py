@@ -15,6 +15,8 @@ from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
 from .commands import schema_cmd as cmd_schema
 from .commands import recall as cmd_recall
+from .commands import index as cmd_index
+from .commands import graph as cmd_graph
 from .commands import storecmd as cmd_store
 
 
@@ -357,9 +359,9 @@ def recall_group() -> None:
 @click.option("--limit", default=10, show_default=True, help="max hits")
 @click.option(
     "--engine",
-    type=click.Choice(["grep", "bm25"], case_sensitive=False),
+    type=click.Choice(["grep", "bm25", "nanograph"], case_sensitive=False),
     default=None,
-    help="override SCHEMA query.search_engine",
+    help="override the preferred engine (ATLAS_RECALL_ENGINE, atlas-mesh.json recall.engine, SCHEMA query.search_engine); nanograph: optional, macOS arm64, falls back to bm25",
 )
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option(
@@ -437,14 +439,203 @@ def recall_disable_cmd(root: str | None, as_json: bool) -> None:
 
 @recall_group.group("index")
 def recall_index_group() -> None:
-    """Recall index generations."""
+    """Deprecated: use `atlas index`."""
 
 
 @recall_index_group.command("build")
 @click.option("--root", default=None)
 @click.option("--json", "as_json", is_flag=True)
 def recall_index_build_cmd(root: str | None, as_json: bool) -> None:
+    """Deprecated alias of `atlas index build` (removal after 0.14.x)."""
     raise SystemExit(cmd_recall.run_index_build(root, as_json))
+
+
+_ENGINE_ARG = "grep|bm25|nanograph"
+_STORE_HELP = "atlas id of a store row in the project's atlas-mesh.json (any spelling that normalises to it)"
+
+
+@main.group("index")
+def index_group() -> None:
+    """Manage the preferred recall engine (grep|bm25|nanograph) and its indexes."""
+
+
+@index_group.command("set")
+@click.argument("engine", metavar=_ENGINE_ARG)
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--default", "default", is_flag=True, help="set the default for all Atlases in the project")
+@click.option("--build", is_flag=True, help="build or refresh the affected indexes now")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_set_cmd(engine: str, root: str | None, store: str | None, default: bool, build: bool, as_json: bool) -> None:
+    """Write recall.engine for one store (default: the store at --root) or the project default."""
+    raise SystemExit(cmd_index.run_set(engine, root, store, default, build, as_json))
+
+
+@index_group.command("unset")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--default", "default", is_flag=True, help="remove the project-wide default")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_unset_cmd(root: str | None, store: str | None, default: bool, as_json: bool) -> None:
+    """Remove recall.engine (index files are left in place)."""
+    raise SystemExit(cmd_index.run_unset(root, store, default, as_json))
+
+
+@index_group.command("show")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_show_cmd(root: str | None, store: str | None, as_json: bool) -> None:
+    """Configured values per level, winning engine, effective engine and index freshness for one store."""
+    raise SystemExit(cmd_index.run_show(root, store, as_json))
+
+
+@index_group.command("status")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_status_cmd(root: str | None, as_json: bool) -> None:
+    """Every store in the project: configured and effective engine, freshness, index directory."""
+    raise SystemExit(cmd_index.run_status(root, as_json))
+
+
+@index_group.command("build")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--all", "all_stores", is_flag=True, help="every mounted store in the project")
+@click.option("--force", is_flag=True, help="rebuild even when the index is fresh")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_build_cmd(root: str | None, store: str | None, all_stores: bool, force: bool, as_json: bool) -> None:
+    """Build or refresh the index for the effective engine (exit 1 when any build failed)."""
+    raise SystemExit(cmd_index.run_build(root, store, all_stores, force, as_json))
+
+
+@main.group("graph")
+def graph_group() -> None:
+    """Structural lookups over relates_to and frontmatter (read-only; no index required)."""
+
+
+_ROOT_HELP = "Atlas store root (default: cwd)"
+_PARTIAL_HELP = "report an incomplete corpus (exit 1) instead of failing on projection errors"
+_EXITS_HELP = "include kva/status terminated|deprecated|superseded pages"
+
+
+@graph_group.command("nodes")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--where", "where", multiple=True, help="field=value on top-level frontmatter (repeatable, ANDed)")
+@click.option("--path", "path_prefix", default=None, help="store-relative path prefix")
+@click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
+# min=1: 0 has no documented meaning for nodes and would only return an empty list.
+@click.option("--limit", type=click.IntRange(min=1), default=None, help="max nodes (at least 1)")
+@click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_nodes_cmd(
+    root: str | None,
+    where: tuple[str, ...],
+    path_prefix: str | None,
+    include_exits: bool,
+    limit: int | None,
+    allow_partial: bool,
+    as_json: bool,
+) -> None:
+    """Pages whose frontmatter matches every --where."""
+    raise SystemExit(
+        cmd_graph.run_nodes(root, where, path_prefix, include_exits, limit, allow_partial, as_json)
+    )
+
+
+@graph_group.command("edges")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--from", "from_page", default=None, help="edges authored by this page")
+@click.option("--to", "to_page", default=None, help="edges targeting this path")
+@click.option("--all", "all_edges", is_flag=True, help="every edge in the store")
+@click.option("--kind", "kinds", multiple=True, help="relation kind (repeatable)")
+@click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
+@click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_edges_cmd(
+    root: str | None,
+    from_page: str | None,
+    to_page: str | None,
+    all_edges: bool,
+    kinds: tuple[str, ...],
+    include_exits: bool,
+    allow_partial: bool,
+    as_json: bool,
+) -> None:
+    """relates_to edges in authored direction, unresolved ones included."""
+    raise SystemExit(
+        cmd_graph.run_edges(
+            root, from_page, to_page, all_edges, kinds, include_exits, allow_partial, as_json
+        )
+    )
+
+
+@graph_group.command("neighbours")
+@click.argument("page")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--kind", "kinds", multiple=True, help="traverse only this relation kind (repeatable)")
+@click.option(
+    "--direction",
+    type=click.Choice(["in", "out", "both"]),
+    default="both",
+    show_default=True,
+)
+@click.option("--hops", type=click.IntRange(min=1, max=3), default=1, show_default=True, help="1..3")
+@click.option("--where", "where", multiple=True, help="filter returned nodes (traversal passes through)")
+@click.option("--max-nodes", type=click.IntRange(min=1), default=200, show_default=True)
+@click.option("--max-edges", type=click.IntRange(min=1), default=500, show_default=True)
+@click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
+@click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@click.option(
+    "--driver",
+    type=click.Choice(["native", "nanograph"]),
+    default="native",
+    show_default=True,
+    help="traversal driver (nanograph: optional, macOS arm64, falls back to native)",
+)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_neighbours_cmd(
+    page: str,
+    root: str | None,
+    kinds: tuple[str, ...],
+    direction: str,
+    hops: int,
+    where: tuple[str, ...],
+    max_nodes: int,
+    max_edges: int,
+    include_exits: bool,
+    allow_partial: bool,
+    driver: str,
+    as_json: bool,
+) -> None:
+    """Bounded breadth-first neighbourhood of PAGE."""
+    raise SystemExit(
+        cmd_graph.run_neighbours(
+            root, page, kinds, direction, hops, where, max_nodes, max_edges,
+            include_exits, allow_partial, as_json, driver,
+        )
+    )
+
+
+@graph_group.command("drivers")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_drivers_cmd(root: str | None, as_json: bool) -> None:
+    """Driver registry, platform matrix and what this machine can use."""
+    raise SystemExit(cmd_graph.run_drivers(root, as_json))
+
+
+@graph_group.command("export")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--format", "fmt", type=click.Choice(["json", "nanograph"]), required=True)
+@click.option("--out", "out", required=True, help="output directory outside the store")
+@click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_export_cmd(
+    root: str | None, fmt: str, out: str, allow_partial: bool, as_json: bool
+) -> None:
+    """Deterministic graph export (graph.json, or nanograph schema.pg + seed.jsonl)."""
+    raise SystemExit(cmd_graph.run_export(root, fmt, out, allow_partial, as_json))
 
 
 if __name__ == "__main__":

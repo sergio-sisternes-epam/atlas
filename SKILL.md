@@ -163,7 +163,7 @@ modules; they are not CLI verbs.
 
 ## Hard rules
 
-1. **Formal lookup = path `recall` + `atlas recall run`** - B17 card `path: recall`, load `references/paths/recall.md`, then the CLI. Do not merge those names. Unbounded whole-tree grep/rg/find is not path recall. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas recall run --engine grep` under their own card. That is not path recall. They must not mount-if-missing, build recall indexes, or run the explained operation.
+1. **Formal lookup = path `recall`** - B17 card `path: recall`, load `references/paths/recall.md`, then the CLI: `atlas recall run` for text and topic questions; `atlas graph nodes|edges|neighbours` for structural ones (see CLI surface). Do not merge those names. Unbounded whole-tree grep/rg/find is not path recall. On synthesis or a mention-only hit list, rewrite once from `glossary.md` Search aliases and prefer spine / work-hub pages. **Exception:** paths `help` and `getting-started` explain without mounting. They use the packaged baseline first. Only if that baseline cannot answer may they `atlas resolve` an already registered checkout and `atlas recall run --engine grep` under their own card. That is not path recall. They must not mount-if-missing, build recall indexes, or run the explained operation.
 2. **`staging/` never answers** - compile hard-fails if staging is non-empty.
 3. **Writes end on compile green** - `atlas compile --root <root>` exit 0 before claiming memory stored. Compile checks SCHEMA shape, required frontmatter, and required links - not markdown headings. On the current shape its new closed gates are `schema_folder` for uncovered gists, `schema_missing_from_index`, and exact-substring `stale_upper_page`; a second schema or a schema-only folder is not a compile failure. An unmounted external `atlas://` reference is a visible, non-blocking warning (`exit 0`) because the dependency may be transient. `index_md_present`, `index_md_listing`, and new page-contract misses remain actionable warnings (`exit 1`) until promoted. Listing checks concept `.md` pages and child folders with an index; media files are ignored. Compile severity `info` (memory-rung findings at the default rung) does not change the exit code.
 4. **`relates_to` / `kind` are authoritative** - body `## Related` is optional mirror.
@@ -188,11 +188,21 @@ the following commands relative to the consumer project.
 python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force] [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>] [--dry-run]
                        # --dry-run reports findings (including memory_rung) without writing mesh.json or publishing the recall index
-python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25] [--include-exits] [--profile <id>] [--allow-partial]
+python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25|nanograph] [--include-exits] [--profile <id>] [--allow-partial]
                        # query tokens: type: kva: status: work_id: path:
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py recall index build --root <atlas>
+# index verbs all take [--root <dir>] [--json]; `index build` replaces deprecated `recall index build`
+python3 <atlas-skill>/scripts/atlas.py index set <grep|bm25|nanograph> [--store <id> | --default] [--build]
+python3 <atlas-skill>/scripts/atlas.py index unset [--store <id> | --default]
+python3 <atlas-skill>/scripts/atlas.py index show [--store <id>]
+python3 <atlas-skill>/scripts/atlas.py index status
+python3 <atlas-skill>/scripts/atlas.py index build [--store <id> | --all] [--force]
+python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N]
+python3 <atlas-skill>/scripts/atlas.py graph edges --root <atlas> (--from <page> | --to <page> | --all) [--kind K]... [--include-exits]
+python3 <atlas-skill>/scripts/atlas.py graph neighbours <page> --root <atlas> [--kind K]... [--direction in|out|both] [--hops 1..3] [--where field=value]... [--driver native|nanograph]
+python3 <atlas-skill>/scripts/atlas.py graph drivers --root <atlas> [--json]
+python3 <atlas-skill>/scripts/atlas.py graph export --root <atlas> --format json|nanograph --out <dir-outside-store>
 python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]
@@ -213,7 +223,11 @@ python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --targ
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
 
-Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
+Search engine: grep by default until recall is enabled. Without recall, `--engine bm25` ranks with SQLite FTS5 on a fresh on-disk index, falling back to grep with a warning only if FTS5 is unavailable or projection fails. A preferred engine (`atlas-mesh.json` `recall.engine` or `ATLAS_RECALL_ENGINE`) becomes the default, its index auto-created and refreshed; an enabled store recall profile still wins. An all-words FTS5 miss triggers one any-word retry labelled `match: "any"`. Opt-in default is `atlas:ranked` (published FTS5, content-digest fast path; beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See paths `recall` and `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
+
+Routing (hard rule 1): formal lookups enter path `recall`; there, text and topic questions use `atlas recall run`, structural ones (which pages link to X, neighbours, work-hub children, nodes by frontmatter) use read-only `atlas graph nodes|edges|neighbours` (`references/graph.md`). `graph export` writes outside the store.
+
+Drivers: optional nanograph (`--engine`/`--driver nanograph`) runs only on macOS arm64, is never the default, and falls back to the built-in driver with a `driver_note` (`references/drivers.md`). Derived indexes live in the consuming project at `.atlas/indexes/<driver-type>/<atlas-id>/`, never in the store; legacy in-store `.atlas-index/` is read-only until removed after 0.14.x.
 
 ## Core contract (summary)
 
@@ -242,7 +256,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 - Replacing `okf`
 - Phone-home telemetry
 - Auto-authoring claims without an agent
-- BM25 / live okf-wiki migration (separate work `atlas-bm25-and-live-migration-v1`)
+- Live okf-wiki migration (separate work `atlas-bm25-and-live-migration-v1`; BM25 ranking itself ships as `--engine bm25`)
 
 ## Progressive disclosure
 

@@ -15,7 +15,7 @@ SCHEMA_NAME = "SCHEMA.json"
 CONTRACT_NAME = "CONTRACT.json"
 CONTRACT_FILENAMES = (SCHEMA_NAME, CONTRACT_NAME)
 DEFAULT_STAGING = "staging"
-SKIP_DIRS = frozenset({"staging", "templates", ".atlas-index", "mesh", "schema.d", ".git"})
+SKIP_DIRS = frozenset({"staging", "templates", ".atlas-index", ".atlas", "mesh", "schema.d", ".git"})
 
 
 def store_root(root: str | None) -> Path:

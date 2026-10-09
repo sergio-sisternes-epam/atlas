@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 
 sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.core import index_location  # noqa: E402
 from atlas_cli.core.recall_config import default_recall_block, validate_store_v2  # noqa: E402
 from atlas_cli.core.schema import classify_lineage, compute_stamp_shape  # noqa: E402
 
@@ -1136,7 +1137,7 @@ def main() -> int:
         check("recall activate atlas:scan on store10", activate10.returncode == 0, activate10.stderr)
 
         mesh_path10 = store10 / "mesh.json"
-        recall_pointer10 = store10 / ".atlas-index" / "recall" / "current.json"
+        recall_pointer10 = index_location.index_dir(store10, "fts5") / "current.json"
 
         code10, payload10 = run_json(["compile", "--root", str(store10), "--json", "--dry-run"])
         check("dry-run compile exits 0", code10 == 0, f"exit={code10} payload={payload10}")

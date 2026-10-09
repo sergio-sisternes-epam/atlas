@@ -1,5 +1,317 @@
 # Changelog
 
+## Unreleased (targets 0.14.0)
+
+- FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)
+  are tokenised like the index's `unicode61` tokenizer instead of keeping
+  only ASCII letters, digits and `_`. `café`, `résumé`, `Grüße` and `東京`
+  are no longer cut to `caf`, `r AND sum` or an empty query, `cafe` and
+  `café` find each other, and `_` separates terms as it does in the index.
+  A contiguous CJK run stays one term, so `東京` is not found inside `東京都`.
+- Index freshness is decided by content: the corpus digest is now sha256
+  over sorted `<relative path> NUL <sha256 of the bytes>` lines, and an
+  index or generation counts as current only when its recorded digest
+  equals the current one. The path/size/mtime fingerprint is only a fast
+  pre-check that can rule an index stale, never fresh, so a same-length
+  edit that keeps its mtime is no longer served from the old generation.
+  This covers the fts5 fast path (recall, `--engine bm25`, `atlas graph`),
+  the preferred-engine refresh, nanograph reuse, legacy `.atlas-index/`
+  reuse and `atlas index show` / `status`. The digest is hashed from raw
+  bytes once per command. It also covers the projection inputs: the bytes
+  of `SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and a
+  `PROJECTION_VERSION`, so a schema-only change (for example SCHEMA 1.0 to
+  2.0, a new relation vocabulary or recall field config) makes the index
+  stale and recall, graph and nanograph rebuild with the new parse, while
+  files outside the projection inputs do not. The fts5 pointer now records
+  `format` 2 and nanograph's index `format` is now 4, so generations
+  recorded with an older digest rebuild once.
+- `atlas graph neighbours PAGE`, `graph edges --from PAGE` and `graph edges
+  --to PAGE` refuse an exit-state page (`terminated`, `deprecated`,
+  `superseded`) with exit 2 unless `--include-exits` is passed, for example
+  "starting page old/dead.md is in exit state terminated; pass
+  --include-exits to traverse from it". The check runs before driver
+  dispatch, so `--driver nanograph` behaves the same.
+- Ignore guard failures are reported: an unreadable or unwritable
+  `info/exclude` (or `info` that is not a directory) or a failing `git
+  rev-parse` gives the warning `atlas_indexes_ignore_failed`
+  (`atlas_index_ignore_failed` for the legacy guard) from compile/validate,
+  `atlas index build` / `set --build`, recall auto-create and nanograph and
+  tgrep builds. It is never treated as already ignored, the index is still
+  built and exit codes do not change. `atlas index show` / `status` report
+  `ignore: ok|missing|failed` from `git check-ignore`.
+- `atlas-mesh.json` writes (`index set`/`unset`, mount's row upsert, store
+  removal) are serialised by `<project>/atlas-mesh.json.lock`, the
+  owner-token lock now shared with index builders (`core/owned_lock.py`):
+  the file is re-read under the lock, validated and replaced atomically, so
+  concurrent writers no longer lose updates. A stale lock (60 s, or a dead
+  pid) is taken over; a held lock makes a writer wait up to 10 s and then
+  exit 2 without writing. The lock and temp-file patterns are added to
+  `info/exclude`; when they cannot be (an unwritable or unreadable
+  `info/exclude`, or `info` that is not a directory), every mesh writer
+  (`index set`/`unset`, `mount`, `store init`/`rehost` and their store
+  removal) reports the warning `atlas_mesh_lock_ignore_failed` in
+  `warnings` (once on stderr in text mode), still writes the mesh and keeps
+  its exit code. Mount's row upsert and store removal now also write
+  atomically.
+- The deprecated `.atlas-index/` location is read only when the new
+  `.atlas/indexes/<driver-type>/<atlas-id>/` location holds no index at all
+  (no `current.json` and no published generation; for tgrep, no index
+  directory). A stale new-location index (corpus, nanograph version or
+  index format change) is now rebuilt instead of losing to a fresh legacy
+  index, for fts5 (including the fast path and an old-format pointer),
+  nanograph and tgrep alike, and `atlas index show` / `status` report it as
+  `stale`, not `legacy-only`.
+- nanograph runs in isolation: every nanograph call (`--version`, `init`,
+  `load`, `run`) runs in a private, empty, 0700 `atlas-nanograph-*`
+  temporary directory that is removed afterwards, so nanograph never loads
+  `.env.nano` or `.env` from your project, store or home directory. `init`
+  reads a private schema copy; `nanograph.toml` / `.env.nano` that `init`
+  scaffolds into an inferred project directory are removed (existing files
+  are kept and reported in `driver_note`), and generations are scrubbed of
+  `.env.nano`, `.env` and `nanograph.toml` before `load` and before
+  publishing. Previously `init` wrote both files into the published
+  generation.
+- `atlas graph neighbours --driver nanograph` now reports nanograph build
+  warnings such as `atlas_indexes_ignore_failed` in `warnings` (and once on
+  stderr in text mode), as recall does; the exit code is unchanged.
+
+- CLI bounds: `atlas graph nodes --limit`, `atlas graph neighbours
+  --max-nodes/--max-edges` must be at least 1 and `--hops` must be 1..3;
+  other values are Click usage errors (exit 2). A negative limit is no
+  longer treated as unlimited, and the in-process graph API raises
+  `ValueError` for a cap or limit below 1 instead of disabling it.
+- Security: every external driver subprocess (nanograph's `--version`
+  probe, `init`, `load` and `run`) now gets an allow-listed environment from
+  one helper (`core/drivers/subprocess_env.py`): only `PATH`, `HOME`, temp,
+  locale, user, Windows system, `RUST_BACKTRACE`, `RUST_LOG` and `NO_COLOR`
+  pass, and a deny pass removes GitHub tokens (`ATLAS_PAT`, `GH_*`,
+  `GITHUB_*`, `COPILOT_*`), model API keys and anything named like a
+  token, secret, password or credential. Atlas's GitHub tokens no longer
+  reach nanograph. See `references/drivers.md`, External driver
+  environment.
+- Security: the driver platform gate always uses the real platform.
+  Production code reads no environment variable for it; tests use an injectable provider and the
+  test-only entry `scripts/testing/atlas_test_cli.py`.
+- nanograph detection resolves `ATLAS_NANOGRAPH_BIN` (relative values
+  against the current directory) and the `PATH` match to an absolute path,
+  so builds and queries that run in the index directory find the binary.
+- Index builder locks carry an `owner` token: only the owner releases a
+  lock, stale takeovers rename the old lock aside one at a time, and a
+  builder that lost its lock publishes nothing and reports `lock_lost`
+  (readers keep the old pointer). Release now re-checks ownership and
+  removes the lock under the same `<name>.takeover` guard as stale takeover.
+  The guard has its own owner token, only its creator removes it, and an
+  abandoned guard is broken after 30 s. A takeover can no longer slip
+  between a release's check and its rename, which used to move the new
+  owner's lock aside briefly, so that owner saw it as lost and aborted a
+  legitimate build. A failed `still_owned()` read is confirmed once under
+  the guard before `lost` is set. This applies to index builders and
+  `atlas-mesh.json.lock`. Publishing now also runs under that guard: the
+  final ownership check, the `current.json` replace and pruning (fts5,
+  including profile stores and `atlas index build`, and nanograph), and the
+  `atlas-mesh.json` replace, happen in one short critical section, so a
+  writer whose stale lock was taken over can no longer overwrite the new
+  owner's pointer, prune its generation or replace its mesh change. It
+  reports `lock_lost` instead (exit 2 for mesh writes). Pruning keeps the
+  previous pointer's generation, and a cheap-fingerprint refresh of the
+  fts5 pointer is written only under the free lock, never over a newer
+  pointer.
+- `atlas graph neighbours --driver nanograph` budgets its work:
+  `--max-nodes` / `--max-edges` now bound the nanograph `run` calls, not
+  just the output. Only relation kinds present in the projection (or
+  given with `--kind`) are queried. Calls stop as soon as a cap is certain
+  to be hit, or once a call budget or a 120 s overall deadline is reached.
+  The result then has `truncated: true` and a `driver_note`. Uncapped
+  results still match `native-graph` exactly.
+- `atlas-mesh.json` validation rejects duplicate store ids (compared after
+  normalisation and ignoring case), naming both rows and their paths. Mount,
+  `atlas index` (exit 2) and recall refuse such a file instead of letting
+  two stores share one index directory.
+- Preferred recall engine: a consuming project can set
+  `"recall": {"engine": "grep|bm25|nanograph"}` on a store row of its
+  `atlas-mesh.json` or as a project-wide top-level default, or set
+  `ATLAS_RECALL_ENGINE`. Precedence is `--engine` > `ATLAS_RECALL_ENGINE` >
+  store row > project default > built-in default (SCHEMA
+  `query.search_engine` when `bm25`, else `grep`), resolved in one place
+  (`core/engine_preference.py`). Recall payloads add `engine_requested` and
+  `engine_source` (`cli|env|store|project|default`) alongside
+  `engine_used`, `driver_used` and `driver_note`.
+- Auto-created, self-refreshing indexes: with an indexed engine (bm25 ->
+  `fts5`, nanograph -> `nanograph`) recall builds the index under
+  `.atlas/indexes/<driver-type>/<atlas-id>/` when it is missing or its corpus
+  digest (or nanograph version) changed, and publishes it before answering.
+  `atlas compile` / `validate` (not `--dry-run`) and `atlas index build`
+  refresh the preferred index and report `preferred_index_refreshed`
+  or `preferred_index_fresh`; a failure is the warning
+  `preferred_index_failed` and never changes exit codes. Builds take a
+  `.lock` (stale after ten minutes), write a `.tmp-*` sibling and publish
+  with an atomic rename plus an atomic pointer replace; fts5 now prunes to
+  the current generation plus one, and nanograph gains a `current.json`
+  pointer. Unavailable preferences fall back nanograph -> bm25 -> grep with
+  a `driver_note` and exit 0; no index is built for an unavailable driver.
+- New `atlas index` command group to manage the preferred engine and its
+  indexes without editing `atlas-mesh.json` by hand:
+  `atlas index set <grep|bm25|nanograph> [--store <atlas-id> | --default]
+  [--build]` writes `recall.engine` on a store row (the store at `--root`,
+  or `--store` with any spelling that normalises to the row id) or as the
+  project-wide default, warning `engine_unavailable_here` (exit 0) when the
+  engine cannot run on this machine and, with `--build`, building the
+  affected indexes now; `atlas index unset` removes it (idempotent, index
+  files are left for you to delete); `atlas index show` reports the value
+  per level, the winning engine and source, the effective engine and why,
+  any overriding recall profile and index freshness
+  (`fresh|stale|missing|legacy-only`); `atlas index status` tabulates every
+  store row and the project default; `atlas index build [--store <atlas-id>
+  | --all] [--force]` builds or refreshes the effective engine's index
+  (exit 1 when any build failed, others still attempted). Writes touch only
+  the target's `recall` key, keep key and row order, indentation and the
+  trailing newline, skip unchanged values and replace the file atomically;
+  invalid files are refused without writing.
+- Deprecated: `atlas recall index build` is now an alias of
+  `atlas index build` for the store at `--root` (same payload plus a
+  `deprecated_command` warning); it will be removed after 0.14.x.
+- New environment variable `ATLAS_RECALL_ENGINE` (invalid values exit 2 for
+  `recall run`, naming the variable and the allowed values).
+- Mesh schema: optional `recall` object (only `engine`) on store rows and at
+  the top level of `atlas-mesh.json`. Unknown keys or values are rejected
+  with an error naming the file, the store id or "project default", and the
+  allowed values. Mesh files without `recall` are unchanged.
+- Behaviour change: an explicit `--engine bm25` now persists its FTS5 index
+  in the project and refreshes it on change instead of building a temporary
+  index per query. The temporary index remains only as a fallback when the
+  index location cannot be written or another builder holds the lock
+  (`ephemeral: true`, reason in `driver_note`).
+- Stores with an enabled recall profile keep the profile authoritative: a
+  `bm25` preference is a no-op (the profile index uses the same new location
+  and auto-refresh), a `nanograph` or `grep` preference is reported as info
+  `preferred_engine_ignored`, and explicit `--engine` still exits 2 with a
+  message pointing to `--profile`.
+- `atlas recall run --engine bm25` now ranks with SQLite FTS5 on stores
+  where recall is not enabled (SCHEMA 1.0, or 2.0 with recall disabled).
+  It reuses a published generation when its corpus digest matches the
+  current content, otherwise it projects the current tree into a temporary index that is
+  deleted after the query. Field filters and exit-state exclusion match
+  grep mode, filter-only queries keep grep behaviour, and the payload
+  reports `engine_used: "sqlite-fts5"`, `score_orientation`, `ephemeral`
+  and `fast_path`. It falls back to grep with a warning only when FTS5 is
+  unavailable or projection fails. The "BM25 engine not yet implemented"
+  stub is gone. Grep stays the default when no flag is passed, and
+  `--engine` still conflicts with enabled recall.
+- Labelled any-word retry: in `--engine bm25` and in the SMR
+  `sqlite-fts5` path, when an all-words query with two or more tokens
+  has no eligible match, one any-word (OR) query runs. Eligibility
+  (field filters, `path:`, the exit-state rule) is pushed into the FTS5
+  query through a temporary table of allowed page ids, so both passes
+  collect eligible hits up to the limit and an eligible all-words match
+  ranked behind excluded pages is never dropped or relabelled `any`. The
+  payload carries `match: "all"` or `match: "any"`, and each retried hit
+  carries `match: "any"`. The FTS5 driver gains an `operator` parameter
+  (AND by default), an `allowed` parameter and the shared
+  `search_eligible` helper used by both paths.
+- Index ignore guards: `atlas compile` / `validate` (not `--dry-run`),
+  `atlas index build` and every nanograph or tgrep build add
+  `/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
+  below the work-tree top level) to the project repository's
+  `info/exclude` when no existing line (such as `.atlas/`) covers it, and
+  report an `atlas_indexes_ignored` info item only when they added the
+  line. For this release the legacy guard still adds `/.atlas-index/` (or
+  `/<store>/.atlas-index/`) to the store repository's `info/exclude` and
+  reports `atlas_index_ignored`. A committed `.gitignore` is never edited,
+  non-git roots are left alone, and exit codes are unchanged. A guard that
+  fails reports a warning (see the ignore guard failure entry above).
+- Docs: `SKILL.md` and path `recall` describe the FTS5-backed
+  `--engine bm25` and the any-word retry; BM25 is no longer listed as a
+  non-goal.
+- New read-only command group `atlas graph` for structural lookups over
+  the shared projection (`relates_to` plus top-level frontmatter). It
+  works on every store (SCHEMA or CONTRACT, 1.0 or 2.0, recall on or off),
+  reads a matching published generation when there is one
+  (`fast_path: true`) and otherwise projects the tree in memory. It never
+  writes to the store. `--allow-partial` turns projection errors into
+  exit 1 with `complete: false` and an `omitted` list.
+  - `atlas graph nodes` filters pages with repeatable, ANDed
+    `--where field=value` on normalised scalar text (list fields match
+    any element), plus `--path` and `--limit`.
+  - `atlas graph edges --from|--to|--all [--kind K]` lists edges in
+    authored direction with `resolved` and `external` flags; unresolved
+    edges are never dropped and a leading `./` is normalised.
+  - `atlas graph neighbours PAGE` is a bounded, cycle-safe breadth-first
+    walk with `--direction in|out|both`, `--hops 1..3`, `--kind`,
+    `--where` (filters returned nodes, not traversal), `--max-nodes` /
+    `--max-edges` and `truncated`.
+  - `atlas graph export --format json|nanograph --out DIR` writes a
+    byte-stable `graph.json`, or a nanograph v1.3.0 `schema.pg`,
+    `seed.jsonl` and `export-receipt.json` (unresolved edges listed in
+    the receipt). DIR inside the store is refused. Edge type names are
+    collision-free: kinds whose PascalCase names clash (`foo-bar` and
+    `foo_bar`, or `foo-external` and the external variant of `foo`) each
+    get a stable `X<8 hex of sha256>` suffix, and the receipt records the
+    map as `edge_types: [{kind, external, edge_type}]`.
+  - The recall exit-state rule (`terminated`/`deprecated`/`superseded`
+    hidden unless `--include-exits` or explicitly asked for) applies to
+    every verb except export.
+- Shared helpers: `projection.normalise_target`, and
+  `retrieve.is_exit_page` / `is_visible` / `adjacent` used by both the
+  recall neighbourhood and `atlas graph`. The recall neighbourhood now
+  also resolves `relates_to` targets written with a leading `./`.
+- Docs: new `references/graph.md`; `SKILL.md` lists the `atlas graph`
+  verbs and routes structural questions to them, and path `recall` notes
+  that `atlas graph neighbours` gives the Expand step as structured JSON.
+
+- Driver overlay (`core/driver_overlay.py`): one driver interface
+  (`id`, `capabilities`, `platforms`, `external`, `detect`, `build`,
+  `bm25_search`, `neighbours`, `health`; unsupported capabilities raise
+  `NotSupported`), a registry with the built-in `sqlite-fts5`
+  (bm25_search) and `native-graph` (graph_traversal) drivers as the
+  defaults on every platform, and a platform matrix. macOS arm64 has
+  nanograph; darwin x86_64, linux x86_64, linux aarch64 and win32 AMD64
+  are empty slots (`planned: none`).
+- Optional nanograph driver, macOS arm64 only, nanograph 1.3.0 or newer
+  (`ATLAS_NANOGRAPH_BIN` or `nanograph` on PATH). It is never selected
+  implicitly and never runs on another platform, even with the binary on
+  PATH. Argv-only subprocesses with timeouts, an allow-listed
+  environment (see below), no `.env.nano`. Its index lives under
+  `<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`
+  (export, generated `atlas.gq`,
+  `atlas.nano`, `ready.json`), is reused while the corpus digest, version
+  and index format match, and only the two newest generations are kept.
+  Its `bm25_text` query has no row cap, so Atlas filters every
+  positive-scoring page before cutting to the limit. Neighbour queries use
+  the export's collision-free edge type map and report the original Atlas
+  kinds; colliding kinds no longer fall back to `native-graph`.
+- `atlas recall run --engine nanograph` (where `--engine bm25` is
+  allowed) ranks with nanograph BM25 (`score_orientation:
+  "higher_better"`, same field filters and exit-state rule). When
+  nanograph is unavailable or fails it falls back to the sqlite-fts5
+  path with `driver_used: "sqlite-fts5"` and a `driver_note`, exit 0.
+  `--engine bm25` payloads now also carry `driver_used`.
+- `atlas graph neighbours --driver native|nanograph` (default `native`)
+  with the same fallback; payloads carry `driver_used`. New
+  `atlas graph drivers [--json]` lists the registry, platform matrix and
+  detection results.
+- Docs: new `references/drivers.md`; `SKILL.md` lists `--engine
+  nanograph`, `--driver` and `atlas graph drivers`.
+- Derived indexes move out of the store into the consuming project:
+  `<project-root>/.atlas/indexes/<driver-type>/<atlas-id>/` with driver
+  types `fts5` (published recall generations), `nanograph` and `tgrep`.
+  The project root and atlas id come from the `atlas-mesh.json` row whose
+  `path` is the store (mesh mode), otherwise from the store's git
+  work-tree top level and its `origin` id, or the store directory with a
+  `local/<name>-<hash>` id (standalone mode); `ATLAS_INDEX_ROOT` (absolute)
+  overrides the project root. Ids are validated segment by segment and
+  symlinked index paths are refused. `current.json` pointers are now
+  relative to the index directory. Payloads that report an index gain
+  `index_dir` and `index_location` (`mode`, `atlas_id`, `id_source`).
+  Projection and validation skip `.atlas/`. New single source of truth
+  `core/index_location.py`; docs in `references/drivers.md` (Index
+  location).
+- Deprecated: the in-store `.atlas-index/` (`recall/`, `nanograph/`,
+  `tgrep/`). For 0.14.x Atlas still reads a usable index there, read-only
+  and only when the new location has none, with a `legacy_index_location`
+  warning; the next build writes the new location only. Support is
+  removed after 0.14.x. Atlas never deletes it: remove `.atlas-index/`
+  yourself after rebuilding.
+
 ## 0.13.1 - 2026-10-09
 
 ### Fixed
