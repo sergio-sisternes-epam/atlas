@@ -47,7 +47,7 @@ Then **read this file**. Missing card or unloaded module ⇒ incomplete Enter.
    ```bash
    python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --dry-run --root <root> --json
    ```
-   Unknown root keys block upgrade, in the core contract file or in an installed overlay (`target_errors` names them). The one object-valued extension slot per overlay is allowed. See path `schema`, *Overlay file to author*. Preview must be shown before apply.
+   Unknown root keys block upgrade, in the core contract file or in an installed overlay (`target_errors` names them). The one object-valued extension slot per overlay is allowed, but once the store is 2.0 it needs Atlas >= 0.13.1 to compile. Reinstall a slot-free overlay first if an older Atlas must still read the store. See path `schema`, *Overlay file to author*. Preview must be shown before apply.
 4. **Apply upgrade** only after the owner selects it. This writes SCHEMA 2.0, a store-local `atlas-compat-v1` contribution, and **does not enable recall**. Apply takes `.atlas-upgrade.lock`, which `schema install` shares. It rechecks the installed overlays under that lock before writing anything, and refuses with zero writes if the check fails or the lock is already present. A lock left by an interrupted run is never reclaimed automatically. See path `schema`, *Install a contribution*, for when an operator may delete it.
    ```bash
    python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --apply --root <root> --json

@@ -41,26 +41,47 @@
 ### Docs
 
 - Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
-  documents the extension slot, the `overlay_extension` issue and the
-  shared install/upgrade lock, and asks packages to test overlays on both
-  store versions. Path `configure` notes that installed overlays can block
-  the upgrade and that apply rechecks them under the lock.
+  documents the extension slot, its minimum reader and rollback steps, the
+  `overlay_extension` issue and the shared install/upgrade lock, and asks
+  packages to test overlays on both store versions. Path `configure` notes
+  that installed overlays can block the upgrade, that apply rechecks them
+  under the lock, and that a kept slot needs Atlas >= 0.13.1 after the
+  upgrade.
 - `contribution-v1.schema.json` gains a `$comment` that describes the slot.
   Its `$id` and its closed shape are unchanged.
 - New fixtures `fixtures/contributions/` hold released overlays verbatim.
   `scripts/test_overlay_extension.py` installs and compiles every fixture on
   SCHEMA 1.0 and 2.0 stores, and through a 1.0 → 2.0 upgrade.
 
+### Compatibility
+
+- **Minimum reader for extension slots on SCHEMA 2.0.** Atlas v0.13.0 and
+  earlier merge the slot as a generic root key, so their compile fails
+  `schema_v2` (`'atlas_tasks' was unexpected`) on a SCHEMA 2.0 store that
+  holds an overlay with a slot. That covers a slot overlay installed by
+  v0.13.1 and one kept through a v0.13.1 `schema upgrade --to 2.0`. The
+  contract stamp does not record this, so such a store needs Atlas >= 0.13.1
+  to compile. On a 2.0 store, `schema install` prints a note when it
+  accepts a slot.
+- To roll back or mix versions on such a store, first reinstall a slot-free
+  overlay (atlas-tasks >= 0.6.1) with `schema install`, or `schema uninstall`
+  the overlay. Older readers then compile it again.
+- SCHEMA 1.0 stores are unaffected: older readers accept extra overlay root
+  keys there.
+
 ### Unchanged
 
 - The contract stamp stays `0.13.0`: `atlas init` still writes
   `atlas_release` `0.13.0`, and a `0.13.1` stamp still fails closed. No
-  store migration is needed, and v0.13.0 readers are unaffected.
+  store migration is needed. v0.13.0 readers are unaffected, except on
+  SCHEMA 2.0 stores that hold an extension-slot overlay (see
+  Compatibility).
 - SCHEMA 1.0 stores keep accepting generic extra overlay root keys as
   before. The only difference is that the extension slot is no longer
   copied into the effective SCHEMA.
 - Apart from the package version, help baselines and CI ref pins, which
-  move to `0.13.1` / `v0.13.1`, no release surface changes.
+  move to `0.13.1` / `v0.13.1`, and the `schema install` note above, no
+  release surface changes.
 
 ## 0.13.0 - 2026-10-09
 

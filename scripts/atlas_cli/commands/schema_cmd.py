@@ -7,6 +7,7 @@ from pathlib import Path
 from ..core.overlay import (
     SCHEMA_D,
     added_types,
+    extension_key,
     load_overlay,
     load_receipt,
     overlay_by_type,
@@ -154,6 +155,7 @@ def _install_locked(
     as_json: bool,
 ) -> int:
     host, _ = load_schema(r)
+    notes: list[str] = []
     if host is not None and schema_version(host) == "2.0":
         try:
             cerrs = validate_contribution(ov)
@@ -163,6 +165,13 @@ def _install_locked(
         if cerrs:
             _print(as_json, {"ok": False, "error": "; ".join(cerrs), "root": str(r), "id": cid})
             return 2
+        ext = extension_key(cid)
+        if ext is not None and isinstance(ov.get(ext), dict):
+            notes.append(
+                f"note: extension slot '{ext}' accepted. While this overlay is installed, "
+                "this SCHEMA 2.0 store needs Atlas >= 0.13.1 to compile. Before using an older "
+                "Atlas, reinstall a slot-free overlay or uninstall it (see path schema)."
+            )
     dest = overlay_path(r, cid)
     _, by_err = overlay_by_type(ov)
     if by_err:
@@ -217,17 +226,17 @@ def _install_locked(
                     written.append(f"templates/{tname}.md")
                     copied.append(tname)
     rec = write_receipt(r, cid, written + [f"{SCHEMA_D}/{cid}.receipt.json"], types=added_types(ov))
-    _print(
-        as_json,
-        {
-            "ok": True,
-            "root": str(r),
-            "id": cid,
-            "overlay": rel(r, dest),
-            "receipt": rel(r, rec),
-            "templates_copied": copied,
-        },
-    )
+    payload = {
+        "ok": True,
+        "root": str(r),
+        "id": cid,
+        "overlay": rel(r, dest),
+        "receipt": rel(r, rec),
+        "templates_copied": copied,
+    }
+    if notes:
+        payload["notes"] = notes
+    _print(as_json, payload)
     return 0
 
 

@@ -35,6 +35,8 @@ from atlas_cli.core.overlay import (  # noqa: E402
 )
 from atlas_cli.core.recall_config import validate_contribution  # noqa: E402
 
+NOTE = "needs Atlas >= 0.13.1 to compile"
+
 RELEASED = {
     "atlas-tasks-v0.6.0": ("atlas-tasks", "atlas_tasks"),
     "atlas-todo-v0.2.0": ("atlas-todo", "atlas_todo"),
@@ -115,6 +117,7 @@ def main() -> int:
             s = store(f"p1-{fx}", "2.0")
             r = install(src, s)
             check(f"p1-{fx}-install-2.0", r.returncode == 0, out(r)[:300])
+            check(f"p1-{fx}-install-2.0-reader-note", NOTE in r.stdout and f"'{slot}'" in r.stdout, r.stdout[:300])
             r = compile_(s)
             check(f"p1-{fx}-compile-2.0", r.returncode == 0, out(r)[-300:])
             eff = effective(s)
@@ -138,11 +141,21 @@ def main() -> int:
             s = store(f"p3-{fx}")
             r = install(src, s)
             check(f"p3-{fx}-install-1.0", r.returncode == 0, out(r)[:300])
+            check(f"p3-{fx}-install-1.0-no-note", NOTE not in r.stdout, r.stdout[:300])
             r = compile_(s)
             check(f"p3-{fx}-compile-1.0", r.returncode == 0, out(r)[-300:])
             check(f"p3-{fx}-not-merged", slot not in effective(s)["merged"])
 
         v06 = FIXTURES / "atlas-tasks-v0.6.0"
+
+        # Reader note: only a 2.0 install that carries the slot gets it; JSON carries it in notes.
+        s = store("note-json", "2.0")
+        r = run(["schema", "install", str(v06), "--root", str(s), "--json"])
+        notes = as_json(r).get("notes") or []
+        check("note-json", r.returncode == 0 and any(NOTE in n for n in notes), out(r)[:300])
+        slot_free = {k: v for k, v in json.loads((v06 / "SCHEMA.overlay.json").read_text()).items() if k != "atlas_tasks"}
+        r = run(["schema", "install", str(overlay("note-slot-free", slot_free)), "--root", str(s), "--json"])
+        check("note-slot-free-reinstall", r.returncode == 0 and "notes" not in as_json(r), out(r)[:300])
 
         # N: everything except the one object slot is still rejected on 2.0.
         base = {"contribution_id": "atlas-tasks", "claimed_folders": ["tasks"]}

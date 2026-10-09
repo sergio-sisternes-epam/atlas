@@ -187,6 +187,9 @@ Root keys an overlay may carry:
 
 - **Contract keys**: `contribution_id`, `claimed_folders`, `templates`, `types`, `bindings`, `presets`.
 - **One extension slot** for package metadata. Its key is the `contribution_id` with `-` replaced by `_` (`atlas-tasks` → `atlas_tasks`, `discuss` → `discuss`). The value must be a JSON object. Atlas checks that it is an object and that no other overlay claims the same key. It is **never** merged into the effective SCHEMA and core never reads it. Ids whose slot would equal a core or envelope key (`memory`, `atlas-release`, `templates`, …) get no slot. Do not make agent behaviour depend on the slot. Keep the package's operational contract in its own docs.
+  - **Minimum reader.** The slot is accepted from Atlas 0.13.1. Older readers merge it as a generic root key, so on a SCHEMA 2.0 store their compile fails `schema_v2` (`'<slot>' was unexpected`). The contract stamp stays `0.13.0` and does not record this. A SCHEMA 2.0 store that holds an overlay with a slot, installed directly or kept through `schema upgrade --to 2.0`, needs Atlas >= 0.13.1 to compile. On a 2.0 store, `schema install` prints a note when it accepts a slot.
+  - **Roll back or mix versions.** Before running Atlas < 0.13.1 on such a store, reinstall a slot-free release of the overlay (atlas-tasks >= 0.6.1) with `schema install`, or `schema uninstall` it. Then compile with the older Atlas.
+  - SCHEMA 1.0 stores are unaffected: older readers accept extra overlay root keys there.
 - **Other extra root keys** (for example `kva`):
   - On a SCHEMA 1.0 store, they are allowed if they are **not** already on core SCHEMA and **not** used by another overlay.
   - On a SCHEMA 2.0 store, `schema install` rejects them (`contribution-v1`). `schema upgrade --to 2.0` blocks until they are removed.
