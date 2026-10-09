@@ -140,10 +140,10 @@ def run_install(
     except OSError as e:
         _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
         return 2
-    try:
-        return _install_locked(r, ov, src_dir, cid, force, as_json)
-    finally:
-        release_store_lock(lock)
+    # On an exception, keep the lock: a partial install needs an operator to check the store.
+    code = _install_locked(r, ov, src_dir, cid, force, as_json)
+    release_store_lock(lock)
+    return code
 
 
 def _install_locked(

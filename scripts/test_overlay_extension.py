@@ -13,6 +13,8 @@ Released overlays under fixtures/contributions/ are installed verbatim.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import shutil
 import subprocess
@@ -25,6 +27,7 @@ ATLAS = ROOT / "scripts" / "atlas.py"
 FIXTURES = ROOT / "fixtures" / "contributions"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from atlas_cli.commands import schema_cmd  # noqa: E402
 from atlas_cli.core import schema_upgrade  # noqa: E402
 from atlas_cli.core.overlay import (  # noqa: E402
     extension_key,
@@ -223,6 +226,37 @@ def main() -> int:
         s = store("l-install-releases-2.0", "2.0")
         r = install(overlay("l-bad", {**base, "kva": {}}), s)
         check("l-install-releases-on-refusal", r.returncode == 2 and not (s / lock_name).exists(), out(r)[:200])
+
+        # L2: an install interrupted after the overlay write keeps its lock;
+        # a refusal that returns normally still releases it.
+        s = store("l-install-interrupted")
+        original_receipt = schema_cmd.write_receipt
+
+        def receipt_fails(*_a, **_k):
+            raise OSError("simulated interruption")
+
+        schema_cmd.write_receipt = receipt_fails
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                schema_cmd.run_install(str(v06), str(s))
+            check("l-install-interrupted-raises", False, "install returned normally")
+        except OSError as e:
+            check("l-install-interrupted-raises", "simulated interruption" in str(e), str(e)[:200])
+        finally:
+            schema_cmd.write_receipt = original_receipt
+        lock_text = (s / lock_name).read_text() if (s / lock_name).is_file() else ""
+        check(
+            "l-install-interrupted-keeps-lock",
+            lock_text.split()[:1] == [schema_upgrade.INSTALL_LOCK_TAG]
+            and overlay_path(s, "atlas-tasks").is_file(),
+            lock_text[:100],
+        )
+        r = install(v06, s)
+        check("l-install-interrupted-blocks-next", r.returncode == 2 and lock_name in out(r), out(r)[:200])
+        s = store("l-install-refusal-inproc", "2.0")
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = schema_cmd.run_install(str(overlay("l-bad-inproc", {**base, "kva": {}})), str(s))
+        check("l-install-refusal-releases-inproc", code == 2 and not (s / lock_name).exists())
 
         s = store("l-upgrade-blocked")
         (s / lock_name).write_text(schema_upgrade.INSTALL_LOCK_TAG + "\n")
