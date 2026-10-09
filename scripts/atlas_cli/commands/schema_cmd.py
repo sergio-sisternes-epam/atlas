@@ -33,6 +33,7 @@ from ..core.schema import (
 )
 from ..core.schema_upgrade import (
     INSTALL_LOCK_TAG,
+    UNINSTALL_LOCK_TAG,
     UpgradeError,
     acquire_store_lock,
     apply as upgrade_apply,
@@ -246,6 +247,24 @@ def run_uninstall(cid: str, root: str | None, as_json: bool = False) -> int:
     if err:
         _print(as_json, {"ok": False, "error": err, "root": str(r)})
         return 2
+    if not r.is_dir():
+        return _uninstall_locked(r, cid, as_json)
+    # Share the upgrade lock so an upgrade's overlay recheck stays valid until it writes.
+    try:
+        lock = acquire_store_lock(r, UNINSTALL_LOCK_TAG)
+    except FileExistsError:
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r), "id": cid})
+        return 2
+    except OSError as e:
+        _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
+        return 2
+    # On an exception, keep the lock: a partial uninstall needs an operator to check the store.
+    code = _uninstall_locked(r, cid, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _uninstall_locked(r: Path, cid: str, as_json: bool) -> int:
     dest = overlay_path(r, cid)
     if not dest.is_file():
         _print(as_json, {"ok": False, "error": f"no overlay {cid}", "root": str(r)})

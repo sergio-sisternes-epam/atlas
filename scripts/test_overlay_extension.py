@@ -4,9 +4,10 @@
 The slot is the root key equal to contribution_id with '-' replaced by '_'.
 It must be an object, is never merged into the effective contract, and is
 ignored by core. Every other extra overlay root key is still rejected on
-SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, and
-rechecks them under the lock that `schema install` shares. Locks are never
-reclaimed and only their owner removes them.
+SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, each
+against contribution-v1, and rechecks them under the lock that `schema
+install` and `schema uninstall` share. Locks are never reclaimed and only
+their owner removes them.
 
 Released overlays under fixtures/contributions/ are installed verbatim.
 """
@@ -31,6 +32,7 @@ from atlas_cli.commands import schema_cmd  # noqa: E402
 from atlas_cli.core import schema_upgrade  # noqa: E402
 from atlas_cli.core.overlay import (  # noqa: E402
     extension_key,
+    receipt_path,
     merge_overlays,
     overlay_path,
     write_json,
@@ -208,7 +210,51 @@ def main() -> int:
         errs = " ".join(pre.get("target_errors") or [])
         check("n3b-upgrade-blocked", pre.get("ok") is False and "overlay_extension" in errs, errs[:300])
 
-        # L: install and upgrade share .atlas-upgrade.lock.
+        # N4: upgrade validates every installed overlay against contribution-v1,
+        # exactly as a 2.0 install would.
+        def snapshot(s: Path) -> dict:
+            files = {p.name: p.read_bytes() for p in sorted((s / "schema.d").glob("*"))}
+            return {"contract": (s / "CONTRACT.json").read_bytes(), "schema.d": files}
+
+        bad_claim = {"contribution_id": "discuss", "claimed_folders": [1]}
+        s = store("n4-2.0", "2.0")
+        r = install(overlay("n4-claim-2.0", bad_claim), s)
+        check("n4-install-2.0-rejected", r.returncode == 2 and "$.claimed_folders[0]" in out(r), out(r)[:300])
+        s = store("n4")
+        r = install(overlay("n4-claim", bad_claim), s)
+        check("n4-install-1.0", r.returncode == 0, out(r)[:300])
+        before = snapshot(s)
+        r = run(["schema", "upgrade", "--to", "2.0", "--root", str(s), "--json"])
+        pre = as_json(r)
+        errs = " ".join(pre.get("target_errors") or [])
+        check(
+            "n4-upgrade-preview-blocked",
+            r.returncode == 2
+            and pre.get("ok") is False
+            and "schema.d/discuss.json" in errs
+            and "$.claimed_folders[0]" in errs,
+            errs[:300],
+        )
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        check(
+            "n4-upgrade-apply-refused",
+            r.returncode == 2
+            and "schema.d/discuss.json" in out(r)
+            and snapshot(s) == before
+            and not (s / schema_upgrade.LOCK_NAME).exists(),
+            out(r)[:300],
+        )
+        s = store("n4-valid")
+        r = install(overlay("n4-valid", {"contribution_id": "discuss", "claimed_folders": ["discuss"]}), s)
+        check("n4-valid-install-1.0", r.returncode == 0, out(r)[:300])
+        pre = as_json(run(["schema", "upgrade", "--to", "2.0", "--root", str(s), "--json"]))
+        check("n4-valid-preview-ok", pre.get("ok") is True and not pre.get("target_errors"), str(pre.get("target_errors")))
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        check("n4-valid-apply", r.returncode == 0, out(r)[:300])
+        r = compile_(s)
+        check("n4-valid-compile-after-upgrade", r.returncode == 0, out(r)[-300:])
+
+        # L: install, uninstall and upgrade share .atlas-upgrade.lock.
         lock_name = schema_upgrade.LOCK_NAME
         s = store("l-install-blocked")
         (s / lock_name).write_text(schema_upgrade.UPGRADE_LOCK_TAG + "\n")
@@ -274,8 +320,8 @@ def main() -> int:
 
         # R: an install that lands after the preview but before the lock is
         # caught by the recheck under the lock, before any write.
-        def race(body: dict | None) -> Path:
-            s = store(f"r-{body['contribution_id'] if body else 'none'}")
+        def race(body: dict | None, name: str = "") -> Path:
+            s = store(name or f"r-{body['contribution_id'] if body else 'none'}")
             original = schema_upgrade.acquire_store_lock
 
             def acquire_then_install(root: Path, tag: str) -> Path:
@@ -313,6 +359,124 @@ def main() -> int:
             check("r-upgrade-ok-after-late-valid-install", r.returncode == 0, out(r)[-300:])
         except schema_upgrade.UpgradeError as e:
             check("r-upgrade-ok-after-late-valid-install", False, str(e)[:300])
+
+        try:
+            race({"contribution_id": "discuss", "claimed_folders": [1]}, "r-envelope")
+            check("r-upgrade-refused-after-late-invalid-envelope", False, "apply succeeded")
+        except schema_upgrade.UpgradeError as e:
+            s = stores / "r-envelope"
+            schema = json.loads((s / "CONTRACT.json").read_text())
+            check(
+                "r-upgrade-refused-after-late-invalid-envelope",
+                "schema.d/discuss.json" in str(e)
+                and schema.get("schema_version") == "1.0"
+                and not overlay_path(s, schema_upgrade.COMPAT_ID).exists()
+                and not (s / lock_name).exists(),
+                str(e)[:300],
+            )
+
+        # U: uninstall takes the same lock for its whole read/delete operation.
+        def uninstall(cid: str, s: Path) -> subprocess.CompletedProcess[str]:
+            return run(["schema", "uninstall", cid, "--root", str(s), "--json"])
+
+        s = store("u-blocked")
+        install(v06, s)
+        for holder in (schema_upgrade.UPGRADE_LOCK_TAG, schema_upgrade.INSTALL_LOCK_TAG):
+            (s / lock_name).write_text(holder + "\n")
+            r = uninstall("atlas-tasks", s)
+            check(
+                f"u-refused-while-{holder}-holds-lock",
+                r.returncode == 2
+                and "Remove the lock only if" in out(r)
+                and overlay_path(s, "atlas-tasks").is_file()
+                and receipt_path(s, "atlas-tasks").is_file()
+                and (s / lock_name).read_text() == holder + "\n",
+                out(r)[:300],
+            )
+        (s / lock_name).unlink()
+
+        s = store("u-releases")
+        install(v06, s)
+        r = uninstall("atlas-tasks", s)
+        check(
+            "u-releases-on-success",
+            r.returncode == 0
+            and not overlay_path(s, "atlas-tasks").exists()
+            and not receipt_path(s, "atlas-tasks").exists()
+            and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        r = uninstall("atlas-tasks", s)
+        check("u-releases-on-refusal", r.returncode == 2 and not (s / lock_name).exists(), out(r)[:200])
+
+        # U2: an uninstall interrupted mid-delete keeps its lock and blocks the next writer.
+        s = store("u-interrupted")
+        install(v06, s)
+        original_resolve = schema_cmd.resolve_under_root
+
+        def resolve_fails(*_a, **_k):
+            raise OSError("simulated interruption")
+
+        schema_cmd.resolve_under_root = resolve_fails
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                schema_cmd.run_uninstall("atlas-tasks", str(s))
+            check("u-interrupted-raises", False, "uninstall returned normally")
+        except OSError as e:
+            check("u-interrupted-raises", "simulated interruption" in str(e), str(e)[:200])
+        finally:
+            schema_cmd.resolve_under_root = original_resolve
+        lock_text = (s / lock_name).read_text() if (s / lock_name).is_file() else ""
+        check("u-interrupted-keeps-lock", lock_text.split()[:1] == [schema_upgrade.UNINSTALL_LOCK_TAG], lock_text[:100])
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        check(
+            "u-interrupted-blocks-upgrade",
+            r.returncode == 2 and "schema uninstall is running or was interrupted" in out(r),
+            out(r)[:300],
+        )
+
+        # U3: an uninstall attempted while an upgrade holds the lock (after the
+        # compat overlay is written, before the contract is replaced) cannot
+        # delete atlas-compat-v1 or any other overlay.
+        s = store("u-race")
+        install(v06, s)
+        original_write_receipt = schema_upgrade.write_receipt
+        attempts: dict[str, int] = {}
+
+        def write_receipt_then_uninstall(root: Path, cid: str, *a, **k):
+            res = original_write_receipt(root, cid, *a, **k)
+            for victim in (schema_upgrade.COMPAT_ID, "atlas-tasks"):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    attempts[victim] = schema_cmd.run_uninstall(victim, str(root))
+            return res
+
+        schema_upgrade.write_receipt = write_receipt_then_uninstall
+        try:
+            schema_upgrade.apply(s)
+            upgrade_err = ""
+        except schema_upgrade.UpgradeError as e:
+            upgrade_err = str(e)
+        finally:
+            schema_upgrade.write_receipt = original_write_receipt
+        schema = json.loads((s / "CONTRACT.json").read_text())
+        check(
+            "u-race-uninstall-refused",
+            attempts == {schema_upgrade.COMPAT_ID: 2, "atlas-tasks": 2},
+            str(attempts),
+        )
+        check(
+            "u-race-overlays-kept",
+            not upgrade_err
+            and schema.get("schema_version") == "2.0"
+            and overlay_path(s, schema_upgrade.COMPAT_ID).is_file()
+            and receipt_path(s, schema_upgrade.COMPAT_ID).is_file()
+            and overlay_path(s, "atlas-tasks").is_file()
+            and receipt_path(s, "atlas-tasks").is_file()
+            and not (s / lock_name).exists(),
+            upgrade_err[:300],
+        )
+        r = compile_(s)
+        check("u-race-compile-after-upgrade", r.returncode == 0, out(r)[-300:])
 
         # D: locks are never reclaimed from contract state, and only their owner removes them.
         s = store("d-token")

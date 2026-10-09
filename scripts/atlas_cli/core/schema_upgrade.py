@@ -13,13 +13,21 @@ from typing import Any
 from .jsonutil import StrictJsonError, load_strict
 from .overlay import (
     SCHEMA_D,
+    list_overlays,
+    load_overlay,
     merge_overlays,
     overlay_path,
     receipt_path,
     write_json,
     write_receipt,
 )
-from .recall_config import default_recall_block, schema_version, validate_store_v2
+from .recall_config import (
+    RecallConfigError,
+    default_recall_block,
+    schema_version,
+    validate_contribution,
+    validate_store_v2,
+)
 from .schema import find_contract_path, load_schema
 
 KNOWN_ROOT_KEYS = frozenset(
@@ -48,6 +56,7 @@ COMPAT_ID = "atlas-compat-v1"
 LOCK_NAME = ".atlas-upgrade.lock"
 UPGRADE_LOCK_TAG = "schema-upgrade-2.0"
 INSTALL_LOCK_TAG = "schema-install"
+UNINSTALL_LOCK_TAG = "schema-uninstall"
 
 
 class UpgradeError(ValueError):
@@ -96,8 +105,10 @@ def lock_held_message(root: Path) -> str:
         what = "a schema install is running or was interrupted"
     elif holder == UPGRADE_LOCK_TAG:
         what = "a schema upgrade is running or was interrupted"
+    elif holder == UNINSTALL_LOCK_TAG:
+        what = "a schema uninstall is running or was interrupted"
     else:
-        what = "a schema upgrade or install is running or was interrupted"
+        what = "a schema upgrade, install or uninstall is running or was interrupted"
     return (
         f"{LOCK_NAME} present: {what}; retry when it finishes. Remove the lock only if "
         "no Atlas command is running and the contract file and schema.d/ have been checked"
@@ -123,6 +134,7 @@ def preview(root: Path) -> dict[str, Any]:
         merged, critical, _ = merge_overlays(target, root)
         v2_errs = [f"installed overlays: {i['path']}: {i['id']}: {i['msg']}" for i in critical]
         v2_errs += [f"installed overlays: {e}" for e in validate_store_v2(merged)]
+        v2_errs += _overlay_envelope_errors(root)
     return {
         "ok": version != "2.0" and not unknown and not v2_errs,
         "from": version,
@@ -134,6 +146,25 @@ def preview(root: Path) -> dict[str, Any]:
         "notes": notes,
         "overlay": overlay,
     }
+
+
+def _overlay_envelope_errors(root: Path) -> list[str]:
+    """Check every installed overlay against contribution-v1, as a 2.0 install would."""
+    errs: list[str] = []
+    for cid in list_overlays(root):
+        if cid == COMPAT_ID:
+            # Replaced by the overlay this upgrade writes.
+            continue
+        ov, err = load_overlay(root, cid)
+        if err or ov is None:
+            continue  # already reported by merge_overlays
+        relp = f"{SCHEMA_D}/{cid}.json"
+        try:
+            cerrs = validate_contribution(ov)
+        except RecallConfigError as e:
+            cerrs = [str(e)]
+        errs += [f"installed overlays: {relp}: overlay_contribution: {e}" for e in cerrs]
+    return errs
 
 
 def _target_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -186,7 +217,7 @@ def apply(root: Path) -> dict[str, Any]:
         lock = acquire_store_lock(root, UPGRADE_LOCK_TAG)
     except FileExistsError as e:
         raise UpgradeError(lock_held_message(root)) from e
-    # Installs take the same lock, so the overlay set is stable from here on.
+    # Installs and uninstalls take the same lock, so the overlay set is stable from here on.
     # Recheck it before any write; nothing is written yet, so release on refusal.
     try:
         pre = preview(root)

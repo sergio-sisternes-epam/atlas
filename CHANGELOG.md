@@ -24,15 +24,22 @@
   example a generic `kva` root key) previews `ok=false` with the overlay
   errors in `target_errors`, and `--apply` refuses with zero writes.
   Previously the upgrade succeeded and the next compile failed `schema_v2`.
+  The upgrade also validates every installed overlay against
+  `contribution-v1` (the 2.0 envelope), as a 2.0 `schema install` would, so
+  an overlay such as `"claimed_folders": [1]` now blocks it with the overlay
+  path in `target_errors`.
 - `schema install` now takes the store's `.atlas-upgrade.lock` while it
   validates and writes. While the lock is held, by an upgrade or another
   install, it exits 2 with zero writes. `schema upgrade --apply` rechecks
   installed overlays after acquiring the lock and before any write, so an
   install that races the upgrade can no longer leave a 2.0 store that fails
   compile. When the lock is already held, apply refuses with a clear message
-  instead of a traceback.
-- The lock now carries a unique token. An install or upgrade only removes a
-  lock whose token matches the one it wrote. Apply no longer reclaims an
+  instead of a traceback. `schema uninstall` now takes the same lock for its
+  whole read and delete, and exits 2 with zero writes while it is held, so it
+  can no longer remove an overlay, such as `atlas-compat-v1`, after an
+  upgrade's recheck.
+- The lock now carries a unique token. An install, uninstall or upgrade only
+  removes a lock whose token matches the one it wrote. Apply no longer reclaims an
   existing lock when the contract already reads 2.0: since v0.10.0 that let
   a second, concurrent upgrade delete the first upgrade's live lock. Every
   existing lock is treated as held. A lock left by an interrupted run must
@@ -44,8 +51,8 @@
 
 - Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
   documents the extension slot, its minimum reader and rollback steps, the
-  `overlay_extension` issue and the shared install/upgrade lock, and asks
-  packages to test overlays on both store versions. Path `configure` notes
+  `overlay_extension` issue and the shared install/uninstall/upgrade lock,
+  and asks packages to test overlays on both store versions. Path `configure` notes
   that installed overlays can block the upgrade, that apply rechecks them
   under the lock, and that a kept slot needs Atlas >= 0.13.1 after the
   upgrade.

@@ -104,7 +104,7 @@ python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <root> [--
 
 Install copies **new-type** templates only. It will not overwrite core `templates/work.md`.
 
-Install and `schema upgrade --apply` share the store lock `.atlas-upgrade.lock`. If the lock is present, both exit 2 and write nothing. Atlas never removes a lock it did not create, whatever the contract version. Retry when the other command finishes. A lock left by an interrupted install or upgrade stays until an operator deletes it. Delete it only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
+Install, `schema uninstall` and `schema upgrade --apply` share the store lock `.atlas-upgrade.lock`. If the lock is present, each exits 2 and writes nothing. Atlas never removes a lock it did not create, whatever the contract version. Retry when the other command finishes. A lock left by an interrupted install, uninstall or upgrade stays until an operator deletes it. Delete it only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
 
 ### 3a. Shipping an Atlas overlay in an APM package
 
@@ -150,6 +150,8 @@ python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <root>
 ```
 
 Deletes `schema.d/<id>.json` and paths on that overlay’s receipt (overlay + templates the CLI copied). Does **not** delete pages the agent authored later. Compile may still see those pages; unknown `type` stays legal under OKF. If they used types that lived only on the overlay, the CLI prints a warning.
+
+Uninstall takes the store lock (see step 3). While it is held, uninstall exits 2 and deletes nothing.
 
 ### 5. Compile (always)
 
