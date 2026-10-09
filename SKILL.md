@@ -156,7 +156,7 @@ still copies into staging; do not use it for strategy moves.
 | **ci** | Assess, install, or repair CI for a mount with a contract file (`CONTRACT.json` or `SCHEMA.json`) | `references/paths/ci.md` |
 | **history** | Read one store path at a git rev; a `relates_to.ref` edge is not a tip hop | `references/paths/history.md` |
 | **version-hint** | Add one living-page `relates_to.ref` hint; grain stays deferred | `references/paths/version-hint.md` |
-| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary | `references/paths/prune.md`
+| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary | `references/paths/prune.md` |
 | **help** | Explain installed modules without running them | `references/paths/help.md` |
 | **getting-started** | First-use purpose, prerequisites, first journey, storage choices | `references/paths/getting-started.md` |
 

@@ -27,8 +27,10 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
     _rewrite_store,
     _unlink_store,
     _empty_relates,
+    _existing_ref_edges,
     _write_all,
     append_ref_edges,
+    rewrite_relates_to,
     run_prune,
 )
 from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: E402
@@ -2098,6 +2100,81 @@ def main() -> int:
             failures.append(f"commented empty relates_to gained a second key:\n{folded_comment}")
         else:
             print("[PASS] append treats a commented empty relates_to as empty")
+
+        quoted_empty = '---\ntype: document\ntitle: Summary\n"relates_to": []\n---\n\nbody\n'
+        folded_quoted = append_ref_edges(quoted_empty, [("dead.md", "derived_from", "abc")])
+        single_quoted = "---\ntype: document\ntitle: Summary\n'relates_to':\n---\n\nbody\n"
+        folded_single = append_ref_edges(single_quoted, [("dead.md", "derived_from", "abc")])
+        if (
+            not _empty_relates('"relates_to": []')
+            or not _empty_relates("'relates_to':")
+            or folded_quoted.count("relates_to") != 1
+            or folded_single.count("relates_to") != 1
+            or "path: dead.md" not in folded_quoted
+            or "path: dead.md" not in folded_single
+        ):
+            failures.append(
+                "quoted relates_to gained a second key:\n"
+                f"{folded_quoted}\n{folded_single}"
+            )
+        else:
+            print("[PASS] append keeps a quoted relates_to key as one list")
+
+        quoted_block = (
+            "---\n"
+            "type: document\ntitle: Living\n"
+            '"relates_to":\n'
+            "  - path: dead.md\n"
+            "    kind: related\n"
+            "---\n\nbody\n"
+        )
+        rewritten, count = rewrite_relates_to(quoted_block, {"dead.md"}, "summary.md", False)
+        if count != 1 or "path: dead.md" in rewritten or "path: summary.md" not in rewritten:
+            failures.append(f"quoted relates_to key was not rewritten:\n{rewritten}")
+        else:
+            print("[PASS] prune rewrites a quoted relates_to key")
+
+        indented = (
+            "---\n"
+            "type: document\ntitle: Living\n"
+            "relates_to:\n"
+            "  - note: |\n"
+            "      - path: dead.md\n"
+            "    path: dead.md\n"
+            "    kind: related\n"
+            "---\n\nbody\n"
+        )
+        rewritten_indent, count_indent = rewrite_relates_to(
+            indented, {"dead.md"}, "summary.md", False
+        )
+        if (
+            count_indent != 1
+            or "      - path: dead.md" not in rewritten_indent
+            or rewritten_indent.count("path: summary.md") != 1
+            or rewritten_indent.count("path: dead.md") != 1
+        ):
+            failures.append(
+                f"indented block-scalar bullet was rewritten:\n{rewritten_indent}"
+            )
+        else:
+            print("[PASS] prune leaves an indented block-scalar bullet unchanged")
+
+        history_text = (
+            "---\n"
+            "relates_to:\n"
+            "  - note: |\n"
+            "      - path: dead.md\n"
+            "        kind: derived_from\n"
+            "        ref: abc\n"
+            "    path: kept.md\n"
+            "    kind: related\n"
+            "---\n"
+        )
+        have = _existing_ref_edges(history_text)
+        if ("dead.md", "derived_from", "abc") in have:
+            failures.append(f"block-scalar bullet counted as a history edge: {have}")
+        else:
+            print("[PASS] history scan ignores an indented block-scalar bullet")
 
         broken = tmp / "broken-schema"
         broken_init = run(["init", "--root", str(broken), "--json"])

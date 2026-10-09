@@ -478,7 +478,7 @@ title: Keeper
 created: 2026-10-05
 relates_to:
   - note: |
-      path: old.md
+      - path: old.md
     path: old.md
     kind: related
 """,
@@ -492,7 +492,7 @@ title: Prose only
 created: 2026-10-05
 relates_to:
   - note: |
-      path: old.md
+      - path: old.md
     path: other.md
     kind: related
 """,

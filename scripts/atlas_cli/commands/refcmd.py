@@ -27,8 +27,15 @@ from ..core.schema import load_schema, staging_dir_name
 SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
 _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
-TOP_KEY = re.compile(r"^[A-Za-z_][\w-]*:")
-ITEM_START = re.compile(r"^\s*-\s+")
+TOP_KEY = re.compile(
+    r"""^(?:[A-Za-z_][\w-]*|(['"])[A-Za-z_][\w-]*\1)\s*:"""
+)
+ITEM_START = re.compile(r"^(\s*)-\s+")
+_RELATES_LINE = re.compile(
+    r"""^(?:relates_to|(?P<q>['"])relates_to(?P=q))\s*:(?P<value>.*)$"""
+)
+_EMPTY_RELATES_VALUE = re.compile(r"^\s*(?:\[\]|~|null|Null|NULL)?\s*(?:#.*)?$")
+_BLOCK_RELATES_VALUE = re.compile(r"^\s*(?:#.*)?$")
 FIELD = re.compile(
     r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
 )
@@ -294,9 +301,19 @@ def _needs_yaml_item(lines: list[str]) -> bool:
     return False
 
 
+def _path_is_plain_scalar(lines: list[str]) -> bool:
+    """True when the item's top-level path can be retargeted without re-emitting."""
+    for index in _top_level_field_indexes(lines):
+        field = _field_parts(lines[index])
+        if field and field[1] == "path":
+            value = field[2].strip()
+            return bool(value) and not _BLOCK_SCALAR.match(value)
+    return False
+
+
 def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
-    """Turn a block scalar that names a drop into the plain form the rewriter edits."""
-    if not lines or not _needs_yaml_item(lines):
+    """Turn a block-scalar path that names a drop into the plain form the rewriter edits."""
+    if not lines or _path_is_plain_scalar(lines) or not _needs_yaml_item(lines):
         return lines
     try:
         value = load_yaml_value("\n".join(lines))
@@ -345,12 +362,35 @@ def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bo
     return rewritten, True
 
 
+def _relates_value(line: str) -> str | None:
+    match = _RELATES_LINE.match(line)
+    if not match:
+        return None
+    return match.group("value")
+
+
+def _is_relates_block(line: str) -> bool:
+    value = _relates_value(line)
+    return value is not None and bool(_BLOCK_RELATES_VALUE.match(value))
+
+
+def _item_marker_indent(line: str) -> str | None:
+    match = ITEM_START.match(line)
+    if not match:
+        return None
+    return match.group(1)
+
+
 def _rewrite_section(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str], int]:
     preamble: list[str] = []
     items: list[list[str]] = []
     current: list[str] | None = None
+    base: str | None = None
     for line in lines:
-        if ITEM_START.match(line):
+        indent = _item_marker_indent(line)
+        # A deeper bullet, including one inside a block scalar, is not a new item.
+        if indent is not None and (base is None or indent == base):
+            base = indent
             if current is not None:
                 items.append(current)
             current = [line]
@@ -455,13 +495,13 @@ def _expand_flow_relates(text: str, drop: set[str] | None = None, *, force: bool
     changed = False
     while index < len(lines):
         line = lines[index]
-        match = re.match(r"^relates_to:\s*(\S.*)$", line)
-        if not match:
+        value = _relates_value(line)
+        if value is None or not value.strip() or value.strip().startswith("#"):
             out.append(line)
             index += 1
             continue
         raw_lines = [line]
-        value_lines = [match.group(1)]
+        value_lines = [value.lstrip()]
         index += 1
         while not _balanced_flow("\n".join(value_lines)) and index < len(lines) and not TOP_KEY.match(lines[index]):
             raw_lines.append(lines[index])
@@ -536,7 +576,7 @@ def _expand_flow_map_items(text: str, drop: set[str] | None = None, *, force: bo
     while index < len(lines):
         line = lines[index]
         if TOP_KEY.match(line):
-            in_relates = bool(re.match(r"^relates_to:\s*$", line))
+            in_relates = _is_relates_block(line)
             out.append(line)
             index += 1
             continue
@@ -582,7 +622,7 @@ def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool
     index = 0
     while index < len(lines):
         line = lines[index]
-        if _empty_relates(line) or re.match(r"^relates_to:\s*$", line):
+        if _empty_relates(line) or _is_relates_block(line):
             out.append(line)
             index += 1
             section: list[str] = []
@@ -611,15 +651,17 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
     in_relates = False
     current: list[str] | None = None
     items: list[list[str]] = []
+    item_indent: str | None = None
     for line in text[3:end].splitlines():
         if TOP_KEY.match(line):
             if current is not None and in_relates:
                 items.append(current)
             current = None
-            flow = re.match(r"^relates_to:\s*(\S.*)$", line)
-            in_relates = bool(_empty_relates(line) or re.match(r"^relates_to:\s*$", line))
-            if flow:
-                blob = flow.group(1).strip()
+            item_indent = None
+            value = _relates_value(line)
+            in_relates = bool(_empty_relates(line) or _is_relates_block(line))
+            if value is not None and value.strip() and not value.strip().startswith("#"):
+                blob = value.strip()
                 if blob.startswith(("[", "{")):
                     try:
                         parsed = _parse_relation_value(blob if blob.startswith("[") else f"[{blob}]")
@@ -635,7 +677,9 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
             continue
         if not in_relates:
             continue
-        if ITEM_START.match(line):
+        indent = _item_marker_indent(line)
+        if indent is not None and (item_indent is None or indent == item_indent):
+            item_indent = indent
             if current is not None:
                 items.append(current)
             current = [line]
@@ -656,7 +700,8 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
 
 
 def _empty_relates(line: str) -> bool:
-    return bool(re.match(r"^relates_to:\s*(?:\[\]|~|null|Null|NULL)?\s*(?:#.*)?$", line))
+    value = _relates_value(line)
+    return value is not None and bool(_EMPTY_RELATES_VALUE.match(value))
 
 
 def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
@@ -692,7 +737,7 @@ def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
             inserted = True
             index += 1
             continue
-        if re.match(r"^relates_to:\s*$", line):
+        if _is_relates_block(line):
             out.append(line)
             index += 1
             while index < len(lines) and not TOP_KEY.match(lines[index]):
