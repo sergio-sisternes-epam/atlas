@@ -310,7 +310,12 @@ class NanographDriver(BaseDriver):
         return {"fresh": False, "reason": "missing or stale"}
 
     def ensure_index(
-        self, store: Path, source: dict[str, Any], wait: float | None = None, allow_legacy: bool = True
+        self,
+        store: Path,
+        source: dict[str, Any],
+        wait: float | None = None,
+        allow_legacy: bool = True,
+        force: bool = False,
     ) -> Path:
         det = self._ready()
         digest = str(source.get("corpus_digest") or "")
@@ -319,8 +324,8 @@ class NanographDriver(BaseDriver):
         base = self.index_base(store)
         self._guard(store, base / digest[:16])
         where = index_location.describe(store, "nanograph")
-        gen_dir = self._current(base, digest, det.version)
-        if gen_dir is None and allow_legacy:
+        gen_dir = None if force else self._current(base, digest, det.version)
+        if gen_dir is None and allow_legacy and not force:
             legacy = self._legacy_generation(store, digest, det.version)
             if legacy is not None:
                 self.last_index = {
@@ -366,7 +371,7 @@ class NanographDriver(BaseDriver):
         if gen_dir is None:
             try:
                 gen_dir, built = index_publish.locked_build(
-                    base, lambda: self._current(base, digest, det.version), build, wait=wait
+                    base, lambda: None if force else self._current(base, digest, det.version), build, wait=wait
                 )
             except index_publish.IndexBusy as e:
                 raise DriverError(str(e)) from e

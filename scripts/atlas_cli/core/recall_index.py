@@ -208,6 +208,7 @@ def ensure_fresh(
     allow_legacy: bool = True,
     wait: float | None = None,
     guard_ignore: bool = False,
+    force: bool = False,
 ) -> Freshness:
     """Return a generation matching the current corpus, building one when needed.
 
@@ -217,13 +218,14 @@ def ensure_fresh(
     only), else build under the lock and publish atomically. Raises
     :class:`IndexLocationError` (unsafe path), :class:`IndexNotBuilt`
     (incomplete corpus), :class:`index_publish.IndexBusy`, ``OSError`` or
-    ``sqlite3.Error``; callers fall back to a temporary index.
+    ``sqlite3.Error``; callers fall back to a temporary index. ``force`` skips every freshness check
+    and always publishes a new generation.
     """
     root = index_root(store)
     base = index_location.indexes_base(store)
     _reject_symlink_escape(base, root)
     fingerprint = cheap_fingerprint(store, schema)
-    hit = _fresh_new(root, fingerprint=fingerprint)
+    hit = None if force else _fresh_new(root, fingerprint=fingerprint)
     if hit is not None:
         return Freshness(hit, False)
     if projection is None:
@@ -231,7 +233,7 @@ def ensure_fresh(
     if not projection.get("complete"):
         raise IndexNotBuilt("incomplete")
     digest = str(projection["corpus_digest"])
-    hit = _fresh_new(root, digest=digest)
+    hit = None if force else _fresh_new(root, digest=digest)
     if hit is not None:
         pointer = {**hit.pointer, "cheap_fingerprint": fingerprint}
         try:
@@ -240,7 +242,7 @@ def ensure_fresh(
             pass
         return Freshness(Generation(hit.db, pointer, False), False)
     current = _read_pointer(root / CURRENT_NAME)
-    if allow_legacy and not (current and current.get("complete") and _pointer_db(root, current.get("db"))):
+    if allow_legacy and not force and not (current and current.get("complete") and _pointer_db(root, current.get("db"))):
         legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
         if legacy and legacy.get("complete") and legacy.get("corpus_digest") == digest:
             db = _legacy_pointer_db(store, legacy.get("db"))
@@ -276,7 +278,7 @@ def ensure_fresh(
         return Generation(dest / DB_NAME, pointer, False)
 
     gen, built = index_publish.locked_build(
-        root, lambda: _fresh_new(root, digest=digest), build, wait=wait
+        root, lambda: None if force else _fresh_new(root, digest=digest), build, wait=wait
     )
     return Freshness(gen, built, previous if built else None)
 
@@ -286,6 +288,7 @@ def publish_generation(
     schema: dict[str, Any] | None,
     focused: bool,
     projection: dict[str, Any] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Publish a complete generation of a recall-enabled store under the project-owned root.
 
@@ -295,18 +298,19 @@ def publish_generation(
         raise IndexError_("focused compile cannot publish a complete generation")
     if not recall_enabled(schema):
         return {"published": False, "reason": "recall_disabled"}
-    return publish_fts5(store, schema, projection=projection)
+    return publish_fts5(store, schema, projection=projection, force=force)
 
 
 def publish_fts5(
     store: Path,
     schema: dict[str, Any] | None,
     projection: dict[str, Any] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Make the new-location fts5 index fresh (any store); legacy is never used or written."""
     where = index_location.describe(store, DRIVER_TYPE)
     try:
-        fresh = ensure_fresh(store, schema, projection=projection, allow_legacy=False)
+        fresh = ensure_fresh(store, schema, projection=projection, allow_legacy=False, force=force)
     except IndexNotBuilt as e:
         return {"published": False, "reason": e.reason, **where}
     pointer = fresh.generation.pointer

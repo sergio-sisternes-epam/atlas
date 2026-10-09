@@ -15,6 +15,7 @@ from .commands import resolve as cmd_resolve
 from .commands import authcmd as cmd_auth
 from .commands import schema_cmd as cmd_schema
 from .commands import recall as cmd_recall
+from .commands import index as cmd_index
 from .commands import graph as cmd_graph
 from .commands import storecmd as cmd_store
 
@@ -436,36 +437,76 @@ def recall_disable_cmd(root: str | None, as_json: bool) -> None:
     raise SystemExit(cmd_recall.run_disable(root, as_json))
 
 
-@recall_group.group("engine", invoke_without_command=True)
-@click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--json", "as_json", is_flag=True)
-@click.pass_context
-def recall_engine_group(ctx: click.Context, root: str | None, as_json: bool) -> None:
-    """Show the preferred recall engine, its source, effective engine and index freshness."""
-    if ctx.invoked_subcommand is None:
-        raise SystemExit(cmd_recall.run_engine(root, as_json))
-
-
-@recall_engine_group.command("set")
-@click.argument("value", type=click.Choice(["grep", "bm25", "nanograph", "default"], case_sensitive=False))
-@click.option("--root", default=None, help="Atlas store root (default: cwd)")
-@click.option("--project", is_flag=True, help="set the project-wide default instead of the store row")
-@click.option("--json", "as_json", is_flag=True)
-def recall_engine_set_cmd(value: str, root: str | None, project: bool, as_json: bool) -> None:
-    """Write recall.engine into atlas-mesh.json (default = remove the setting)."""
-    raise SystemExit(cmd_recall.run_engine_set(root, value, project, as_json))
-
-
 @recall_group.group("index")
 def recall_index_group() -> None:
-    """Recall index generations."""
+    """Deprecated: use `atlas index`."""
 
 
 @recall_index_group.command("build")
 @click.option("--root", default=None)
 @click.option("--json", "as_json", is_flag=True)
 def recall_index_build_cmd(root: str | None, as_json: bool) -> None:
+    """Deprecated alias of `atlas index build` (removal after 0.14.x)."""
     raise SystemExit(cmd_recall.run_index_build(root, as_json))
+
+
+_ENGINE_ARG = "grep|bm25|nanograph"
+_STORE_HELP = "atlas id of a store row in the project's atlas-mesh.json (any spelling that normalises to it)"
+
+
+@main.group("index")
+def index_group() -> None:
+    """Manage the preferred recall engine (grep|bm25|nanograph) and its indexes."""
+
+
+@index_group.command("set")
+@click.argument("engine", metavar=_ENGINE_ARG)
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--default", "default", is_flag=True, help="set the default for all Atlases in the project")
+@click.option("--build", is_flag=True, help="build or refresh the affected indexes now")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_set_cmd(engine: str, root: str | None, store: str | None, default: bool, build: bool, as_json: bool) -> None:
+    """Write recall.engine for one store (default: the store at --root) or the project default."""
+    raise SystemExit(cmd_index.run_set(engine, root, store, default, build, as_json))
+
+
+@index_group.command("unset")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--default", "default", is_flag=True, help="remove the project-wide default")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_unset_cmd(root: str | None, store: str | None, default: bool, as_json: bool) -> None:
+    """Remove recall.engine (index files are left in place)."""
+    raise SystemExit(cmd_index.run_unset(root, store, default, as_json))
+
+
+@index_group.command("show")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_show_cmd(root: str | None, store: str | None, as_json: bool) -> None:
+    """Configured values per level, winning engine, effective engine and index freshness for one store."""
+    raise SystemExit(cmd_index.run_show(root, store, as_json))
+
+
+@index_group.command("status")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_status_cmd(root: str | None, as_json: bool) -> None:
+    """Every store in the project: configured and effective engine, freshness, index directory."""
+    raise SystemExit(cmd_index.run_status(root, as_json))
+
+
+@index_group.command("build")
+@click.option("--root", default=None, help="store or project directory (default: cwd)")
+@click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--all", "all_stores", is_flag=True, help="every mounted store in the project")
+@click.option("--force", is_flag=True, help="rebuild even when the index is fresh")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def index_build_cmd(root: str | None, store: str | None, all_stores: bool, force: bool, as_json: bool) -> None:
+    """Build or refresh the index for the effective engine (exit 1 when any build failed)."""
+    raise SystemExit(cmd_index.run_build(root, store, all_stores, force, as_json))
 
 
 @main.group("graph")

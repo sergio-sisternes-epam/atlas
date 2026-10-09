@@ -381,31 +381,33 @@ def main() -> int:
         )
         lock.unlink()
 
-        # --- recall engine command ----------------------------------------------
-        code, p, out = cli("recall", "engine", "--root", str(store), "--json")
+        # --- atlas index show / set ---------------------------------------------
+        code, p, out = cli("index", "show", "--root", str(store), "--json")
         check(
-            "engine-command",
+            "index-show",
             code == 0
             and p.get("engine_requested") == "bm25"
             and p.get("engine_source") == "store"
             and p.get("engine_effective") == "bm25"
-            and (p.get("index") or {}).get("fresh") is False
+            and (p.get("index") or {}).get("freshness") == "stale"
             and str((p.get("index") or {}).get("index_dir") or "").startswith(".atlas/indexes/fts5/"),
             out[:500],
         )
         snap = tree_snapshot(base)
+        code, p, out = cli("index", "show", "--root", str(store))
+        check("index-show-read-only", code == 0 and "bm25" in out and tree_snapshot(base) == snap, out[:300])
+        code, p, out = cli("index", "set", "grep", "--default", "--root", str(store), "--json")
+        doc = json.loads((project / "atlas-mesh.json").read_text(encoding="utf-8"))
+        check("index-set-default", code == 0 and doc.get("recall") == {"engine": "grep"} and doc["stores"][0].get("recall") == {"engine": "bm25"}, out[:300])
+        code, p, out = cli("index", "unset", "--root", str(store), "--json")
+        doc = json.loads((project / "atlas-mesh.json").read_text(encoding="utf-8"))
+        check("index-unset-store", code == 0 and "recall" not in doc["stores"][0], out[:300])
+        code, p, out = cli("index", "show", "--root", str(store), "--json")
+        check("index-show-after-set", p.get("engine_requested") == "grep" and p.get("engine_source") == "project", out[:300])
+        code, p, out = cli("index", "set", "bm25", "--root", str(lone), "--json")
+        check("index-set-standalone-error", code == 2 and "atlas mount" in out, out[:300])
         code, p, out = cli("recall", "engine", "--root", str(store))
-        check("engine-command-read-only", code == 0 and "bm25" in out and tree_snapshot(base) == snap, out[:300])
-        code, p, out = cli("recall", "engine", "set", "grep", "--project", "--root", str(store), "--json")
-        doc = json.loads((project / "atlas-mesh.json").read_text(encoding="utf-8"))
-        check("engine-set-project", code == 0 and doc.get("recall") == {"engine": "grep"} and doc["stores"][0].get("recall") == {"engine": "bm25"}, out[:300])
-        code, p, out = cli("recall", "engine", "set", "default", "--root", str(store), "--json")
-        doc = json.loads((project / "atlas-mesh.json").read_text(encoding="utf-8"))
-        check("engine-set-clear-store", code == 0 and "recall" not in doc["stores"][0], out[:300])
-        code, p, out = cli("recall", "engine", "--root", str(store), "--json")
-        check("engine-after-set", p.get("engine_requested") == "grep" and p.get("engine_source") == "project", out[:300])
-        code, p, out = cli("recall", "engine", "set", "bm25", "--root", str(lone), "--json")
-        check("engine-set-standalone-error", code != 0 and "atlas-mesh.json" in out, out[:300])
+        check("recall-engine-removed", code == 2 and "No such command" in out, out[:300])
 
         # --- nanograph preference on Linux falls back -----------------------------
         write_mesh(project, row_recall={"engine": "nanograph"})

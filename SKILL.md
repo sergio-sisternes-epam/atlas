@@ -192,8 +192,7 @@ python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine
                        # query tokens: type: kva: status: work_id: path:
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py recall index build --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py recall engine [set grep|bm25|nanograph|default [--project]] --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py index set|unset|show|status|build [grep|bm25|nanograph] --root <atlas> [--store <id>|--default|--all] [--build] [--force]  # replaces deprecated `recall index build`
 python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N]
 python3 <atlas-skill>/scripts/atlas.py graph edges --root <atlas> (--from <page> | --to <page> | --all) [--kind K]... [--include-exits]
 python3 <atlas-skill>/scripts/atlas.py graph neighbours <page> --root <atlas> [--kind K]... [--direction in|out|both] [--hops 1..3] [--where field=value]... [--driver native|nanograph]

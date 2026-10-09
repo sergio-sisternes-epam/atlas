@@ -18,6 +18,7 @@ unavailable; no index is built for an unavailable driver.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -176,11 +177,84 @@ def ignored_notice(profile: str, pref: EnginePreference) -> dict[str, str]:
     }
 
 
+FRESHNESS = ("fresh", "stale", "missing", "legacy-only")
+DIGEST_PREFIX = 12
+
+
+def _short(digest: Any) -> str | None:
+    text = str(digest or "")
+    return text[:DIGEST_PREFIX] or None
+
+
+def _fts5_freshness(store: Path, schema: dict[str, Any] | None) -> dict[str, Any]:
+    from . import recall_index
+    from .projection import project_store
+
+    projection = project_store(store, schema, allow_partial=False)
+    digest = str(projection.get("corpus_digest") or "") if projection.get("complete") else ""
+    out: dict[str, Any] = {"corpus_digest": _short(digest)}
+    root = recall_index.index_root(store)
+    cur = recall_index._read_pointer(root / recall_index.CURRENT_NAME)
+    if cur and cur.get("complete") and recall_index._pointer_db(root, cur.get("db")) is not None:
+        state = "fresh" if digest and cur.get("corpus_digest") == digest else "stale"
+        return {**out, "freshness": state, "generation": cur.get("generation"), "digest": _short(cur.get("corpus_digest"))}
+    legacy = recall_index._read_pointer(recall_index.legacy_root(store) / recall_index.CURRENT_NAME)
+    if legacy and legacy.get("complete") and recall_index._legacy_pointer_db(store, legacy.get("db")) is not None:
+        return {
+            **out,
+            "freshness": "legacy-only",
+            "generation": legacy.get("generation"),
+            "digest": _short(legacy.get("corpus_digest")),
+            "legacy_fresh": bool(digest) and legacy.get("corpus_digest") == digest,
+        }
+    return {**out, "freshness": "missing", "generation": None, "digest": None}
+
+
+def _nanograph_freshness(store: Path) -> dict[str, Any]:
+    from . import graph
+    from .driver_overlay import get_driver
+
+    driver = get_driver("nanograph")
+    digest = str(graph.load_source(store).get("corpus_digest") or "")
+    out: dict[str, Any] = {"corpus_digest": _short(digest)}
+    det = driver.detect()
+    base = driver.index_base(store)
+    pointer: dict[str, Any] = {}
+    try:
+        raw = json.loads((base / "current.json").read_text(encoding="utf-8"))
+        pointer = raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        pointer = {}
+    if det.available and digest:
+        gen = driver._current(base, digest, det.version)
+        if gen is not None:
+            ready = driver._read_ready(gen) or {}
+            return {**out, "freshness": "fresh", "generation": gen.name, "digest": _short(ready.get("corpus_digest"))}
+    has_new = bool(pointer) or (base.is_dir() and any(c.is_dir() and not c.name.startswith(".") for c in base.iterdir()))
+    if has_new:
+        return {
+            **out,
+            "freshness": "stale",
+            "generation": pointer.get("generation"),
+            "digest": _short(pointer.get("corpus_digest")),
+        }
+    legacy = driver.legacy_base(store)
+    if legacy.is_dir() and any(c.is_dir() for c in legacy.iterdir()):
+        return {**out, "freshness": "legacy-only", "generation": None, "digest": None}
+    return {**out, "freshness": "missing", "generation": None, "digest": None}
+
+
 def index_status(store: Path, schema: dict[str, Any] | None, engine: str) -> dict[str, Any]:
-    """Read-only: index directory and freshness for an effective engine (never builds)."""
+    """Read-only: index directory and freshness for an effective engine (never builds).
+
+    ``freshness`` is ``fresh`` | ``stale`` | ``missing`` | ``legacy-only``
+    (``None`` for grep, which needs no index); ``fresh`` is the matching
+    boolean, ``generation`` the published generation id and ``digest`` /
+    ``corpus_digest`` short prefixes of the indexed and current corpus digests.
+    """
     driver_type = INDEX_TYPES.get(engine)
     if driver_type is None:
-        return {"driver_type": None, "index_dir": None, "fresh": None}
+        return {"driver_type": None, "index_dir": None, "freshness": None, "fresh": None}
     out: dict[str, Any] = {"driver_type": driver_type}
     try:
         out.update(index_location.describe(store, driver_type))
@@ -188,31 +262,18 @@ def index_status(store: Path, schema: dict[str, Any] | None, engine: str) -> dic
         out["index_dir"] = None
     try:
         if engine == "bm25":
-            from . import recall_index
-            from .projection import project_store
-
-            projection = project_store(store, schema, allow_partial=False)
-            digest = str(projection.get("corpus_digest") or "")
-            gen = recall_index.find_generation(store, digest=digest) if projection.get("complete") else None
-            out["fresh"] = gen is not None
-            if gen is not None:
-                out["generation"] = gen.pointer.get("generation")
-                if gen.legacy:
-                    out["legacy"] = True
+            out.update(_fts5_freshness(store, schema))
         else:
-            from . import graph
-            from .driver_overlay import get_driver
-
-            source = graph.load_source(store)
-            out.update(get_driver("nanograph").index_state(store, str(source.get("corpus_digest") or "")))
+            out.update(_nanograph_freshness(store))
     except Exception as e:  # noqa: BLE001 - status is advisory
-        out["fresh"] = False
+        out.setdefault("freshness", "missing")
         out["reason"] = str(e)
+    out["fresh"] = out.get("freshness") == "fresh"
     return out
 
 
-def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str) -> dict[str, Any]:
-    """Make the effective engine's new-location index fresh. Raises on failure.
+def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force: bool = False) -> dict[str, Any]:
+    """Make the effective engine's new-location index fresh (``force``: always rebuild). Raises on failure.
 
     Returns ``{"driver", "driver_type", "generation", "rebuilt", "index_dir"}``.
     """
@@ -220,7 +281,7 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str) -> di
     if engine == "bm25":
         from . import recall_index
 
-        fresh = recall_index.ensure_fresh(store, schema, allow_legacy=False)
+        fresh = recall_index.ensure_fresh(store, schema, allow_legacy=False, force=force)
         gen = fresh.generation.pointer.get("generation")
         rebuilt = fresh.rebuilt
     else:
@@ -229,7 +290,7 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str) -> di
 
         driver = get_driver("nanograph")
         source = graph.load_source(store)
-        driver.ensure_index(store, source, allow_legacy=False)
+        driver.ensure_index(store, source, allow_legacy=False, force=force)
         info = driver.last_index or {}
         gen = info.get("generation")
         rebuilt = not info.get("reused", True)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -185,12 +187,6 @@ def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
     return []
 
 
-def _write_atomic(fp: Path, doc: dict[str, Any]) -> None:
-    tmp = fp.with_name(f".{fp.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, fp)
-
-
 def upsert(project: Path, row: dict[str, str]) -> Path:
     doc = load(project)
     sid = row["id"]
@@ -209,36 +205,116 @@ def upsert(project: Path, row: dict[str, str]) -> Path:
     return fp
 
 
-def set_recall_engine(project: Path, store_id: str | None, engine: str | None) -> Path:
-    """Set (or clear, with ``engine=None``) a store row's or the project's ``recall.engine``.
+DEFAULT_TARGET = "default"
 
-    ``store_id=None`` targets the project-wide default. Validates the whole
-    document before an atomic replace; never writes an invalid file.
+
+@dataclass(frozen=True)
+class RecallWrite:
+    path: Path
+    target: str
+    previous: str | None
+    value: str | None
+    changed: bool
+
+
+def detect_indent(text: str) -> str | int:
+    """Indentation of an existing JSON file: a tab, or the width of the first indented line (default 2)."""
+    for line in text.splitlines()[1:]:
+        stripped = line.lstrip(" \t")
+        if not stripped or len(stripped) == len(line):
+            continue
+        lead = line[: len(line) - len(stripped)]
+        if lead.startswith("\t"):
+            return "\t"
+        return len(lead)
+    return 2
+
+
+def write_json_atomic(fp: Path, doc: Any, indent: str | int = 2, trailing_newline: bool = True) -> None:
+    """Temp file in the same directory, flush + fsync, then ``os.replace``; no temp file survives."""
+    text = json.dumps(doc, indent=indent, ensure_ascii=False) + ("\n" if trailing_newline else "")
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{fp.name}.", suffix=".tmp", dir=str(fp.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.chmod(tmp, fp.stat().st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, fp)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    try:
+        dir_fd = os.open(str(fp.parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
+def set_recall_engine(project: Path, target: str | None, value: str | None) -> RecallWrite:
+    """Set (or clear, with ``value=None``) ``recall.engine`` on a store row or the project default.
+
+    ``target`` is a canonical store id, or ``None`` / :data:`DEFAULT_TARGET`
+    for the top-level (project-wide) default. Only the target's ``recall`` key
+    changes: key order, row order, unknown keys, indentation and the trailing
+    newline are preserved. Unchanged values do not touch the file. A file that
+    is not valid JSON, or a result that fails validation, raises
+    :class:`MeshFileError` and nothing is written.
     """
     fp = mesh_path(project)
     if not fp.is_file():
         raise MeshFileError(f"{fp} not found")
-    doc = load(project)
-    if store_id is None:
-        target = doc
+    if value is not None and value not in RECALL_ENGINES:
+        raise MeshFileError(f"engine {value!r} is not allowed; allowed values: {', '.join(RECALL_ENGINES)}")
+    raw = fp.read_text(encoding="utf-8")
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise MeshFileError(f"invalid JSON in {fp}: {e}; not modified") from e
+    if not isinstance(doc, dict) or not isinstance(doc.get("stores"), list):
+        errs = validate_doc(doc, source=str(fp))
+        raise MeshFileError("; ".join(errs or [f"{fp}: mesh root must be an object with stores"]) + "; not modified")
+    label = DEFAULT_TARGET if target in (None, DEFAULT_TARGET) else str(target)
+    if label == DEFAULT_TARGET:
+        obj = doc
     else:
-        target = next((s for s in doc.get("stores") or [] if s.get("id") == store_id), None)
-        if target is None:
-            raise MeshFileError(f"{fp}: no store row with id {store_id}")
-    block = dict(target.get("recall") or {})
-    if engine is None:
-        block.pop("engine", None)
+        obj = next((s for s in doc["stores"] if isinstance(s, dict) and s.get("id") == label), None)
+        if obj is None:
+            raise MeshFileError(f"{fp}: no store row with id {label}")
+    block = obj.get("recall")
+    previous = block.get("engine") if isinstance(block, dict) else None
+    if isinstance(block, dict):
+        new_block: dict[str, Any] | None = dict(block)
     else:
-        block["engine"] = engine
-    if block:
-        target["recall"] = block
+        new_block = {}
+    if value is None:
+        new_block.pop("engine", None)
     else:
-        target.pop("recall", None)
+        new_block["engine"] = value
+    if not new_block:
+        new_block = None
+    current = block if "recall" in obj else None
+    if new_block == current:
+        return RecallWrite(fp, label, previous, value, False)
+    if new_block is None:
+        obj.pop("recall", None)
+    else:
+        obj["recall"] = new_block
+    # A broken recall block on the target is repairable here; any other error refuses the write.
     errs = validate_doc(doc, source=str(fp))
     if errs:
-        raise MeshFileError("; ".join(errs))
-    _write_atomic(fp, doc)
-    return fp
+        raise MeshFileError("; ".join(errs) + "; not modified")
+    write_json_atomic(fp, doc, indent=detect_indent(raw), trailing_newline=raw.endswith("\n"))
+    return RecallWrite(fp, label, previous, value, True)
 
 
 def find_store(project: Path, atlas_id: str) -> dict | None:

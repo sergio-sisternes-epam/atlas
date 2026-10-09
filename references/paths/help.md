@@ -134,7 +134,8 @@ When references are absent, unreadable, irrelevant, or only partial:
 
 3. If `root` is a store, search with the **read-only grep** route only
    (`--engine grep`). Do **not** pass `--profile`, do **not** run
-   `atlas recall index build`, do **not** enable recall.
+   `atlas index build` (or the deprecated `atlas recall index build`), do
+   **not** enable recall.
 
    ```text
    python3 <atlas-skill>/scripts/atlas.py recall run "<question>" --root <root> --json --engine grep

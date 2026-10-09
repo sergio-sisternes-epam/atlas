@@ -23,24 +23,12 @@ from ..core.recall_config import (
     validate_against,
     validate_store_v2,
 )
-from ..core import index_location, meshfile
-from ..core.engine_preference import (
-    ENGINES,
-    EnginePreferenceError,
-    INDEX_TYPES,
-    effective_engine,
-    ignored_notice,
-    index_status,
-    refresh_preferred,
-    resolve_engine,
-)
-from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
+from ..core import index_location
 from ..core.recall_index import (
     IndexError_,
     active_generation,
     legacy_warning,
     load_current,
-    publish_generation,
 )
 from ..core.schema import find_contract_path, load_schema
 from ..core.drivers import tgrep as tgrep_driver
@@ -281,32 +269,10 @@ def run_disable(root: str | None, as_json: bool = False) -> int:
 
 
 def run_index_build(root: str | None, as_json: bool = False) -> int:
-    r = store_root(root)
-    schema, err = _effective(r)
-    if schema is None:
-        _print(as_json, {"ok": False, "error": err, "root": str(r)})
-        return 2
-    try:
-        result = publish_generation(r, schema, focused=False)
-    except (IndexError_, Exception) as e:
-        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
-        return 2
-    payload = {"ok": True, "root": str(r), **index_location.describe(r, "fts5"), **result}
-    info = [item for item in (ensure_indexes_ignored(r), ensure_index_ignored(r)) if item]
-    for item in refresh_preferred(r, schema):
-        if item.get("level") == "warning":
-            payload.setdefault("warnings", []).append(item)
-        else:
-            info.append(item)
-    if info:
-        payload["info"] = info
-    if as_json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print(f"published={result.get('published')} generation={result.get('generation')}")
-        if payload.get("index_dir"):
-            print(f"index: {payload['index_dir']}")
-    return 0
+    """Deprecated alias of ``atlas index build`` for the store from --root (removal after 0.14.x)."""
+    from .index import run_build
+
+    return run_build(root, None, False, False, as_json, deprecated=True)
 
 
 def run_probe(root: str | None, query: str, profile: str | None, allow_partial: bool, as_json: bool) -> int:
@@ -322,103 +288,3 @@ def run_probe(root: str | None, query: str, profile: str | None, allow_partial: 
         else:
             print(f"hits={payload.get('count')} complete={payload.get('recall', {}).get('complete')}")
     return code
-
-
-def run_engine(root: str | None, as_json: bool = False) -> int:
-    """Read-only: resolved preference, source, effective engine, index dir and freshness."""
-    r = store_root(root)
-    schema, err = _effective(r)
-    try:
-        pref = resolve_engine(r, None, schema)
-    except EnginePreferenceError as e:
-        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
-        return 2
-    payload: dict[str, Any] = {
-        "ok": True,
-        "root": str(r),
-        "engine_requested": pref.requested,
-        "engine_source": pref.source,
-        "origin": pref.origin,
-        "mesh_file": pref.mesh_file,
-        "store_id": pref.store_id,
-    }
-    if err:
-        payload["schema_error"] = err
-    if schema is not None and recall_enabled(schema):
-        try:
-            preset = resolve_profile(schema)["preset"]
-        except RecallConfigError:
-            preset = (schema.get("recall") or {}).get("preset")
-        payload["profile"] = preset
-        payload["engine_effective"] = f"profile:{preset}"
-        payload["driver_used"] = "sqlite-fts5"
-        payload["index"] = index_status(r, schema, "bm25")
-        if pref.is_preference and pref.requested != "bm25":
-            payload["info"] = [ignored_notice(str(preset), pref)]
-    else:
-        eff = effective_engine(pref.requested)
-        payload["engine_effective"] = eff.engine
-        payload["driver_used"] = eff.driver
-        if eff.note:
-            payload["driver_note"] = eff.note
-        payload["persist_index"] = pref.persist and eff.engine in INDEX_TYPES
-        payload["index"] = index_status(r, schema, eff.engine)
-    if as_json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print(f"requested: {pref.requested} (source: {pref.source}; {pref.origin})")
-        print(f"effective: {payload['engine_effective']} driver={payload['driver_used']}")
-        if payload.get("driver_note"):
-            print(f"note: {payload['driver_note']}")
-        for item in payload.get("info") or []:
-            print(f"info: {item['message']}")
-        idx = payload.get("index") or {}
-        if idx.get("driver_type"):
-            print(f"index: {idx.get('index_dir')} fresh={idx.get('fresh')} generation={idx.get('generation')}")
-        else:
-            print("index: none (grep needs no index)")
-    return 0
-
-
-def run_engine_set(root: str | None, value: str, project: bool, as_json: bool = False) -> int:
-    """Write ``recall.engine`` on the store's mesh row (or the project default) atomically."""
-    r = store_root(root)
-    engine = None if value.lower() in ("default", "none", "unset") else value.lower()
-    if engine is not None and engine not in ENGINES:
-        _print(as_json, {"ok": False, "error": f"engine {value!r} is not allowed; allowed values: {', '.join(ENGINES)}", "root": str(r)})
-        return 2
-    match = index_location.mesh_match(r)
-    if match is None:
-        _print(
-            as_json,
-            {
-                "ok": False,
-                "error": (
-                    "store has no row in any atlas-mesh.json above it; set ATLAS_RECALL_ENGINE "
-                    "or pass --engine instead"
-                ),
-                "root": str(r),
-            },
-        )
-        return 2
-    target = None if project else str(match.row.get("id"))
-    try:
-        path = meshfile.set_recall_engine(match.directory, target, engine)
-    except (meshfile.MeshFileError, OSError) as e:
-        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
-        return 2
-    index_location.clear_cache()
-    payload = {
-        "ok": True,
-        "root": str(r),
-        "mesh_file": str(path),
-        "scope": "project" if project else "store",
-        "store_id": target,
-        "engine": engine,
-    }
-    if as_json:
-        print(json.dumps(payload, indent=2))
-    else:
-        where = "project default" if project else f"store {target}"
-        print(f"{path}: {where} recall.engine = {engine or '(unset)'}")
-    return 0

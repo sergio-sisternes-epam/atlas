@@ -15,8 +15,8 @@
   `fts5`, nanograph -> `nanograph`) recall builds the index under
   `.atlas/indexes/<driver-type>/<atlas-id>/` when it is missing or its corpus
   digest (or nanograph version) changed, and publishes it before answering.
-  `atlas compile` / `validate` (not `--dry-run`) and `atlas recall index
-  build` refresh the preferred index and report `preferred_index_refreshed`
+  `atlas compile` / `validate` (not `--dry-run`) and `atlas index build`
+  refresh the preferred index and report `preferred_index_refreshed`
   or `preferred_index_fresh`; a failure is the warning
   `preferred_index_failed` and never changes exit codes. Builds take a
   `.lock` (stale after ten minutes), write a `.tmp-*` sibling and publish
@@ -24,10 +24,27 @@
   the current generation plus one, and nanograph gains a `current.json`
   pointer. Unavailable preferences fall back nanograph -> bm25 -> grep with
   a `driver_note` and exit 0; no index is built for an unavailable driver.
-- New `atlas recall engine [--root R] [--json]` (read-only: preference,
-  source, effective engine, index directory and freshness) and
-  `atlas recall engine set <grep|bm25|nanograph|default> [--project]`, which
-  writes `atlas-mesh.json` atomically.
+- New `atlas index` command group to manage the preferred engine and its
+  indexes without editing `atlas-mesh.json` by hand:
+  `atlas index set <grep|bm25|nanograph> [--store <atlas-id> | --default]
+  [--build]` writes `recall.engine` on a store row (the store at `--root`,
+  or `--store` with any spelling that normalises to the row id) or as the
+  project-wide default, warning `engine_unavailable_here` (exit 0) when the
+  engine cannot run on this machine and, with `--build`, building the
+  affected indexes now; `atlas index unset` removes it (idempotent, index
+  files are left for you to delete); `atlas index show` reports the value
+  per level, the winning engine and source, the effective engine and why,
+  any overriding recall profile and index freshness
+  (`fresh|stale|missing|legacy-only`); `atlas index status` tabulates every
+  store row and the project default; `atlas index build [--store <atlas-id>
+  | --all] [--force]` builds or refreshes the effective engine's index
+  (exit 1 when any build failed, others still attempted). Writes touch only
+  the target's `recall` key, keep key and row order, indentation and the
+  trailing newline, skip unchanged values and replace the file atomically;
+  invalid files are refused without writing.
+- Deprecated: `atlas recall index build` is now an alias of
+  `atlas index build` for the store at `--root` (same payload plus a
+  `deprecated_command` warning); it will be removed after 0.14.x.
 - New environment variable `ATLAS_RECALL_ENGINE` (invalid values exit 2 for
   `recall run`, naming the variable and the allowed values).
 - Mesh schema: optional `recall` object (only `engine`) on store rows and at
@@ -62,7 +79,7 @@
   `match: "any"`. The FTS5 driver gains an `operator` parameter (AND by
   default).
 - Index ignore guards: `atlas compile` / `validate` (not `--dry-run`),
-  `atlas recall index build` and every nanograph or tgrep build add
+  `atlas index build` and every nanograph or tgrep build add
   `/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
   below the work-tree top level) to the project repository's
   `info/exclude` when no existing line (such as `.atlas/`) covers it, and

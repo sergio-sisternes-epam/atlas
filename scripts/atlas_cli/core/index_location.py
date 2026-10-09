@@ -286,7 +286,7 @@ def legacy_warning(store: Path, driver_type: str) -> dict[str, str]:
         "code": LEGACY_WARNING_CODE,
         "level": "warning",
         "message": (
-            f"reading deprecated index at {old}; rebuild with `atlas recall index build` "
+            f"reading deprecated index at {old}; rebuild with `atlas index build` "
             f"(or rerun) to move it to {new}; legacy {LEGACY_DIR}/ support will be "
             f"removed after {LEGACY_REMOVAL}"
         ),

@@ -97,7 +97,9 @@ macOS arm64. Atlas does not install it.
 Nothing selects nanograph implicitly: it is not a recall profile, not a
 `query.search_engine` value and not a default. A project can prefer it (or
 `bm25`) explicitly through `atlas-mesh.json` `recall.engine` or
-`ATLAS_RECALL_ENGINE`; see path `recall`, Preferred engine.
+`ATLAS_RECALL_ENGINE`, normally set with `atlas index set nanograph`
+(per store) or `atlas index set nanograph --default` (project-wide); see
+path `recall`, Preferred engine and Managing engines and indexes.
 
 | Preferred engine | Driver | Index (driver type) | Fallback when unavailable |
 | --- | --- | --- | --- |
@@ -196,14 +198,16 @@ path component from `.atlas/` downwards may be a symlink. Nested
 directories that mirror the mount layout (for example
 `.atlas/indexes/fts5/github.com/owner/repo/`) are intended.
 
-**Reporting.** Payloads that report an index (`recall index build`,
+**Reporting.** Payloads that report an index (`index build`, `index show`,
+`index status`,
 `recall status`, compile and validate info, `--engine bm25` fast path,
 `atlas graph` fast path, `atlas graph drivers`, `nanograph_index`) carry
 `index_dir` (project-relative POSIX path) and
 `index_location: {"mode", "atlas_id", "id_source"}`.
 
 **Ignore guard.** `atlas compile` / `validate` (not `--dry-run`),
-`atlas recall index build` and every nanograph or tgrep build add
+`atlas index build` (and its deprecated alias `atlas recall index build`)
+and every nanograph or tgrep build add
 `/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
 below its work-tree top level) to the project repository's
 `info/exclude` (`git rev-parse --git-path info/exclude`) unless an
@@ -218,7 +222,7 @@ added as before (`atlas_index_ignored`).
 are read-only for 0.14.x and removed after it. When no usable index exists
 at the new location but one does at the old one, Atlas reads it without
 changing it and adds a `legacy_index_location` warning item (printed to
-stderr outside `--json`). The next build (`atlas recall index build`, a
+stderr outside `--json`). The next build (`atlas index build`, a
 compile that publishes, or a nanograph or tgrep rebuild) writes only the
 new location, after which the warning disappears. Atlas never deletes the
 old directory; delete `.atlas-index/` yourself once you have rebuilt.
