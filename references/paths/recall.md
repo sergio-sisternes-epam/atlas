@@ -108,8 +108,16 @@ the warning `preferred_index_failed`; exit codes never change because of
 index work.
 
 **Atomic publish and lock.** A builder takes `<index-dir>/.lock`
-(`O_CREAT|O_EXCL`, JSON with pid, host and time). A lock older than ten
-minutes is treated as abandoned and broken. The builder writes into a
+(`O_CREAT|O_EXCL`, JSON with a per-build `owner` token, pid, host and
+`created_at`). A lock older than ten minutes, or whose pid is no longer
+running on the same host, is stale: the next builder renames it aside
+(`.lock.stale-<owner>-<random>`, atomic, one takeover at a time) and creates
+its own. Only the owner releases a lock. Before it publishes the pointer and
+prunes, a builder checks it still owns the lock; if it lost the lock it
+publishes nothing, deletes its new generation and reports `lock_lost`, and
+readers keep the old pointer. A builder that finds its lock taken over at
+release leaves it in place and adds a `lock_lost` debug warning to the
+build result. The builder writes into a
 `.tmp-<generation>` sibling, fsyncs, renames it into place with
 `os.replace`, then replaces the pointer (`current.json`) atomically. Readers
 resolve the pointer once, so they never see a half-built generation; leftover

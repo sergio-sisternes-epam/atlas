@@ -161,6 +161,40 @@ def validate_doc(data: Any, source: str | None = None) -> list[str]:
         except IdentityError:
             errs.append(f"stores[{i}] id is not host/org/repo: {sid}")
         errs.extend(strategy_errors(row, i))
+    errs.extend(duplicate_id_errors(data))
+    return errs
+
+
+def _id_key(sid: str) -> str:
+    try:
+        canon = normalise(sid)
+    except IdentityError:
+        canon = sid
+    return canon.lower()
+
+
+def duplicate_id_errors(data: Any) -> list[str]:
+    """Store ids must be unique after normalisation, ignoring case (``--store`` matching ignores case)."""
+    stores = data.get("stores") if isinstance(data, dict) else None
+    seen: dict[str, tuple[int, str]] = {}
+    errs: list[str] = []
+    for i, row in enumerate(stores if isinstance(stores, list) else []):
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip():
+            continue
+        sid = row["id"].strip()
+        key = _id_key(sid)
+        path = row.get("path")
+        if key in seen:
+            first, first_path = seen[key]
+            try:
+                shown = normalise(sid)
+            except IdentityError:
+                shown = sid
+            errs.append(
+                f"duplicate store id {shown}: stores[{first}] (path {first_path}) and stores[{i}] (path {path})"
+            )
+        else:
+            seen[key] = (i, str(path))
     return errs
 
 

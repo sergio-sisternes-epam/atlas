@@ -43,6 +43,7 @@ class Located:
     project: Path | None
     match: index_location.MeshMatch | None
     doc: dict[str, Any] | None = None
+    error: str | None = None
 
     @property
     def mesh_file(self) -> Path | None:
@@ -98,7 +99,10 @@ def locate(root: str | None) -> Located:
     """The store at ``--root`` (when it is a mesh row) and the project that owns the mesh file."""
     r = store_root(root)
     index_location.clear_cache()
-    match = index_location.mesh_match(r)
+    try:
+        match = index_location.mesh_match(r)
+    except index_location.IndexLocationError as e:
+        return Located(r, _nearest_mesh(r), None, error=str(e))
     if match is not None:
         return Located(r, match.directory, match)
     return Located(r, _nearest_mesh(r), None)
@@ -331,6 +335,8 @@ def run_build(
     if store and all_stores:
         return _fail(as_json, "--store and --all are mutually exclusive")
     loc = locate(root)
+    if loc.error:
+        return _fail(as_json, loc.error, root=str(loc.root))
     try:
         if all_stores:
             if loc.project is None:
@@ -393,6 +399,8 @@ def _write(
     root: str | None, store: str | None, default: bool, value: str | None, build: bool, as_json: bool
 ) -> int:
     loc = locate(root)
+    if loc.error:
+        return _fail(as_json, loc.error, root=str(loc.root))
     try:
         project, target, ref = _write_target(loc, store, default)
         result = meshfile.set_recall_engine(project, target, value)
@@ -560,6 +568,8 @@ def _freshness_text(idx: dict[str, Any], mounted: bool) -> str:
 
 def run_show(root: str | None, store: str | None, as_json: bool) -> int:
     loc = locate(root)
+    if loc.error:
+        return _fail(as_json, loc.error, root=str(loc.root))
     try:
         ref = _row_for(loc, store) if store else _root_store(loc, need_row=False)
         doc = _load_doc(loc) if ref.row is not None else None
@@ -593,6 +603,8 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
 
 def run_status(root: str | None, as_json: bool) -> int:
     loc = locate(root)
+    if loc.error:
+        return _fail(as_json, loc.error, root=str(loc.root))
     if loc.project is None:
         refs = [_root_store(loc, need_row=False)]
         doc: dict[str, Any] | None = None

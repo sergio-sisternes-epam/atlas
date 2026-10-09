@@ -2,6 +2,29 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Security: every external driver subprocess (nanograph's `--version`
+  probe, `init`, `load` and `run`) now gets an allow-listed environment from
+  one helper (`core/drivers/subprocess_env.py`): only `PATH`, `HOME`, temp,
+  locale, user, Windows system, `RUST_BACKTRACE`, `RUST_LOG` and `NO_COLOR`
+  pass, and a deny pass removes GitHub tokens (`ATLAS_PAT`, `GH_*`,
+  `GITHUB_*`, `COPILOT_*`), model API keys and anything named like a
+  token, secret, password or credential. Atlas's GitHub tokens no longer
+  reach nanograph. See `references/drivers.md`, External driver
+  environment.
+- Security: the driver platform gate always uses the real platform.
+  Production code reads no environment variable for it; tests use an injectable provider and the
+  test-only entry `scripts/testing/atlas_test_cli.py`.
+- nanograph detection resolves `ATLAS_NANOGRAPH_BIN` (relative values
+  against the current directory) and the `PATH` match to an absolute path,
+  so builds and queries that run in the index directory find the binary.
+- Index builder locks carry an `owner` token: only the owner releases a
+  lock, stale takeovers rename the old lock aside one at a time, and a
+  builder that lost its lock publishes nothing and reports `lock_lost`
+  (readers keep the old pointer).
+- `atlas-mesh.json` validation rejects duplicate store ids (compared after
+  normalisation and ignoring case), naming both rows and their paths. Mount,
+  `atlas index` (exit 2) and recall refuse such a file instead of letting
+  two stores share one index directory.
 - Preferred recall engine: a consuming project can set
   `"recall": {"engine": "grep|bm25|nanograph"}` on a store row of its
   `atlas-mesh.json` or as a project-wide top-level default, or set
@@ -134,9 +157,8 @@
 - Optional nanograph driver, macOS arm64 only, nanograph 1.3.0 or newer
   (`ATLAS_NANOGRAPH_BIN` or `nanograph` on PATH). It is never selected
   implicitly and never runs on another platform, even with the binary on
-  PATH. Argv-only subprocesses with timeouts, embedding credentials
-  (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `NANOGRAPH_EMBED*`) stripped from
-  its environment, no `.env.nano`. Its index lives under
+  PATH. Argv-only subprocesses with timeouts, an allow-listed
+  environment (see below), no `.env.nano`. Its index lives under
   `<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`
   (export, generated `atlas.gq`,
   `atlas.nano`, `ready.json`), is reused while the corpus digest matches,

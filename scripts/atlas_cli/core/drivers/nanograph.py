@@ -1,7 +1,8 @@
 """nanograph driver: optional, external, macOS arm64 only.
 
-Argv-only subprocess (never a shell), bounded timeouts, embedding credentials
-stripped from the environment, and an Atlas-owned index under
+Argv-only subprocess (never a shell), bounded timeouts, an allow-listed
+environment with credentials denied (core/drivers/subprocess_env.py), an
+absolute binary path fixed at detection time, and an Atlas-owned index under
 ``<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`` (see
 core/index_location.py). Builds run in a ``.tmp-<generation>`` sibling under
 the shared builder lock, are published with an atomic rename and then an
@@ -27,6 +28,7 @@ from ..driver_overlay import BaseDriver, Detection, DriverError
 from ..ignore_guard import ensure_indexes_ignored
 from ..index_location import IndexLocationError
 from .fts5 import query_tokens
+from .subprocess_env import external_driver_env
 
 MIN_VERSION = (1, 3, 0)
 BIN_ENV = "ATLAS_NANOGRAPH_BIN"
@@ -40,17 +42,7 @@ DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
 CURRENT_NAME = "current.json"
 _GEN_NAME = re.compile(r"[0-9a-f]{16}(?:-[0-9a-f]{8})?")
-STRIPPED_ENV = frozenset({"OPENAI_API_KEY", "GEMINI_API_KEY"})
-STRIPPED_ENV_PREFIX = "NANOGRAPH_EMBED"
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-
-
-def child_env() -> dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if k not in STRIPPED_ENV and not k.startswith(STRIPPED_ENV_PREFIX)
-    }
 
 
 def query_ident(edge_type: str) -> str:
@@ -108,11 +100,28 @@ class NanographDriver(BaseDriver):
     # --- detection ------------------------------------------------------
 
     def find_binary(self) -> str | None:
+        """Absolute, resolved path to the binary; later calls run with another cwd.
+
+        A relative ``ATLAS_NANOGRAPH_BIN`` is resolved against the process cwd
+        at detection time.
+        """
         configured = os.environ.get(BIN_ENV, "").strip()
         if configured:
             path = Path(configured).expanduser()
-            return str(path) if path.is_file() and os.access(path, os.X_OK) else None
-        return shutil.which("nanograph")
+            if not path.is_absolute():
+                path = Path.cwd() / path
+        else:
+            found = shutil.which("nanograph")
+            if not found:
+                return None
+            path = Path(found)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+        try:
+            path = path.resolve()
+        except (OSError, RuntimeError):
+            return None
+        return str(path) if path.is_file() and os.access(path, os.X_OK) else None
 
     def detect(self) -> Detection:
         self._detection = self._probe()
@@ -131,7 +140,7 @@ class NanographDriver(BaseDriver):
                 capture_output=True,
                 text=True,
                 timeout=VERSION_TIMEOUT,
-                env=child_env(),
+                env=external_driver_env(),
                 shell=False,
             )
             match = _VERSION.search(f"{proc.stdout}\n{proc.stderr}") if proc.returncode == 0 else None
@@ -164,7 +173,7 @@ class NanographDriver(BaseDriver):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=child_env(),
+                env=external_driver_env(),
                 shell=False,
             )
         except subprocess.TimeoutExpired as e:
@@ -338,7 +347,7 @@ class NanographDriver(BaseDriver):
                 }
                 return legacy
 
-        def build() -> Path:
+        def build(lock: index_publish.BuildLock) -> Path:
             ensure_indexes_ignored(store)
             name = digest[:16]
             if (base / name).exists():
@@ -351,9 +360,15 @@ class NanographDriver(BaseDriver):
             try:
                 graph.export_nanograph(source, tmp_dir / "export")
                 self.build(tmp_dir / "export", tmp_dir)
+                index_publish.ensure_owned(lock)
                 index_publish.publish_dir(tmp_dir, dest)
             except BaseException:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise
+            try:
+                index_publish.ensure_owned(lock)
+            except index_publish.LockLost:
+                shutil.rmtree(dest, ignore_errors=True)
                 raise
             ready = self._read_ready(dest) or {}
             index_publish.write_json_atomic(
@@ -365,27 +380,33 @@ class NanographDriver(BaseDriver):
                     "built_at": ready.get("built_at"),
                 },
             )
+            self._prune(base, dest)
             return dest
 
         reused = gen_dir is not None
+        lock_warnings: list[dict[str, Any]] = []
         if gen_dir is None:
             try:
                 gen_dir, built = index_publish.locked_build(
-                    base, lambda: None if force else self._current(base, digest, det.version), build, wait=wait
+                    base,
+                    lambda: None if force else self._current(base, digest, det.version),
+                    build,
+                    wait=wait,
+                    warnings=lock_warnings,
                 )
             except index_publish.IndexBusy as e:
                 raise DriverError(str(e)) from e
             except OSError as e:
                 raise DriverError(f"index build failed ({e.strerror or e})") from e
             reused = not built
-            if built:
-                self._prune(base, gen_dir)
         self.last_index = {
             "generation": gen_dir.name,
             "path": index_location.project_relative(store, gen_dir),
             "reused": reused,
             **where,
         }
+        if lock_warnings:
+            self.last_index["warnings"] = lock_warnings
         return gen_dir
 
     def _prune(self, base: Path, keep: Path) -> None:

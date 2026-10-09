@@ -4,7 +4,8 @@ writes, availability warnings, freshness, builds and the deprecated
 `atlas recall index build` alias.
 
 Linux-safe: no network and no real nanograph (the fake binary from
-test_drivers is used with ATLAS_PLATFORM_OVERRIDE=darwin-arm64).
+test_drivers runs through the test-only scripts/testing/atlas_test_cli.py
+with ATLAS_TEST_PLATFORM=darwin-arm64).
 """
 
 from __future__ import annotations
@@ -196,7 +197,7 @@ def main() -> int:
         check("unknown-key-refused", code == 2 and "x-owner" in str(p.get("error")) and bad.read_bytes() == bad_bytes, out[:300])
 
         # --- unavailable warning (Linux) ---------------------------------------------
-        linux = {"ATLAS_PLATFORM_OVERRIDE": "linux-x86_64"}
+        linux = {"ATLAS_TEST_PLATFORM": "linux-x86_64"}
         code, p, out = cli("index", "set", "nanograph", "--root", str(sa), "--json", env=linux)
         warn = [w for w in p.get("warnings") or [] if w.get("code") == "engine_unavailable_here"]
         check(
@@ -338,7 +339,7 @@ def main() -> int:
         gmesh = write_mesh(gproject, {"version": 1, "stores": [{"id": A, "path": "atlas/one"}, {"id": B, "path": "atlas/two"}]})
         fake = write_fake(tmp / "nanograph")
         log = tmp / "nano.log"
-        nenv = {"ATLAS_PLATFORM_OVERRIDE": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
+        nenv = {"ATLAS_TEST_PLATFORM": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
         code, p, out = cli("index", "set", "nanograph", "--build", "--root", str(g1), "--json", env=nenv)
         b = (p.get("builds") or [{}])[0]
         nbase = idx(gproject, "nanograph", A)

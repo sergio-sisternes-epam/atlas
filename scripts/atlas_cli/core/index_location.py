@@ -8,7 +8,8 @@ Resolution rule for a store directory ``S`` (resolved):
 
 a. Mesh mode. Walk up from ``S.parent`` through its ancestors. At each
    directory ``D`` that contains ``atlas-mesh.json``, load it (malformed files
-   are skipped) and look for a row whose ``path``, resolved against ``D``,
+   are skipped, except that a file with duplicate store ids that lists ``S``
+   raises :class:`IndexLocationError`) and look for a row whose ``path``, resolved against ``D``,
    equals ``S``. The first match wins: ``project_root = D``,
    ``atlas_id = row["id"]``, ``id_source = "mesh"``.
 b. Standalone mode (no mesh row matches). ``project_root`` is the git
@@ -32,6 +33,7 @@ in-store ``.atlas-index/`` layout is read-only for 0.14.x and removed after.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import sys
@@ -120,6 +122,7 @@ def mesh_match(store: Path) -> MeshMatch | None:
         try:
             doc = meshfile.load_for_location(directory)
         except (meshfile.MeshFileError, OSError, ValueError):
+            _reject_duplicate_ids(directory, store)
             continue
         for row in doc.get("stores") or []:
             if not isinstance(row, dict):
@@ -135,6 +138,27 @@ def mesh_match(store: Path) -> MeshMatch | None:
             if candidate == store:
                 return MeshMatch(directory, row, doc)
     return None
+
+
+def _row_path_is(directory: Path, row: Any, store: Path) -> bool:
+    raw = row.get("path") if isinstance(row, dict) else None
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    try:
+        return (directory / raw).resolve() == store
+    except (OSError, RuntimeError):
+        return False
+
+
+def _reject_duplicate_ids(directory: Path, store: Path) -> None:
+    """A mesh listing ``store`` with duplicate store ids is an error, never skipped or guessed."""
+    try:
+        doc = json.loads((directory / meshfile.MESH_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    errs = meshfile.duplicate_id_errors(doc)
+    if errs and any(_row_path_is(directory, row, store) for row in doc.get("stores") or []):
+        raise IndexLocationError(f"{directory / meshfile.MESH_NAME}: {'; '.join(errs)}")
 
 
 def _mesh_match(store: Path) -> tuple[Path, str] | None:

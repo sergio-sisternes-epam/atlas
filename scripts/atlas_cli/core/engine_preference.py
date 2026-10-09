@@ -106,7 +106,10 @@ def resolve_engine(
     env_value = _check(env_raw, ENV) if env_raw.strip() else None
     store_value = project_value = None
     mesh_file = store_id = None
-    match = index_location.mesh_match(Path(store))
+    try:
+        match = index_location.mesh_match(Path(store))
+    except index_location.IndexLocationError as e:
+        raise EnginePreferenceError(str(e)) from e
     if match is not None:
         mesh_file = str(match.mesh_file)
         store_id = str(match.row.get("id"))
@@ -284,6 +287,7 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force
         fresh = recall_index.ensure_fresh(store, schema, allow_legacy=False, force=force)
         gen = fresh.generation.pointer.get("generation")
         rebuilt = fresh.rebuilt
+        lock_warnings = list(fresh.warnings)
     else:
         from . import graph
         from .driver_overlay import get_driver
@@ -294,14 +298,18 @@ def refresh_index(store: Path, schema: dict[str, Any] | None, engine: str, force
         info = driver.last_index or {}
         gen = info.get("generation")
         rebuilt = not info.get("reused", True)
+        lock_warnings = list(info.get("warnings") or [])
     where = index_location.describe(store, driver_type)
-    return {
+    out = {
         "driver": ENGINE_DRIVERS[engine],
         "driver_type": driver_type,
         "generation": gen,
         "rebuilt": rebuilt,
         "index_dir": where.get("index_dir"),
     }
+    if lock_warnings:
+        out["warnings"] = lock_warnings
+    return out
 
 
 def refresh_preferred(store: Path, schema: dict[str, Any] | None) -> list[dict[str, Any]]:

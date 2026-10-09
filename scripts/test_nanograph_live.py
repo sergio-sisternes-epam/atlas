@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Live nanograph check: runs only on macOS arm64 with a real nanograph >= 1.3.0.
 
-Skips (exit 0) everywhere else. No overrides are honoured: the test clears
-ATLAS_PLATFORM_OVERRIDE and ATLAS_NANOGRAPH_BIN and looks for `nanograph` on PATH.
+Skips (exit 0) everywhere else. No overrides are honoured: the test refuses to
+run while the test harness platform (ATLAS_TEST_PLATFORM or an injected
+platform provider) is active, clears ATLAS_NANOGRAPH_BIN and looks for
+`nanograph` on PATH through the production entry scripts/atlas.py.
 """
 
 from __future__ import annotations
@@ -20,9 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-for _name in ("ATLAS_PLATFORM_OVERRIDE", "ATLAS_NANOGRAPH_BIN"):
-    os.environ.pop(_name, None)
+os.environ.pop("ATLAS_NANOGRAPH_BIN", None)
 
+from atlas_cli.core import driver_overlay  # noqa: E402
 from atlas_cli.core.driver_overlay import normalise_machine  # noqa: E402
 from atlas_cli.core.drivers.nanograph import NanographDriver  # noqa: E402
 from test_graph import PAGES, SCHEMA_V1  # noqa: E402
@@ -34,6 +36,9 @@ def skip(reason: str) -> int:
 
 
 def main() -> int:
+    if os.environ.get("ATLAS_TEST_PLATFORM") or not driver_overlay.platform_provider_is_real():
+        print("REFUSED: the live nanograph test must not run under the test harness platform (unset ATLAS_TEST_PLATFORM)")
+        return 2
     real = (sys.platform, normalise_machine(platform.machine()))
     if real != ("darwin", "arm64"):
         return skip(f"nanograph live test needs darwin-arm64, this is {real[0]}-{real[1]}")

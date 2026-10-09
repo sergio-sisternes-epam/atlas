@@ -3,7 +3,8 @@
 self-refreshing indexes, atomic publish, locks, fallback and profile stores.
 
 Linux-safe: no network and no real nanograph (the fake binary from
-test_drivers is used with ATLAS_PLATFORM_OVERRIDE=darwin-arm64).
+test_drivers runs through the test-only scripts/testing/atlas_test_cli.py
+with ATLAS_TEST_PLATFORM=darwin-arm64).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
+TEST_CLI = ROOT / "scripts" / "testing" / "atlas_test_cli.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.commands import search as search_cmd  # noqa: E402
@@ -32,13 +34,13 @@ from test_index_location import to_legacy_fts5, tree_snapshot, warning_codes  # 
 from test_recall_bm25 import as_json, make_store  # noqa: E402
 
 STORE_ID = "github.com/acme/notes"
-CLEAN_ENV = ("ATLAS_RECALL_ENGINE", "ATLAS_INDEX_ROOT", "ATLAS_PLATFORM_OVERRIDE", "ATLAS_NANOGRAPH_BIN")
+CLEAN_ENV = ("ATLAS_RECALL_ENGINE", "ATLAS_INDEX_ROOT", "ATLAS_TEST_PLATFORM", "ATLAS_NANOGRAPH_BIN")
 
 
 def cli(*args: str, env: dict[str, str] | None = None) -> tuple[int, dict, str]:
     base = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
     proc = subprocess.run(
-        [sys.executable, str(ATLAS), *args],
+        [sys.executable, str(TEST_CLI if "ATLAS_TEST_PLATFORM" in (env or {}) else ATLAS), *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -412,7 +414,7 @@ def main() -> int:
         # --- nanograph preference on Linux falls back -----------------------------
         write_mesh(project, row_recall={"engine": "nanograph"})
         nano_base = project / ".atlas" / "indexes" / "nanograph"
-        code, p, out = cli("recall", "run", "ranking", "--root", str(store), "--json", env={"ATLAS_PLATFORM_OVERRIDE": "linux-x86_64"})
+        code, p, out = cli("recall", "run", "ranking", "--root", str(store), "--json", env={"ATLAS_TEST_PLATFORM": "linux-x86_64"})
         check(
             "linux-nanograph-fallback",
             code == 0
@@ -429,7 +431,7 @@ def main() -> int:
         write_mesh(gproject, row_recall={"engine": "nanograph"})
         fake = write_fake(tmp / "nanograph")
         log = tmp / "nano.log"
-        nenv = {"ATLAS_PLATFORM_OVERRIDE": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
+        nenv = {"ATLAS_TEST_PLATFORM": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
         gbase = gproject / ".atlas" / "indexes" / "nanograph" / Path(*STORE_ID.split("/"))
 
         def builds() -> int:
@@ -534,7 +536,7 @@ def main() -> int:
         write_mesh(pproject, row_recall={"engine": "nanograph"})
         code, p, out = cli(
             "recall", "run", "ranking recall", "--root", str(pstore), "--json",
-            env={"ATLAS_PLATFORM_OVERRIDE": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake)},
+            env={"ATLAS_TEST_PLATFORM": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake)},
         )
         notices = [i for i in p.get("info") or [] if i.get("code") == "preferred_engine_ignored"]
         check(

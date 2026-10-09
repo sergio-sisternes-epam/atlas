@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Driver overlay registry, platform gating and the nanograph driver (fake binary).
 
-Runs on any platform: the platform probe is monkeypatched in-process and
-overridden for CLI subprocesses with the test-only ATLAS_PLATFORM_OVERRIDE.
-No real nanograph is needed.
+Runs on any platform: the platform provider is swapped in-process with
+driver_overlay.set_platform_provider_for_tests, and CLI subprocesses that need
+a fake platform run the test-only entry scripts/testing/atlas_test_cli.py with
+ATLAS_TEST_PLATFORM. No real nanograph is needed.
 """
 
 from __future__ import annotations
@@ -18,6 +19,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
+TEST_CLI = ROOT / "scripts" / "testing" / "atlas_test_cli.py"
+SECRET_ENV = {
+    "ATLAS_PAT": "atlas-pat-not-real",
+    "GH_TOKEN": "gh-token-not-real",
+    "GITHUB_TOKEN": "github-token-not-real",
+    "GH_ENTERPRISE_TOKEN": "ghe-token-not-real",
+    "GITHUB_APM_PAT": "apm-pat-not-real",
+    "GITHUB_APM_PAT_ORG": "apm-pat-org-not-real",
+    "COPILOT_GITHUB_TOKEN": "copilot-token-not-real",
+    "OPENAI_API_KEY": "sk-test-not-real",
+    "GEMINI_API_KEY": "gm-test-not-real",
+    "NANOGRAPH_EMBED_MODEL": "should-not-leak",
+    "FOO_BAR": "unrelated",
+}
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.core import driver_overlay, index_location  # noqa: E402
@@ -37,6 +52,8 @@ def opt(args, name):
 
 
 args = sys.argv[1:]
+with open(os.path.realpath(__file__) + ".calls", "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(args) + "\n")
 if LOG:
     with open(LOG, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({
@@ -45,6 +62,7 @@ if LOG:
             "openai": "OPENAI_API_KEY" in os.environ,
             "gemini": "GEMINI_API_KEY" in os.environ,
             "embed": any(k.startswith("NANOGRAPH_EMBED") for k in os.environ),
+            "env_keys": sorted(os.environ),
         }) + "\n")
 if args == ["--version"]:
     print("nanograph " + VERSION if VERSION != "garbage" else "nanograph dev build")
@@ -147,7 +165,6 @@ def main() -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="atlas-drivers-"))
     saved_env = dict(os.environ)
-    real_platform = driver_overlay.current_platform
     try:
         fake = write_fake(tmp / "nanograph")
         empty_path = tmp / "empty-bin"
@@ -187,11 +204,14 @@ def main() -> int:
             check("not-supported", "native-graph" in str(e))
 
         # --- detection with the platform probe monkeypatched ------------------
-        def set_platform(p: str, m: str) -> None:
-            driver_overlay.current_platform = lambda: (p, m)
+        from atlas_cli.core.drivers import subprocess_env
 
-        driver_overlay.current_platform = real_platform
-        os.environ.pop("ATLAS_PLATFORM_OVERRIDE", None)
+        subprocess_env.set_test_passthrough_prefixes(("FAKE_NANOGRAPH_",))
+
+        def set_platform(p: str, m: str) -> None:
+            driver_overlay.set_platform_provider_for_tests(lambda: (p, m))
+
+        driver_overlay.reset_platform_provider()
         os.environ["ATLAS_NANOGRAPH_BIN"] = str(fake)
         os.environ["PATH"] = f"{tmp}{os.pathsep}{saved_env.get('PATH', '')}"
         set_platform("linux", "x86_64")
@@ -218,17 +238,50 @@ def main() -> int:
         check("darwin-unreadable", nano_mod.NanographDriver().detect().reason == "nanograph version unreadable")
         os.environ["FAKE_NANOGRAPH_VERSION"] = "1.3.0"
         det = nano_mod.NanographDriver().detect()
-        check("darwin-ok", det.available and det.reason == "ok" and det.version == "1.3.0" and det.binary == str(fake), str(det))
+        check("darwin-ok", det.available and det.reason == "ok" and det.version == "1.3.0" and det.binary == str(fake.resolve()), str(det))
         os.environ.pop("ATLAS_NANOGRAPH_BIN")
         os.environ["PATH"] = f"{tmp}{os.pathsep}{saved_env.get('PATH', '')}"
-        check("darwin-path-lookup", nano_mod.NanographDriver().detect().binary == str(fake))
-        driver_overlay.current_platform = real_platform
+        check("darwin-path-lookup", nano_mod.NanographDriver().detect().binary == str(fake.resolve()))
+        # T4: a relative PATH entry or ATLAS_NANOGRAPH_BIN is made absolute at detection time.
+        saved_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            os.environ["PATH"] = f".{os.pathsep}{saved_env.get('PATH', '')}"
+            det = nano_mod.NanographDriver().detect()
+            check("darwin-relative-path-entry-absolute", det.available and det.binary == str(fake.resolve()), str(det))
+            os.environ["ATLAS_NANOGRAPH_BIN"] = "nanograph"
+            det = nano_mod.NanographDriver().detect()
+            check("darwin-relative-bin-absolute", det.available and Path(det.binary or "").is_absolute() and det.binary == str(fake.resolve()), str(det))
+        finally:
+            os.chdir(saved_cwd)
         os.environ.clear()
         os.environ.update(saved_env)
+        set_platform("darwin", "aarch64")
+        check("provider-normalised", driver_overlay.current_platform() == ("darwin", "arm64"))
+        driver_overlay.reset_platform_provider()
+        check("provider-reset-real", driver_overlay.platform_provider_is_real())
 
-        os.environ["ATLAS_PLATFORM_OVERRIDE"] = "darwin-aarch64"
-        check("override-normalised", driver_overlay.current_platform() == ("darwin", "arm64"))
-        os.environ.pop("ATLAS_PLATFORM_OVERRIDE")
+        # T0: the allow-listed external driver environment.
+        from atlas_cli.core.drivers.subprocess_env import external_driver_env
+
+        child = external_driver_env(source={**SECRET_ENV, "PATH": "/bin", "HOME": "/h", "RUST_LOG": "info", "LANG": "C"})
+        check(
+            "driver-env-allow-list",
+            set(child) == {"PATH", "HOME", "RUST_LOG", "LANG"},
+            str(sorted(child)),
+        )
+        child = external_driver_env(extra_allowed=("GH_TOKEN", "OPENAI_API_KEY", "MY_SETTING"), source={**SECRET_ENV, "MY_SETTING": "1"})
+        check("driver-env-deny-wins", set(child) == {"MY_SETTING"}, str(sorted(child)))
+
+        # T3: no production module reads a platform override from the environment.
+        offenders = [
+            str(f.relative_to(ROOT))
+            for f in sorted((ROOT / "scripts" / "atlas_cli").rglob("*.py"))
+            if "ATLAS_PLATFORM_OVERRIDE" in f.read_text(encoding="utf-8")
+            or "ATLAS_TEST_PLATFORM" in f.read_text(encoding="utf-8")
+        ]
+        check("no-platform-env-in-production", not offenders, str(offenders))
+        check("production-entry-no-harness", "testing" not in (ROOT / "scripts" / "atlas.py").read_text(encoding="utf-8"))
 
         gq = nano_mod.generate_queries(["DerivedFrom"])
         check(
@@ -245,17 +298,15 @@ def main() -> int:
         log = tmp / "nanograph.log"
         env = {
             **saved_env,
-            "ATLAS_PLATFORM_OVERRIDE": "darwin-arm64",
+            **SECRET_ENV,
+            "ATLAS_TEST_PLATFORM": "darwin-arm64",
             "ATLAS_NANOGRAPH_BIN": str(fake),
             "FAKE_NANOGRAPH_LOG": str(log),
-            "OPENAI_API_KEY": "sk-test-not-real",
-            "GEMINI_API_KEY": "gm-test-not-real",
-            "NANOGRAPH_EMBED_MODEL": "should-not-leak",
         }
 
         def cli(*args: str, **extra: str) -> tuple[int, dict, str]:
             proc = subprocess.run(
-                [sys.executable, str(ATLAS), *args, "--root", str(store), "--json"],
+                [sys.executable, str(TEST_CLI), *args, "--root", str(store), "--json"],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
@@ -347,6 +398,16 @@ def main() -> int:
             str(loads[:1]),
         )
         check("env-stripped", entries and not any(e["openai"] or e["gemini"] or e["embed"] for e in entries))
+        probes = [e for e in entries if e["argv"] == ["--version"]]
+        runs = [e for e in entries if e["argv"][:1] == ["run"]]
+        leaked = sorted({k for e in entries for k in e["env_keys"] if k in SECRET_ENV})
+        check("env-probe-and-run-logged", bool(probes) and bool(runs), f"probes={len(probes)} runs={len(runs)}")
+        check("env-no-secrets-or-unrelated", not leaked, str(leaked))
+        check(
+            "env-path-home-kept",
+            all({"PATH", "HOME"} <= set(e["env_keys"]) for e in probes + runs),
+            str([e["env_keys"] for e in probes[:1]]),
+        )
         check(
             "cwd-index",
             all(
@@ -404,7 +465,7 @@ def main() -> int:
             code == 0 and p.get("driver_used") == "native-graph" and p.get("driver_note") == "nanograph run failed (exit 3)" and p.get("count", 0) > 0,
             out,
         )
-        code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
+        code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", ATLAS_TEST_PLATFORM="linux-x86_64")
         check(
             "fallback-platform",
             code == 0
@@ -412,7 +473,7 @@ def main() -> int:
             and p.get("driver_note") == "preferred engine nanograph unavailable: unavailable on linux-x86_64; used bm25",
             out,
         )
-        code, p, out = cli("graph", "neighbours", "work/hub.md", "--driver", "nanograph", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
+        code, p, out = cli("graph", "neighbours", "work/hub.md", "--driver", "nanograph", ATLAS_TEST_PLATFORM="linux-x86_64")
         check("fallback-platform-neighbours", code == 0 and p.get("driver_note") == "nanograph unavailable on linux-x86_64", out)
         code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", FAKE_NANOGRAPH_VERSION="1.2.0")
         check("fallback-old-version", code == 0 and p.get("driver_note") == "preferred engine nanograph unavailable: nanograph version 1.2.0 below minimum 1.3.0; used bm25", out)
@@ -460,16 +521,96 @@ def main() -> int:
             and (nano.get("index_location") or {}).get("mode") == "standalone",
             str(nano),
         )
-        code, p, out = cli("graph", "drivers", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
+        code, p, out = cli("graph", "drivers", ATLAS_TEST_PLATFORM="linux-x86_64")
         nano = next((d for d in p.get("drivers", []) if d["id"] == "nanograph"), {})
         check("drivers-cmd-linux", nano.get("detect", {}).get("reason") == "unavailable on linux-x86_64", out)
         human = subprocess.run(
-            [sys.executable, str(ATLAS), "graph", "drivers", "--root", str(store)],
-            cwd=ROOT, text=True, capture_output=True, env={**env, "ATLAS_PLATFORM_OVERRIDE": "linux-x86_64"},
+            [sys.executable, str(TEST_CLI), "graph", "drivers", "--root", str(store)],
+            cwd=ROOT, text=True, capture_output=True, env={**env, "ATLAS_TEST_PLATFORM": "linux-x86_64"},
         )
         check("drivers-human", human.returncode == 0 and "unavailable on linux-x86_64" in human.stdout, human.stdout)
+
+        # --- T3: the production entry ignores every platform env var ------------
+        import platform as _platform
+
+        prod_log = tmp / "prod-nanograph.log"
+        (tmp / "prodbin").mkdir()
+        prod_fake = write_fake(tmp / "prodbin" / "nanograph")
+        real_label = driver_overlay.platform_label(
+            (sys.platform, driver_overlay.normalise_machine(_platform.machine()))
+        )
+        if real_label != "darwin-arm64":
+            prod = subprocess.run(
+                [sys.executable, str(ATLAS), "graph", "drivers", "--root", str(store), "--json"],
+                cwd=ROOT, text=True, capture_output=True,
+                env={
+                    **env,
+                    "ATLAS_PLATFORM_OVERRIDE": "darwin-arm64",
+                    "ATLAS_TEST_PLATFORM": "darwin-arm64",
+                    "FAKE_NANOGRAPH_LOG": str(prod_log),
+                    "ATLAS_NANOGRAPH_BIN": str(prod_fake),
+                },
+            )
+            try:
+                pdata = json.loads(prod.stdout)
+            except json.JSONDecodeError:
+                pdata = {}
+            pnano = next((d for d in pdata.get("drivers", []) if d["id"] == "nanograph"), {})
+            check(
+                "production-ignores-platform-env",
+                prod.returncode == 0
+                and pnano.get("detect", {}).get("reason") == f"unavailable on {real_label}"
+                and (pdata.get("platform") or {}).get("label") == real_label,
+                prod.stdout + prod.stderr,
+            )
+            check("production-fake-not-executed", not prod_log.exists() and not Path(str(prod_fake.resolve()) + ".calls").exists())
+
+        # --- T4: relative ATLAS_NANOGRAPH_BIN keeps working for build + query -----
+        rel_cwd = tmp / "relcwd"
+        (rel_cwd / "bin").mkdir(parents=True)
+        write_fake(rel_cwd / "bin" / "nanograph")
+        rel_store = make_store(tmp / "relstore")
+        rel_log = tmp / "rel-nanograph.log"
+        rel_env = {**env, "ATLAS_NANOGRAPH_BIN": "bin/nanograph", "FAKE_NANOGRAPH_LOG": str(rel_log)}
+        rel = subprocess.run(
+            [sys.executable, str(TEST_CLI), "index", "build", "--root", str(rel_store), "--json"],
+            cwd=rel_cwd, text=True, capture_output=True, env={**rel_env, "ATLAS_RECALL_ENGINE": "nanograph"},
+        )
+        try:
+            rdata = json.loads(rel.stdout)
+        except json.JSONDecodeError:
+            rdata = {}
+        check(
+            "relative-bin-build",
+            rel.returncode == 0 and rdata.get("status") == "built" and rdata.get("engine_effective") == "nanograph",
+            rel.stdout + rel.stderr,
+        )
+        relq = subprocess.run(
+            [sys.executable, str(TEST_CLI), "recall", "run", "hub", "--engine", "nanograph", "--root", str(rel_store), "--json"],
+            cwd=rel_cwd, text=True, capture_output=True, env=rel_env,
+        )
+        try:
+            qdata = json.loads(relq.stdout)
+        except json.JSONDecodeError:
+            qdata = {}
+        check(
+            "relative-bin-query",
+            relq.returncode == 0 and qdata.get("engine_used") == "nanograph" and "driver_note" not in qdata,
+            relq.stdout + relq.stderr,
+        )
+        saved_cwd = os.getcwd()
+        os.chdir(rel_cwd)
+        try:
+            os.environ["ATLAS_NANOGRAPH_BIN"] = "bin/nanograph"
+            set_platform("darwin", "arm64")
+            det = nano_mod.NanographDriver().detect()
+            check("relative-bin-detect-absolute", Path(det.binary or "").is_absolute() and det.available, str(det))
+        finally:
+            os.chdir(saved_cwd)
+            driver_overlay.reset_platform_provider()
     finally:
-        driver_overlay.current_platform = real_platform
+        driver_overlay.reset_platform_provider()
+        subprocess_env.reset_test_passthrough()
         os.environ.clear()
         os.environ.update(saved_env)
         shutil.rmtree(tmp, ignore_errors=True)

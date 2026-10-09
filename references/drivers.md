@@ -46,8 +46,12 @@ run-time failure (non-zero exit, timeout, unreadable output) raises
 | Linux (`linux`) | `aarch64` | — | none |
 | Windows (`win32`) | `AMD64` | — | none |
 
-The platform comes from `sys.platform` and `platform.machine()`; `arm64`
-and `aarch64` are treated as the same machine. The rows marked
+The platform comes from `sys.platform` and `platform.machine()` only; `arm64`
+and `aarch64` are treated as the same machine. The gate always reflects the
+real platform: no environment variable or setting can change it. Only the
+test suite swaps the platform, in process or through the test-only entry
+`scripts/testing/atlas_test_cli.py` (`ATLAS_TEST_PLATFORM`), which the
+production entry `scripts/atlas.py` never loads. The rows marked
 `planned: none` are slots for a future driver, not commitments. The built-ins
 cover every row.
 
@@ -58,7 +62,10 @@ binaries for `aarch64-apple-darwin` only, so Atlas enables it only on
 macOS arm64. Atlas does not install it.
 
 - **Binary:** `ATLAS_NANOGRAPH_BIN` when set, otherwise `nanograph` on
-  `PATH`. Minimum version 1.3.0, read from `nanograph --version`.
+  `PATH`. Detection turns either into an absolute, resolved path (a
+  relative `ATLAS_NANOGRAPH_BIN` is resolved against the current directory
+  at detection time) and every later call uses that path. Minimum version
+  1.3.0, read from `nanograph --version`.
 - **Detection reasons** (`atlas graph drivers` shows them), checked in this
   order: `unavailable on <platform>-<machine>` (the platform check comes
   first; a binary on `PATH` is never run on an unsupported platform),
@@ -66,9 +73,10 @@ macOS arm64. Atlas does not install it.
   `nanograph version <v> below minimum 1.3.0`, `ok`.
 - **Process rules:** argv only, never a shell; timeouts of 10 s
   (`--version`), 120 s (`init`, `load`) and 30 s (`run`); the working
-  directory is the index generation directory. The environment is passed
-  through without `OPENAI_API_KEY`, `GEMINI_API_KEY` or any
-  `NANOGRAPH_EMBED*` variable. Atlas never writes `.env.nano`.
+  directory is the index generation directory. The environment is
+  allow-listed (see [External driver environment](#external-driver-environment)),
+  for the `--version` probe as well as `init`, `load` and `run`. Atlas never
+  writes `.env.nano`.
 - **No embeddings, no network:** the export has no `Vector` fields and no
   `@embed`, and Atlas only uses BM25 and graph queries.
 - **Index:** `.atlas/indexes/nanograph/<atlas-id>/<generation>/` under the
@@ -78,7 +86,8 @@ macOS arm64. Atlas does not install it.
   `atlas.gq` (generated queries), `atlas.nano` (`nanograph init` then
   `nanograph load --mode overwrite`) and finally `ready.json`
   (`version`, `corpus_digest`, `built_at`). The build runs in a
-  `.tmp-<generation>` sibling under a `.lock`, is renamed into place
+  `.tmp-<generation>` sibling under an owner-checked `.lock` (see path
+  `recall`, Atomic publish and lock), is renamed into place
   atomically and then `current.json` (generation, digest, version) is
   replaced atomically; a rebuild for the same digest after a version change
   gets a `-<8 hex>` suffix. A generation is reused while the pointer (and
@@ -91,6 +100,27 @@ macOS arm64. Atlas does not install it.
   (`neighbours_out_<edge>` / `neighbours_in_<edge>`, edge name with a
   lowercase first letter) and Atlas merges the results in the same
   breadth-first walk as `native-graph`, so the output matches it exactly.
+
+## External driver environment
+
+Every external driver subprocess gets an environment built by one helper,
+`external_driver_env()` in `scripts/atlas_cli/core/drivers/subprocess_env.py`.
+It never inherits Atlas's own environment.
+
+1. **Allow-list.** Only these variables pass, and only when already set:
+   `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LC_ALL`, `LC_CTYPE`,
+   `TZ`, `USER`, `LOGNAME`, `SYSTEMROOT`, `WINDIR`, `COMSPEC` (for future
+   Windows slots), `RUST_BACKTRACE`, `RUST_LOG` and `NO_COLOR`.
+2. **Deny pass** (defence in depth; it wins over the allow-list). A
+   variable is removed when it is one of Atlas's GitHub token variables
+   (`TOKEN_ENV_KEYS` in `core/auth.py`) or its name matches, ignoring case,
+   `TOKEN`, `PAT` (as a whole `_`-separated word, so `PATH` is kept),
+   `SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, or starts with `GH_`,
+   `GITHUB_`, `GITHUB_APM_PAT`, `COPILOT_`, `ATLAS_PAT`, `NANOGRAPH_EMBED`,
+   `OPENAI_`, `GEMINI_`, `ANTHROPIC_`, `AZURE_OPENAI_` or `AWS_`.
+
+So GitHub tokens, model API keys and unrelated variables never reach
+nanograph. A future external driver uses the same helper.
 
 ## Selection and fallback
 
@@ -170,7 +200,9 @@ is the single source of truth.
 
 1. **Mesh mode.** Walk up from the parent of `S` through its ancestors. At
    each directory `D` holding `atlas-mesh.json`, load it (a malformed file
-   is skipped) and look for a row whose `path`, resolved against `D`,
+   is skipped, but a file with duplicate store ids that lists `S` is an
+   error: index commands exit 2 and recall refuses, so two stores never
+   share an index) and look for a row whose `path`, resolved against `D`,
    equals `S`. The first match wins: the project root is `D`, the atlas id
    is the row's `id` (`id_source: "mesh"`).
 2. **Standalone mode** (no row matches). The project root is the git

@@ -9,12 +9,11 @@ or fails. See references/drivers.md.
 
 from __future__ import annotations
 
-import os
 import platform
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 CAPABILITIES = frozenset({"bm25_search", "graph_traversal"})
 DEFAULT_DRIVER = {"bm25_search": "sqlite-fts5", "graph_traversal": "native-graph"}
@@ -29,10 +28,6 @@ PLATFORM_MATRIX: tuple[dict[str, Any], ...] = (
     {"platform": "linux", "machine": "aarch64", "external": {}, "planned": "none"},
     {"platform": "win32", "machine": "AMD64", "external": {}, "planned": "none"},
 )
-
-# Test-only: lets subprocess tests pretend to run on another platform, e.g.
-# ATLAS_PLATFORM_OVERRIDE=darwin-arm64. Not a user-facing setting.
-_PLATFORM_OVERRIDE_ENV = "ATLAS_PLATFORM_OVERRIDE"
 
 
 class DriverError(RuntimeError):
@@ -62,13 +57,35 @@ def normalise_machine(machine: str) -> str:
     return text or "unknown"
 
 
+def _real_platform() -> tuple[str, str]:
+    return sys.platform, platform.machine()
+
+
+# Production always uses the real platform. Only tests swap the provider, in
+# process (set_platform_provider_for_tests) or through the test-only CLI entry
+# scripts/testing/atlas_test_cli.py. No environment variable is read here.
+_platform_provider: Callable[[], tuple[str, str]] = _real_platform
+
+
+def set_platform_provider_for_tests(provider: Callable[[], tuple[str, str]]) -> None:
+    """Test-only: make :func:`current_platform` report ``provider()``."""
+    global _platform_provider
+    _platform_provider = provider
+
+
+def reset_platform_provider() -> None:
+    global _platform_provider
+    _platform_provider = _real_platform
+
+
+def platform_provider_is_real() -> bool:
+    return _platform_provider is _real_platform
+
+
 def current_platform() -> tuple[str, str]:
     """(sys.platform, normalised machine). The single platform probe."""
-    override = os.environ.get(_PLATFORM_OVERRIDE_ENV, "").strip()
-    if override and "-" in override:
-        plat, machine = override.split("-", 1)
-        return plat, normalise_machine(machine)
-    return sys.platform, normalise_machine(platform.machine())
+    plat, machine = _platform_provider()
+    return plat, normalise_machine(machine)
 
 
 def platform_label(plat: tuple[str, str] | None = None) -> str:

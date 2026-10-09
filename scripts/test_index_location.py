@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
+TEST_CLI = ROOT / "scripts" / "testing" / "atlas_test_cli.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.core import ignore_guard, index_location  # noqa: E402
@@ -38,7 +39,7 @@ GIT_ENV = {
 
 def cli(*args: str, env: dict[str, str] | None = None) -> tuple[int, dict, str]:
     proc = subprocess.run(
-        [sys.executable, str(ATLAS), *args],
+        [sys.executable, str(TEST_CLI if "ATLAS_TEST_PLATFORM" in (env or {}) else ATLAS), *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -368,7 +369,7 @@ def main() -> int:
         fake = write_fake(tmp / "nanograph")
         gstore = make_graph_store(tmp / "gstore")
         log = tmp / "nanograph.log"
-        nenv = {"ATLAS_PLATFORM_OVERRIDE": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
+        nenv = {"ATLAS_TEST_PLATFORM": "darwin-arm64", "ATLAS_NANOGRAPH_BIN": str(fake), "FAKE_NANOGRAPH_LOG": str(log)}
 
         def ncli(*args: str) -> tuple[int, dict, str]:
             return cli(*args, "--root", str(gstore), "--json", env=nenv)

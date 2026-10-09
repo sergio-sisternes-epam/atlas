@@ -165,6 +165,7 @@ class Freshness:
     generation: Generation
     rebuilt: bool
     previous: str | None = None
+    warnings: tuple[dict[str, Any], ...] = ()
 
 
 def _fresh_new(root: Path, *, digest: str | None = None, fingerprint: str | None = None) -> Generation | None:
@@ -250,7 +251,7 @@ def ensure_fresh(
                 return Freshness(Generation(db, legacy, True), False)
     previous = str((current or {}).get("generation") or "") or None
 
-    def build() -> Generation:
+    def build(lock: index_publish.BuildLock) -> Generation:
         if guard_ignore:
             ensure_indexes_ignored(store)
         gen_id = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -261,9 +262,15 @@ def ensure_fresh(
         tmp_dir.mkdir(parents=True)
         try:
             inserted = _write_sqlite(tmp_dir / DB_NAME, projection["pages"], digest)
+            index_publish.ensure_owned(lock)
             index_publish.publish_dir(tmp_dir, dest)
         except BaseException:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        try:
+            index_publish.ensure_owned(lock)
+        except index_publish.LockLost:
+            shutil.rmtree(dest, ignore_errors=True)
             raise
         pointer = {
             "generation": gen_id,
@@ -277,10 +284,11 @@ def ensure_fresh(
         _prune(root, gen_id)
         return Generation(dest / DB_NAME, pointer, False)
 
+    lock_warnings: list[dict[str, Any]] = []
     gen, built = index_publish.locked_build(
-        root, lambda: None if force else _fresh_new(root, digest=digest), build, wait=wait
+        root, lambda: None if force else _fresh_new(root, digest=digest), build, wait=wait, warnings=lock_warnings
     )
-    return Freshness(gen, built, previous if built else None)
+    return Freshness(gen, built, previous if built else None, tuple(lock_warnings))
 
 
 def publish_generation(
@@ -327,6 +335,8 @@ def publish_fts5(
     }
     if fresh.previous:
         out["previous_generation"] = fresh.previous
+    if fresh.warnings:
+        out["warnings"] = list(fresh.warnings)
     return out
 
 
