@@ -1355,6 +1355,52 @@ def main() -> int:
             else:
                 print("[PASS] prune keeps a quoted schema 2.0 ref edge")
 
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (commented / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (commented / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n"
+                    "  - path: dead.md\n"
+                    "    kind: related\n"
+                    "    note: |\n"
+                    "      ref: not-a-history-edge\n"
+                    "  - path: dead.md\n"
+                    "    kind: implements\n",
+                    prose,
+                ),
+                encoding="utf-8",
+            )
+            git(commented, ["add", "."])
+            git(commented, ["commit", "-m", "nested ref text"])
+            nested_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(commented),
+                    "--json",
+                ]
+            )
+            living = (commented / "living.md").read_text(encoding="utf-8")
+            if (
+                nested_prune.returncode != 0
+                or "path: dead.md" in living
+                or living.count("path: summary.md") < 2
+                or "ref: not-a-history-edge" not in living
+            ):
+                failures.append(f"nested ref text froze a live edge: {nested_prune.stdout}\n{living}")
+            else:
+                print("[PASS] prune rewrites a live edge whose prose contains ref")
+
         shown = tmp / "shown"
         shown_init = run(["init", "--root", str(shown), "--json"])
         if shown_init.returncode != 0:

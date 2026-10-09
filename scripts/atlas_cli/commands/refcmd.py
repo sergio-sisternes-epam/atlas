@@ -240,14 +240,6 @@ def _item_field(lines: list[str], key: str) -> str | None:
     return None
 
 
-def _has_field(lines: list[str], key: str) -> bool:
-    for line in lines:
-        field = _field_parts(line)
-        if field and field[1] == key:
-            return True
-    return False
-
-
 def _parsed_item(lines: list[str]) -> dict | None:
     try:
         value = load_yaml_value("\n".join(lines))
@@ -259,10 +251,9 @@ def _parsed_item(lines: list[str]) -> dict | None:
 
 
 def _item_has_ref(lines: list[str]) -> bool:
-    if _has_field(lines, "ref"):
-        return True
+    """History is a parsed top-level ref. A nested mapping or block scalar is not."""
     parsed = _parsed_item(lines)
-    return parsed is not None and "ref" in parsed
+    return parsed is not None and bool(str(parsed.get("ref") or "").strip())
 
 
 def _needs_yaml_item(lines: list[str]) -> bool:
@@ -616,11 +607,13 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
     if current is not None and in_relates:
         items.append(current)
     for item in items:
-        if _has_field(item, "ref"):
-            path = _item_field(item, "path")
-            ref = _item_field(item, "ref")
-            if path and ref:
-                found.add((path, _item_field(item, "kind"), ref))
+        parsed = _parsed_item(item)
+        if parsed is None or not str(parsed.get("ref") or "").strip():
+            continue
+        path = _item_field(item, "path")
+        ref = _item_field(item, "ref")
+        if path and ref:
+            found.add((path, _item_field(item, "kind"), ref))
     return found
 
 

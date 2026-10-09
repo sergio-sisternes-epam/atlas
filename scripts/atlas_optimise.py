@@ -333,14 +333,9 @@ def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
     return None
 
 
-_HISTORY_REF = re.compile(r"""(?:^|\s)(?:(['"])ref\1|ref)\s*:\s*\S""")
-
-
 def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
-    """True when the item is a history edge, including a quoted SCHEMA 2.0 ref key."""
+    """True when the parsed item has a top-level ref. Nested prose is not history."""
     chunk = lines[span[0] : span[1]]
-    if any(_HISTORY_REF.search(line) for line in chunk):
-        return True
     try:
         value = load_yaml_value("\n".join(chunk))
     except FrontmatterError:

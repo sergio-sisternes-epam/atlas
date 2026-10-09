@@ -424,6 +424,43 @@ relates_to:
         self.assertIn("'ref': abcdef1234567890", history_only)
         self.assertNotIn("new.md", history_only)
 
+    def test_nested_ref_text_does_not_freeze_live_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "keeper.md",
+            """
+type: document
+title: Keeper
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    note: |
+      see ref: not-a-history-edge
+  - path: old.md
+    kind: related
+    meta:
+      ref: nested-only
+""",
+            "## Content\n\nSee [old](old.md). This keeper page has enough prose.",
+        )
+        store = opt.Store(root)
+        self.assertIn("keeper.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["keeper.md"])
+        keeper = (root / "keeper.md").read_text(encoding="utf-8")
+        self.assertNotIn("path: old.md", keeper)
+        self.assertIn("path: new.md", keeper)
+        self.assertIn("see ref: not-a-history-edge", keeper)
+        self.assertIn("ref: nested-only", keeper)
+        self.assertNotIn("(old.md)", keeper)
+
     def test_no_contract_write_and_stamp(self) -> None:
         self.assertEqual(CURRENT_RELEASE, "0.13.0")
         root = shared_parent_store(self.base)

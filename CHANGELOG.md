@@ -23,6 +23,7 @@
 - Optimise referrer discovery and rewriting leave ref-bearing `relates_to` items unchanged. A history edge still names the pre-move path.
 - `atlas ref prune` treats a markdown link that starts with `/` as store-root relative. It does not consult that path on the filesystem root, so an inbound `/dead.md` link is retargeted before the page is deleted.
 - A quoted SCHEMA 2.0 `ref` key is still a history edge. Prune and optimise leave that item's path unchanged.
+- Optimise and prune treat history as a parsed top-level `relates_to` `ref`. Nested prose or a nested mapping that contains `ref:` does not freeze a live path.
 - `atlas ref show` and `atlas ref prune` load without `fcntl`, so other commands still start where file locking is unavailable. Prune refuses there instead of failing at import.
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
