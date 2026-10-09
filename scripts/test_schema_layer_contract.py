@@ -6,10 +6,14 @@ Run: python3 scripts/test_schema_layer_contract.py
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,6 +24,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.commands import memory_migrate
 from atlas_cli.core.frontmatter import read_page
 from atlas_cli.core.schema import classify_lineage, compute_stamp_shape
 
@@ -162,9 +167,9 @@ def main() -> int:
             (one / "CONTRACT.json").is_file() and not (one / "SCHEMA.json").is_file(),
         )
         check(
-            "one-contract-file: init writes package-aligned beta.7 stamp",
+            "one-contract-file: init writes the final 0.13.0 stamp",
             json.loads((one / "CONTRACT.json").read_text(encoding="utf-8")).get("atlas_release")
-            == "0.13.0-beta.7",
+            == "0.13.0",
         )
         code, payload = run_json(["compile", "--root", str(one), "--json"])
         check(
@@ -256,8 +261,8 @@ def main() -> int:
         )
         migrated = json.loads((pre_beta / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "pre-beta-eligible: migrated store stamps atlas_release/memory.layers beta.7",
-            migrated.get("atlas_release") == "0.13.0-beta.7"
+            "pre-beta-eligible: contract-file apply stamps atlas_release 0.13.0 and current layers",
+            migrated.get("atlas_release") == "0.13.0"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -327,8 +332,8 @@ def main() -> int:
         )
         migrated = json.loads((page_shaped / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "page-shaped-store: migration writes beta.7 contract stamp and layers",
-            migrated.get("atlas_release") == "0.13.0-beta.7"
+            "page-shaped-store: migration writes 0.13.0 contract stamp and layers",
+            migrated.get("atlas_release") == "0.13.0"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated),
         )
@@ -810,7 +815,7 @@ def main() -> int:
                 and not frame.exists()
                 and not (store / "SCHEMA.json").exists()
                 and json.loads((store / "CONTRACT.json").read_text(encoding="utf-8"))["atlas_release"]
-                == "0.13.0-beta.7",
+                == "0.13.0",
                 f"exit={code} payload={payload} meta={meta}",
             )
 
@@ -1241,8 +1246,8 @@ def main() -> int:
         )
         migrated = json.loads((empty_beta2 / "CONTRACT.json").read_text(encoding="utf-8"))
         check(
-            "empty-beta2-init: migrated store stamps beta.7 layers schema/gist/memory",
-            migrated.get("atlas_release") == "0.13.0-beta.7"
+            "empty-beta2-init: migrated store stamps 0.13.0 layers schema/gist/memory",
+            migrated.get("atlas_release") == "0.13.0"
             and migrated.get("memory", {}).get("layers") == ["schema", "gist", "memory"],
             str(migrated.get("atlas_release")),
         )
@@ -1958,10 +1963,10 @@ def main() -> int:
 
         # === beta3-contract-still-current ========================================
         # A hand-stamped CONTRACT.json still carrying the original
-        # "0.13.0-beta.3" stamp (not the "0.13.0-beta.7" stamp init/apply now
-        # write) with layers schema/gist/memory must still read as "current":
+        # "0.13.0-beta.3" stamp (not the "0.13.0" stamp init/apply now write)
+        # with layers schema/gist/memory must still read as "current":
         # compile succeeds, memory-migrate assess reports lineage current, and
-        # apply is a no-op that never rewrites the stamp to beta.7.
+        # default apply is a no-op that never rewrites the stamp to 0.13.0.
         beta3_reader = tmp / "beta3-contract-still-current"
         beta3_reader.mkdir(parents=True)
         (beta3_reader / "index.md").write_text("# Store\n\n- notes\n", encoding="utf-8")
@@ -2023,10 +2028,10 @@ def main() -> int:
             f"exit={code} payload={payload}",
         )
         check(
-            "beta3-contract-still-current: apply does not rewrite the stamp to beta.7",
+            "beta3-contract-still-current: apply does not rewrite the stamp to 0.13.0",
             sha(beta3_reader / "CONTRACT.json") == before_beta3_hash,
         )
-        for stamp in ("0.13.0-beta.3", "0.13.0-beta.4", "0.13.0-beta.7"):
+        for stamp in ("0.13.0-beta.3", "0.13.0-beta.4", "0.13.0-beta.7", "0.13.0"):
             contract = json.loads((beta3_reader / "CONTRACT.json").read_text(encoding="utf-8"))
             contract["atlas_release"] = stamp
             (beta3_reader / "CONTRACT.json").write_text(json.dumps(contract), encoding="utf-8")
@@ -2053,13 +2058,33 @@ def main() -> int:
                 and all(sha(path) == digest for path, digest in current_hashes.items()),
                 str(payload),
             )
+            code, payload = run_json([
+                "memory-migrate", "--root", str(beta3_reader), "--operation", "apply", "--json",
+            ])
+            check(
+                f"current reader: apply with no batch on {stamp} is a zero-write no-op",
+                code == 0 and payload.get("lineage") == "current"
+                and {path for path in beta3_reader.rglob("*") if path.is_file()} == set(current_hashes)
+                and all(sha(path) == digest for path, digest in current_hashes.items()),
+                str(payload),
+            )
+            code, payload = run_json([
+                "memory-migrate", "--root", str(beta3_reader), "--operation", "assess", "--json",
+            ])
+            check(
+                f"current reader: assess on {stamp} reports atlas_release and restamp_eligible",
+                code == 0 and payload.get("atlas_release") == stamp
+                and payload.get("restamp_eligible") is (stamp != "0.13.0")
+                and all(sha(path) == digest for path, digest in current_hashes.items()),
+                str(payload),
+            )
             shape, error = compute_stamp_shape("SCHEMA.json", contract)
             check(
                 f"current reader: SCHEMA.json refuses {stamp}",
                 shape is None and error is not None,
                 f"shape={shape} error={error}",
             )
-        for stamp in ("0.13.0-beta.6", "0.13.0-beta.999"):
+        for stamp in ("0.13.0-beta.5", "0.13.0-beta.6", "0.13.0-beta.999", "0.13.1", "0.13.0-rc.1"):
             contract["atlas_release"] = stamp
             for filename in ("SCHEMA.json", "CONTRACT.json"):
                 shape, error = compute_stamp_shape(filename, contract)
@@ -2081,11 +2106,524 @@ def main() -> int:
                 "memory-migrate", "--root", str(beta3_reader), "--operation", "apply",
                 "--batch", "contract-file", "--json",
             ])
+            code, restamp_payload = run_json([
+                "memory-migrate", "--root", str(beta3_reader), "--operation", "apply",
+                "--batch", "restamp", "--json",
+            ])
+            check(
+                f"unknown reader: apply --batch restamp refuses {stamp} with zero writes",
+                code == 2
+                and "restamp_not_eligible" in findings_by_id(restamp_payload, "findings")
+                and sha(beta3_reader / "CONTRACT.json") == before_hash,
+                str(restamp_payload),
+            )
             check(
                 f"unknown reader: apply refuses {stamp} without restamping",
                 code == 2 and sha(beta3_reader / "CONTRACT.json") == before_hash,
                 str(payload),
             )
+
+        # === opt-in-restamp =======================================================
+        # `memory-migrate --operation apply --batch restamp` is the only path
+        # that moves a current store's older accepted stamp to 0.13.0. It
+        # rewrites atlas_release alone and touches no other byte or file.
+        def snapshot(store: Path) -> dict[str, bytes]:
+            return {
+                str(path.relative_to(store)): (
+                    b"symlink:" + str(path.readlink()).encode()
+                    if path.is_symlink()
+                    else path.read_bytes()
+                )
+                for path in store.rglob("*")
+                if path.is_symlink() or path.is_file()
+            }
+
+        def restamp(store: Path) -> tuple[int, dict]:
+            return run_json([
+                "memory-migrate", "--root", str(store), "--operation", "apply",
+                "--batch", "restamp", "--json",
+            ])
+
+        for old_stamp in ("0.13.0-beta.3", "0.13.0-beta.4", "0.13.0-beta.7"):
+            store = tmp / f"restamp-{old_stamp}"
+            init_r = run(["init", "--root", str(store), "--json"])
+            check(f"restamp {old_stamp}: init ok", init_r.returncode == 0, init_r.stderr)
+            write_index(store / "notes")
+            write_page(
+                store / "notes" / "topic.gist.md",
+                "gist",
+                [{"path": "notes/index.md", "kind": "derived_from"}],
+            )
+            write_page(
+                store / "notes" / "schema.schema.md",
+                "schema",
+                [{"path": "notes/topic.gist.md", "kind": "related"}],
+            )
+            contract_path = store / "CONTRACT.json"
+            init_bytes = contract_path.read_bytes()
+            check(
+                f"restamp {old_stamp}: init wrote the 0.13.0 stamp",
+                b'"atlas_release": "0.13.0",' in init_bytes,
+            )
+            old_bytes = init_bytes.replace(
+                b'"atlas_release": "0.13.0",', f'"atlas_release": "{old_stamp}",'.encode()
+            )
+            contract_path.write_bytes(old_bytes)
+            before_contract = json.loads(old_bytes)
+            code, payload = run_json(["compile", "--root", str(store), "--json", "--dry-run"])
+            check(f"restamp {old_stamp}: store compiles before restamp", code == 0, str(payload))
+            before = snapshot(store)
+
+            for operation in ("assess", "inventory"):
+                code, payload = run_json([
+                    "memory-migrate", "--root", str(store), "--operation", operation, "--json",
+                ])
+                check(
+                    f"restamp {old_stamp}: {operation} reports restamp_eligible true and writes nothing",
+                    code == 0
+                    and payload.get("lineage") == "current"
+                    and payload.get("atlas_release") == old_stamp
+                    and payload.get("restamp_eligible") is True
+                    and payload.get("contract_file_eligible") is False
+                    and snapshot(store) == before,
+                    str(payload),
+                )
+
+            code, payload = restamp(store)
+            after = snapshot(store)
+            after_contract = json.loads(contract_path.read_bytes())
+            check(
+                f"restamp {old_stamp}: apply --batch restamp succeeds",
+                code == 0 and payload.get("ok") is True
+                and payload.get("atlas_release") == "0.13.0"
+                and payload.get("previous_atlas_release") == old_stamp,
+                str(payload),
+            )
+            check(
+                f"restamp {old_stamp}: only atlas_release changes in CONTRACT.json",
+                after_contract.get("atlas_release") == "0.13.0"
+                and list(after_contract) == list(before_contract)
+                and {k: v for k, v in after_contract.items() if k != "atlas_release"}
+                == {k: v for k, v in before_contract.items() if k != "atlas_release"},
+                f"before={before_contract} after={after_contract}",
+            )
+            check(
+                f"restamp {old_stamp}: CONTRACT.json bytes differ only in the stamp value",
+                after["CONTRACT.json"] == init_bytes
+                and after["CONTRACT.json"] == old_bytes.replace(
+                    f'"atlas_release": "{old_stamp}",'.encode(), b'"atlas_release": "0.13.0",'
+                )
+                and after["CONTRACT.json"].endswith(b"}\n"),
+                repr(after["CONTRACT.json"][:200]),
+            )
+            check(
+                f"restamp {old_stamp}: every other file is byte-identical and none is added or removed",
+                set(after) == set(before)
+                and all(after[name] == data for name, data in before.items() if name != "CONTRACT.json"),
+                f"before={sorted(before)} after={sorted(after)}",
+            )
+            code, payload = run_json(["compile", "--root", str(store), "--json", "--dry-run"])
+            check(f"restamp {old_stamp}: restamped store compiles", code == 0, str(payload))
+
+            settled = snapshot(store)
+            code, payload = restamp(store)
+            check(
+                f"restamp {old_stamp}: second restamp is an idempotent zero-write no-op",
+                code == 0 and payload.get("ok") is True
+                and any("already at current stamp" in note for note in payload.get("notes", []))
+                and snapshot(store) == settled,
+                str(payload),
+            )
+            code, payload = run_json([
+                "memory-migrate", "--root", str(store), "--operation", "assess", "--json",
+            ])
+            check(
+                f"restamp {old_stamp}: assess after restamp reports restamp_eligible false",
+                code == 0 and payload.get("atlas_release") == "0.13.0"
+                and payload.get("restamp_eligible") is False
+                and snapshot(store) == settled,
+                str(payload),
+            )
+
+        # Default apply on a beta.7 store stays a no-op that never restamps.
+        default_store = tmp / "restamp-default-apply-beta7"
+        init_r = run(["init", "--root", str(default_store), "--json"])
+        check("restamp default-apply: init ok", init_r.returncode == 0, init_r.stderr)
+        default_contract = default_store / "CONTRACT.json"
+        default_contract.write_bytes(
+            default_contract.read_bytes().replace(
+                b'"atlas_release": "0.13.0",', b'"atlas_release": "0.13.0-beta.7",'
+            )
+        )
+        default_before = snapshot(default_store)
+        for batch_args in ([], ["--batch", "contract-file"]):
+            code, payload = run_json([
+                "memory-migrate", "--root", str(default_store), "--operation", "apply",
+                *batch_args, "--json",
+            ])
+            check(
+                f"restamp default-apply: apply {batch_args or 'without batch'} on beta.7 writes nothing",
+                code == 0 and payload.get("lineage") == "current"
+                and snapshot(default_store) == default_before,
+                str(payload),
+            )
+
+        # Refusals: every non-current lineage and SCHEMA.json writes nothing.
+        refusal_contracts = {
+            "pre-beta": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "pre", "atlas_release": "0.12.0",
+                "structure": {}, "compile": {},
+            }),
+            "pre-beta-unstamped": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "pre", "structure": {}, "compile": {},
+            }),
+            "in-beta-shipped": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "b", "atlas_release": "0.13.0-beta",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["frame", "gist", "page"]},
+            }),
+            "in-beta-beta2": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "b2", "atlas_release": "0.13.0-beta.2",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["frame", "gist", "memory"]},
+            }),
+            "full-beta2-init": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "b2i", "structure": {}, "compile": {},
+                "templates": {"by_type": {}},
+                "types": {"recommended": ["frame", "gist", "page"]},
+            }),
+            "schema-json-final-stamp": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "s", "atlas_release": "0.13.0",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            }),
+            "schema-json-beta7-stamp": ("SCHEMA.json", {
+                "schema_version": "1.0", "atlas_id": "s", "atlas_release": "0.13.0-beta.7",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            }),
+            "contract-wrong-layers": ("CONTRACT.json", {
+                "schema_version": "1.0", "atlas_id": "c", "atlas_release": "0.13.0-beta.7",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["frame", "gist", "memory"]},
+            }),
+            "contract-malformed-stamp": ("CONTRACT.json", {
+                "schema_version": "1.0", "atlas_id": "c", "atlas_release": "0.13.0-beta.7x",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            }),
+        }
+        for label, (filename, contract) in refusal_contracts.items():
+            store = tmp / f"restamp-refuse-{label}"
+            store.mkdir(parents=True)
+            (store / "index.md").write_text("# Store\n", encoding="utf-8")
+            (store / filename).write_text(json.dumps(contract) + "\n", encoding="utf-8")
+            before = snapshot(store)
+            code, payload = run_json([
+                "memory-migrate", "--root", str(store), "--operation", "assess", "--json",
+            ])
+            check(
+                f"restamp refuse {label}: assess reports restamp_eligible false",
+                code == 0 and payload.get("restamp_eligible") is False
+                and payload.get("atlas_release") == contract.get("atlas_release")
+                and snapshot(store) == before,
+                str(payload),
+            )
+            code, payload = restamp(store)
+            check(
+                f"restamp refuse {label}: restamp exits non-zero with restamp_not_eligible and writes nothing",
+                code != 0 and payload.get("ok") is False
+                and "restamp_not_eligible" in findings_by_id(payload, "findings")
+                and snapshot(store) == before,
+                str(payload),
+            )
+            if label.startswith("pre-beta"):
+                check(
+                    f"restamp refuse {label}: refusal points pre-beta stores at contract-file",
+                    "--batch contract-file" in payload.get("error", ""),
+                    str(payload),
+                )
+                code, payload = run_json([
+                    "memory-migrate", "--root", str(store), "--operation", "apply",
+                    "--batch", "contract-file", "--json",
+                ])
+                migrated = (
+                    json.loads((store / "CONTRACT.json").read_text(encoding="utf-8"))
+                    if (store / "CONTRACT.json").is_file() else {}
+                )
+                check(
+                    f"restamp refuse {label}: contract-file still migrates pre-beta straight to 0.13.0",
+                    code == 0 and migrated.get("atlas_release") == "0.13.0"
+                    and not (store / "SCHEMA.json").exists(),
+                    str(payload),
+                )
+            if label.startswith("schema-json"):
+                code, payload = run_json(["compile", "--root", str(store), "--json", "--dry-run"])
+                check(
+                    f"restamp refuse {label}: SCHEMA.json with a current stamp fails compile closed",
+                    code == 2 and "stamp_shape" in findings_by_id(payload, "critical"),
+                    str(payload),
+                )
+
+        # A CONTRACT.json symlink is refused before any write, including the target.
+        link_store = tmp / "restamp-refuse-symlink"
+        link_store.mkdir(parents=True)
+        link_target = tmp / "restamp-symlink-target.json"
+        link_target.write_text(
+            json.dumps({
+                "schema_version": "1.0", "atlas_id": "l", "atlas_release": "0.13.0-beta.7",
+                "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            }, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (link_store / "CONTRACT.json").symlink_to(link_target)
+        target_before = sha(link_target)
+        code, payload = restamp(link_store)
+        check(
+            "restamp refuse symlink: CONTRACT.json symlink exits non-zero and target is unchanged",
+            code != 0 and payload.get("ok") is False
+            and sha(link_target) == target_before
+            and (link_store / "CONTRACT.json").is_symlink(),
+            str(payload),
+        )
+
+        # TOCTOU: a CONTRACT.json swapped for a symlink after the CLI resolved
+        # it is caught by the lstat re-check inside restamp, with zero writes.
+        toctou_store = tmp / "restamp-toctou-symlink"
+        toctou_store.mkdir(parents=True)
+        toctou_target = tmp / "restamp-toctou-target.json"
+        toctou_contract = {
+            "schema_version": "1.0", "atlas_id": "t", "atlas_release": "0.13.0-beta.7",
+            "structure": {}, "compile": {},
+            "memory": {"layers": ["schema", "gist", "memory"]},
+        }
+        toctou_target.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        (toctou_store / "CONTRACT.json").symlink_to(toctou_target)
+        toctou_target_before = sha(toctou_target)
+        toctou_before = snapshot(toctou_store)
+        toctou_out = io.StringIO()
+        with contextlib.redirect_stdout(toctou_out):
+            toctou_code = memory_migrate._apply_restamp(
+                toctou_store, toctou_store / "CONTRACT.json", toctou_contract,
+                "current", "eligible", True,
+            )
+        toctou_payload = json.loads(toctou_out.getvalue())
+        check(
+            "restamp refuse symlink (TOCTOU): lstat re-check refuses with zero writes and the target is unchanged",
+            toctou_code != 0 and toctou_payload.get("ok") is False
+            and "restamp_not_eligible" in findings_by_id(toctou_payload, "findings")
+            and sha(toctou_target) == toctou_target_before
+            and (toctou_store / "CONTRACT.json").is_symlink()
+            and snapshot(toctou_store) == toctou_before
+            and sorted(p.name for p in toctou_store.iterdir()) == ["CONTRACT.json"],
+            str(toctou_payload),
+        )
+
+        # A symlink swapped in between the read and the write is never written
+        # through: the atomic replace swaps the directory entry instead.
+        swap_store = tmp / "restamp-toctou-swap"
+        swap_store.mkdir(parents=True)
+        swap_contract = swap_store / "CONTRACT.json"
+        swap_contract.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        swap_target = tmp / "restamp-toctou-swap-target.json"
+        swap_target.write_text("outside\n", encoding="utf-8")
+        swap_target_before = sha(swap_target)
+        real_restamp_bytes = memory_migrate._restamp_bytes
+
+        def swapping_restamp_bytes(original: bytes, old_stamp: str):
+            result = real_restamp_bytes(original, old_stamp)
+            swap_contract.unlink()
+            swap_contract.symlink_to(swap_target)
+            return result
+
+        memory_migrate._restamp_bytes = swapping_restamp_bytes
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                memory_migrate._apply_restamp(
+                    swap_store, swap_contract, toctou_contract, "current", "eligible", True,
+                )
+        finally:
+            memory_migrate._restamp_bytes = real_restamp_bytes
+        check(
+            "restamp TOCTOU swap: a symlink swapped in before the write is replaced, not written through",
+            sha(swap_target) == swap_target_before
+            and not swap_contract.is_symlink()
+            and json.loads(swap_contract.read_bytes())["atlas_release"] == "0.13.0"
+            and sorted(p.name for p in swap_store.iterdir()) == ["CONTRACT.json"],
+        )
+
+        # Restamp keeps the original permission bits (where the platform has them)
+        # and leaves no temporary file behind.
+        mode_store = tmp / "restamp-mode"
+        mode_store.mkdir(parents=True)
+        (mode_store / "index.md").write_text("# Store\n", encoding="utf-8")
+        mode_contract = mode_store / "CONTRACT.json"
+        mode_contract.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        os.chmod(mode_contract, 0o640)
+        mode_before = stat.S_IMODE(os.lstat(mode_contract).st_mode)
+        code, payload = restamp(mode_store)
+        check(
+            "restamp mode: succeeds, keeps the file mode and leaves no temporary file",
+            code == 0 and payload.get("ok") is True
+            and json.loads(mode_contract.read_bytes())["atlas_release"] == "0.13.0"
+            and stat.S_IMODE(os.lstat(mode_contract).st_mode) == mode_before
+            and (os.name == "nt" or mode_before == 0o640)
+            and not any(p.name.endswith(".tmp") for p in mode_store.iterdir()),
+            f"{payload} mode={oct(stat.S_IMODE(os.lstat(mode_contract).st_mode))}",
+        )
+
+        # Restamp preserves the original CONTRACT.json bytes: it replaces only
+        # the top-level stamp value, whatever the layout, encoding or line
+        # endings, and refuses with zero writes when that is not provably safe.
+        def raw_contract_store(label: str, raw: bytes) -> Path:
+            store = tmp / f"restamp-bytes-{label}"
+            store.mkdir(parents=True)
+            (store / "index.md").write_text("# Store\n", encoding="utf-8")
+            (store / "CONTRACT.json").write_bytes(raw)
+            return store
+
+        layers_json = '"memory": {"layers": ["schema", "gist", "memory"]}'
+        pretty_unicode = (
+            "{\n"
+            '  "schema_version": "1.0",\n'
+            '  "atlas_id": "u",\n'
+            '  "atlas_release": "0.13.0-beta.7",\n'
+            '  "título": "Café ✓",\n'
+            '  "structure": {},\n'
+            '  "compile": {},\n'
+            f"  {layers_json}\n"
+            "}\n"
+        )
+        byte_safe_cases = {
+            "compact": (
+                '{"schema_version":"1.0","atlas_id":"c","atlas_release":"0.13.0-beta.3",'
+                '"structure":{},"compile":{},"memory":{"layers":["schema","gist","memory"]}}'
+            ).encode("utf-8"),
+            "non-ascii": pretty_unicode.encode("utf-8"),
+            "crlf": pretty_unicode.replace("\n", "\r\n").encode("utf-8"),
+            "unusual-spacing": (
+                '{ "schema_version" : "1.0" ,\n\t"atlas_id":"s",\n'
+                '\t"atlas_release" :  "0.13.0-beta.7"  ,\n'
+                f'\t"structure" : {{}} , "compile":{{ }},\n\t{layers_json}\n}}\n'
+            ).encode("utf-8"),
+            "nested-other-stamp": (
+                '{\n  "schema_version": "1.0",\n  "atlas_id": "n",\n'
+                '  "atlas_release": "0.13.0-beta.4",\n'
+                '  "provenance": {"atlas_release": "0.12.0"},\n'
+                f'  "structure": {{}},\n  "compile": {{}},\n  {layers_json}\n}}\n'
+            ).encode("utf-8"),
+        }
+        for label, raw in byte_safe_cases.items():
+            old_value = json.loads(raw)["atlas_release"]
+            store = raw_contract_store(label, raw)
+            before = snapshot(store)
+            code, payload = restamp(store)
+            after = snapshot(store)
+            old_member = f'"{old_value}"'.encode()
+            expected = raw.replace(old_member, b'"0.13.0"')
+            check(
+                f"restamp bytes {label}: output equals input with only the stamp substring replaced",
+                code == 0 and payload.get("ok") is True
+                and payload.get("previous_atlas_release") == old_value
+                and raw.count(old_member) == 1
+                and after["CONTRACT.json"] == expected
+                and {k: v for k, v in after.items() if k != "CONTRACT.json"}
+                == {k: v for k, v in before.items() if k != "CONTRACT.json"},
+                f"{payload} {after['CONTRACT.json']!r}",
+            )
+        check(
+            "restamp bytes: literal non-ASCII and CRLF survive unescaped",
+            "Café ✓".encode("utf-8") in (tmp / "restamp-bytes-non-ascii" / "CONTRACT.json").read_bytes()
+            and (tmp / "restamp-bytes-crlf" / "CONTRACT.json").read_bytes().count(b"\r\n")
+            == pretty_unicode.count("\n"),
+        )
+        check(
+            "restamp bytes nested-other-stamp: nested atlas_release is left untouched",
+            json.loads((tmp / "restamp-bytes-nested-other-stamp" / "CONTRACT.json").read_bytes())
+            == {
+                "schema_version": "1.0", "atlas_id": "n", "atlas_release": "0.13.0",
+                "provenance": {"atlas_release": "0.12.0"}, "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            },
+        )
+
+        byte_unsafe_cases = {
+            "nested-same-stamp": (
+                '{"schema_version": "1.0", "atlas_id": "n", "atlas_release": "0.13.0-beta.4", '
+                '"provenance": {"atlas_release": "0.13.0-beta.4"}, '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+            "duplicate-key": (
+                '{"schema_version": "1.0", "atlas_id": "d", "atlas_release": "0.13.0-beta.3", '
+                '"atlas_release": "0.13.0-beta.4", '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+            "escaped-key": (
+                '{"schema_version": "1.0", "atlas_id": "e", "atlas\\u005frelease": "0.13.0-beta.7", '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+        }
+        for label, text in byte_unsafe_cases.items():
+            store = raw_contract_store(label, text.encode("utf-8"))
+            before = snapshot(store)
+            code, payload = restamp(store)
+            check(
+                f"restamp bytes {label}: refuses with restamp_not_byte_safe and writes nothing",
+                code != 0 and payload.get("ok") is False
+                and "restamp_not_byte_safe" in findings_by_id(payload, "findings")
+                and snapshot(store) == before,
+                str(payload),
+            )
+
+        # The unsupported-batch error names both supported batches.
+        unsupported = tmp / "restamp-unsupported-batch"
+        unsupported.mkdir(parents=True)
+        (unsupported / "SCHEMA.json").write_text(
+            json.dumps({"schema_version": "1.0", "atlas_id": "u", "structure": {}, "compile": {}}),
+            encoding="utf-8",
+        )
+        code, payload = run_json([
+            "memory-migrate", "--root", str(unsupported), "--operation", "apply",
+            "--batch", "bogus", "--json",
+        ])
+        check(
+            "unsupported batch: error names contract-file and restamp",
+            code == 2 and "'contract-file'" in payload.get("error", "")
+            and "'restamp'" in payload.get("error", ""),
+            str(payload),
+        )
+
+        # A mistyped batch is rejected before the current-lineage no-op and the
+        # pre-beta guard: non-zero, zero writes, and the error names both batches.
+        typo_current = tmp / "restamp-typo-current-beta7"
+        init_r = run(["init", "--root", str(typo_current), "--json"])
+        check("unsupported batch typo: init ok", init_r.returncode == 0, init_r.stderr)
+        typo_contract = typo_current / "CONTRACT.json"
+        typo_contract.write_bytes(
+            typo_contract.read_bytes().replace(
+                b'"atlas_release": "0.13.0",', b'"atlas_release": "0.13.0-beta.7",'
+            )
+        )
+        for label, store in (("beta.7 current", typo_current), ("pre-beta", unsupported)):
+            before = snapshot(store)
+            code, payload = run_json([
+                "memory-migrate", "--root", str(store), "--operation", "apply",
+                "--batch", "restmap", "--json",
+            ])
+            error = payload.get("error", "")
+            check(
+                f"unsupported batch typo ({label}): --batch restmap exits non-zero, writes nothing, names supported batches",
+                code != 0 and payload.get("ok") is False
+                and "unsupported --batch 'restmap'" in error
+                and "'contract-file'" in error and "'restamp'" in error
+                and snapshot(store) == before,
+                str(payload),
+            )
+        check(
+            "unsupported batch typo: beta.7 store keeps its stamp",
+            json.loads(typo_contract.read_bytes())["atlas_release"] == "0.13.0-beta.7",
+        )
 
         # === memory-rung-preserves-lineage =======================================
         # A shipped 0.13.0-beta SCHEMA.json with no memory block must keep

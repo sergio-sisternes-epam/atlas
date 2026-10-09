@@ -309,12 +309,38 @@ relates_to:
         self.assertNotIn("schema_missing_from_index", crit)
 
     def test_no_contract_write_and_stamp(self) -> None:
-        self.assertEqual(CURRENT_RELEASE, "0.13.0-beta.7")
+        self.assertEqual(CURRENT_RELEASE, "0.13.0")
         root = shared_parent_store(self.base)
         contract = (root / "CONTRACT.json").read_bytes()
+        self.assertEqual(json.loads(contract)["atlas_release"], "0.13.0")
         plan(root, self.base / "out")
         run(OPT, "apply", "--root", str(root), "--target", ".", "--plan", str(self.base / "out" / "plan.json"))
         self.assertEqual((root / "CONTRACT.json").read_bytes(), contract)
+
+    def test_beta7_and_final_stamps_are_accepted_alike(self) -> None:
+        results = {}
+        for stamp in ("0.13.0-beta.7", "0.13.0"):
+            with self.subTest(stamp=stamp):
+                base = self.base / stamp
+                base.mkdir()
+                root = shared_parent_store(base)
+                contract_path = root / "CONTRACT.json"
+                contract = json.loads(contract_path.read_text())
+                contract["atlas_release"] = stamp
+                contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+                before = contract_path.read_bytes()
+                code, p = plan(root, base / "out")
+                self.assertIsNone(p["precondition"], p["precondition"])
+                self.assertIn(("dead-index-cue", "auto"), {(t["kind"], t["class"]) for t in tasks(p)})
+                applied = run(
+                    OPT, "apply", "--root", str(root), "--target", ".",
+                    "--plan", str(base / "out" / "plan.json"),
+                )
+                report = json.loads(applied.stdout)
+                self.assertIn("dead-index-cue:notes/index.md:frame.md", report["applied"])
+                self.assertEqual(contract_path.read_bytes(), before)
+                results[stamp] = (code, sorted(t["id"] for t in tasks(p)), applied.returncode, report["applied"])
+        self.assertEqual(results["0.13.0-beta.7"], results["0.13.0"])
 
     def test_not_wired_into_install_or_compile(self) -> None:
         help_text = run(ATLAS, "--help").stdout

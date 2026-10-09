@@ -9,12 +9,25 @@ not rewritten. New current-shape pages use suffixes as search handles.
 An unstamped full beta.2 init with no frame, gist, page, or memory content
 pages is also eligible. Apply then aligns templates and types.recommended
 with the blocks `atlas init` writes, and still does not rewrite content pages.
+
+`--batch contract-file` writes the CURRENT_RELEASE stamp ("0.13.0"). A store
+that is already current (CONTRACT.json stamped 0.13.0-beta.3, beta.4, beta.7
+or 0.13.0) is a no-op for that batch and for apply with no batch. The
+separate, operator-chosen `--batch restamp` replaces only the top-level
+``atlas_release`` string value inside the original bytes of a current
+CONTRACT.json that still carries an older accepted stamp; every other byte
+and every other file stays unchanged, and it refuses with zero writes when
+that single-value replacement cannot be verified.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import os
+import re
+import stat
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -33,6 +46,7 @@ from ..core.recall_config import schema_version
 from ..core.schema import (
     BETA3_LAYERS,
     CURRENT_RELEASE,
+    OLDER_CURRENT_STAMPS,
     classify_lineage,
     find_contract_path,
     is_unstamped_full_beta2_init,
@@ -44,6 +58,8 @@ from .validate import MD_LINK, WIKILINK
 
 REFUSE_BATCH_TOKENS = frozenset({"", "migrate everything"})
 LEGACY_BATCH = "contract-file"
+RESTAMP_BATCH = "restamp"
+SUPPORTED_BATCHES = (LEGACY_BATCH, RESTAMP_BATCH)
 MEMORY_PAGE_TYPES = frozenset({"memory", "gist", "frame"})
 # Content types that keep an unstamped full beta.2 init on the in-beta
 # refusal. `page` is included here; the pre-beta lineage flip above does
@@ -521,6 +537,40 @@ def _empty_beta2_migration_status(root: Path, contract_name: str, schema: dict) 
     return status
 
 
+def _restamp_status(contract_name: str, schema: dict, contract_lineage: str) -> str:
+    """Classify a store for ``--batch restamp`` without writing anything.
+
+    Returns ``"eligible"`` when restamp would rewrite ``atlas_release`` (a
+    current CONTRACT.json with layers schema/gist/memory and an older
+    accepted current stamp), ``"already"`` when it already carries
+    CURRENT_RELEASE, and ``"refused"`` for anything else.
+    """
+    if contract_name != CONTRACT_NAME or contract_lineage != "current":
+        return "refused"
+    memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else None
+    layers = memory.get("layers") if isinstance(memory, dict) else None
+    if layers != BETA3_LAYERS:
+        return "refused"
+    atlas_release = schema.get("atlas_release")
+    if atlas_release == CURRENT_RELEASE:
+        return "already"
+    if atlas_release in OLDER_CURRENT_STAMPS:
+        return "eligible"
+    return "refused"
+
+
+def _restamp_refusal_msg(contract_name: str, lineage: str, atlas_release: object) -> str:
+    msg = (
+        f"--batch {RESTAMP_BATCH} only rewrites atlas_release on a current "
+        f"{CONTRACT_NAME} (layers {BETA3_LAYERS!r}) stamped "
+        f"{', '.join(OLDER_CURRENT_STAMPS)}; this store is {contract_name} "
+        f"lineage {lineage} with atlas_release={atlas_release!r} and was not rewritten"
+    )
+    if lineage == "pre-beta":
+        msg += f"; pre-beta stores use --batch {LEGACY_BATCH}, which writes {CURRENT_RELEASE}"
+    return msg
+
+
 def _print(as_json: bool, payload: dict) -> None:
     if as_json:
         print(json.dumps(payload, indent=2))
@@ -533,8 +583,31 @@ def _print(as_json: bool, payload: dict) -> None:
         print(f"lineage: {payload['lineage']}")
     if "contract_file_eligible" in payload:
         print(f"contract_file_eligible: {str(bool(payload['contract_file_eligible'])).lower()}")
+    if "atlas_release" in payload:
+        print(f"atlas_release: {payload['atlas_release']}")
+    if "restamp_eligible" in payload:
+        print(f"restamp_eligible: {str(bool(payload['restamp_eligible'])).lower()}")
     for note in payload.get("notes") or []:
         print(f"note: {note}")
+
+
+def _unsupported_batch(
+    r: Path, contract_name: str, lineage: str, batch_value: str, as_json: bool
+) -> int:
+    payload = {
+        "ok": False,
+        "root": str(r),
+        "operation": "apply",
+        "contract_file": contract_name,
+        "lineage": lineage,
+        "error": (
+            f"unsupported --batch {batch_value!r}; supported batches are "
+            f"{LEGACY_BATCH!r} (pre-beta or empty beta.2 init -> {CURRENT_RELEASE}) "
+            f"and {RESTAMP_BATCH!r} (current store stamp -> {CURRENT_RELEASE})"
+        ),
+    }
+    _print(as_json, payload)
+    return 2
 
 
 def run(
@@ -588,6 +661,7 @@ def run(
     beta2 = _empty_beta2_migration_status(r, contract_name, schema)
     if beta2["eligible"]:
         lineage = "empty-beta2-init"
+    restamp = _restamp_status(contract_name, schema, contract_lineage)
 
     if operation in ("assess", "inventory"):
         notes = ["write nothing"]
@@ -603,6 +677,13 @@ def run(
                 "unstamped full beta.2 init has frame, gist, page, or memory "
                 "content pages; not eligible for apply"
             )
+        if restamp == "eligible":
+            notes.append(
+                f"current store with an older accepted stamp; eligible for apply "
+                f"--batch {RESTAMP_BATCH} (atlas_release -> {CURRENT_RELEASE})"
+            )
+        elif restamp == "already":
+            notes.append("already at current stamp")
         payload = {
             "ok": True,
             "root": str(r),
@@ -610,6 +691,8 @@ def run(
             "contract_file": contract_name,
             "lineage": lineage,
             "contract_file_eligible": contract_lineage == "pre-beta" or beta2["eligible"],
+            "atlas_release": schema.get("atlas_release"),
+            "restamp_eligible": restamp == "eligible",
             "notes": notes,
         }
         if beta2["match"] and beta2["finding"] is None:
@@ -623,6 +706,14 @@ def run(
         return 2
 
     # --- apply ---
+    batch_value = (batch or "").strip()
+    if batch_value == RESTAMP_BATCH:
+        return _apply_restamp(r, contract_path, schema, lineage, restamp, as_json)
+    # Reject typos such as "restmap" before any lineage-specific no-op or
+    # refusal, so a mistyped batch never exits 0 on a current store.
+    if batch_value.lower() not in REFUSE_BATCH_TOKENS and batch_value not in SUPPORTED_BATCHES:
+        return _unsupported_batch(r, contract_name, lineage, batch_value, as_json)
+
     if contract_lineage == "current":
         payload = {
             "ok": True,
@@ -669,7 +760,6 @@ def run(
         return 2
 
     # contract_lineage == "pre-beta"
-    batch_value = (batch or "").strip()
     if batch_value.lower() in REFUSE_BATCH_TOKENS:
         payload = {
             "ok": False,
@@ -690,16 +780,7 @@ def run(
         return 2
 
     if batch_value != LEGACY_BATCH:
-        payload = {
-            "ok": False,
-            "root": str(r),
-            "operation": "apply",
-            "contract_file": contract_name,
-            "lineage": lineage,
-            "error": f"unsupported --batch {batch_value!r}; only {LEGACY_BATCH!r} is implemented",
-        }
-        _print(as_json, payload)
-        return 2
+        return _unsupported_batch(r, contract_name, lineage, batch_value, as_json)
 
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
     # atlas_release/memory.layers to the current shape. Existing pages stay
@@ -973,4 +1054,213 @@ def run(
         ],
     }
     _print(as_json, payload)
+    return 0
+
+
+class _DuplicateKeyError(ValueError):
+    pass
+
+
+def _strict_pairs(pairs: list[tuple[str, object]]) -> dict:
+    seen: set[str] = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise _DuplicateKeyError(key)
+        seen.add(key)
+    return dict(pairs)
+
+
+def _ordered(value: object) -> object:
+    """Normalise parsed JSON so equality also checks object key order."""
+    if isinstance(value, dict):
+        return [(key, _ordered(item)) for key, item in value.items()]
+    if isinstance(value, list):
+        return [_ordered(item) for item in value]
+    return value
+
+
+def _restamp_bytes(original: bytes, old_stamp: str) -> tuple[bytes | None, str]:
+    """Return ``original`` with only the top-level stamp value replaced.
+
+    The raw UTF-8 bytes must hold exactly one ``"atlas_release": "<old>"``
+    member (any spacing around the colon), and re-parsing the result must
+    equal the original object, key order included, with only the top-level
+    ``atlas_release`` changed to CURRENT_RELEASE. Duplicate keys at any depth,
+    a nested key carrying the same stamp, or an escaped key or value all
+    refuse. Returns ``(None, reason)`` on refusal.
+    """
+    try:
+        text = original.decode("utf-8")
+        before = json.loads(text, object_pairs_hook=_strict_pairs)
+    except _DuplicateKeyError as error:
+        return None, f"duplicate JSON key {error.args[0]!r}"
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return None, f"cannot re-read the contract as UTF-8 JSON ({error})"
+    if not isinstance(before, dict) or before.get("atlas_release") != old_stamp:
+        return None, "the contract changed while it was being read"
+    pattern = re.compile(
+        rb'"atlas_release"(\s*:\s*)"' + re.escape(old_stamp.encode("utf-8")) + rb'"'
+    )
+    matches = list(pattern.finditer(original))
+    if len(matches) != 1:
+        return None, (
+            f"expected exactly one \"atlas_release\": \"{old_stamp}\" member in the "
+            f"raw file, found {len(matches)}"
+        )
+    match = matches[0]
+    replacement = b'"atlas_release"' + match.group(1) + b'"' + CURRENT_RELEASE.encode("utf-8") + b'"'
+    new_bytes = original[: match.start()] + replacement + original[match.end():]
+    expected = dict(before)
+    expected["atlas_release"] = CURRENT_RELEASE
+    try:
+        after = json.loads(new_bytes.decode("utf-8"), object_pairs_hook=_strict_pairs)
+    except (ValueError, UnicodeDecodeError) as error:
+        return None, f"the restamped contract does not re-parse ({error})"
+    if _ordered(after) != _ordered(expected):
+        return None, (
+            "replacing the matched member would change more than the top-level "
+            "atlas_release value"
+        )
+    return new_bytes, ""
+
+
+def _read_regular_file(path: Path) -> bytes:
+    """Read ``path`` without following a final-component symlink where possible."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read()
+
+
+def _replace_contract(contract_path: Path, data: bytes, mode: int) -> None:
+    """Atomically replace ``contract_path`` with ``data``, keeping ``mode``.
+
+    The bytes go to a sibling temporary file that is fsynced and then moved
+    over the contract with ``os.replace``, which swaps the directory entry
+    and never writes through a symlink. The temporary file is removed on
+    any error.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=contract_path.parent, prefix=".CONTRACT.json.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, contract_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _apply_restamp(
+    r: Path,
+    contract_path: Path,
+    schema: dict,
+    lineage: str,
+    restamp: str,
+    as_json: bool,
+) -> int:
+    """`apply --batch restamp`: move a current store's stamp to CURRENT_RELEASE.
+
+    Replaces only the top-level ``atlas_release`` string value inside the
+    original CONTRACT.json bytes; encoding, spacing, line endings, key order
+    and every other byte stay as they were. If that replacement cannot be
+    proven safe (see ``_restamp_bytes``) it refuses and writes nothing. No
+    page, template or other file is touched.
+    """
+    contract_name = contract_path.name
+    atlas_release = schema.get("atlas_release")
+    base = {
+        "root": str(r),
+        "operation": "apply",
+        "batch": RESTAMP_BATCH,
+        "contract_file": contract_name,
+        "lineage": lineage,
+        "atlas_release": atlas_release,
+    }
+    if restamp == "already":
+        _print(as_json, {"ok": True, **base, "notes": ["already at current stamp; no-op write"]})
+        return 0
+    if restamp != "eligible":
+        msg = _restamp_refusal_msg(contract_name, lineage, atlas_release)
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "restamp_not_eligible", "path": contract_name, "msg": msg}],
+        })
+        return 2
+
+    # Re-check immediately before reading: only a regular file, never a
+    # symlink swapped in after find_contract_path ran.
+    lstat_error = ""
+    try:
+        original_stat = os.lstat(contract_path)
+    except OSError as error:
+        original_stat = None
+        lstat_error = f" ({error})"
+    if original_stat is None or not stat.S_ISREG(original_stat.st_mode):
+        msg = (
+            f"{contract_name} is not a regular file{lstat_error}; "
+            "refusing to restamp, no file was written"
+        )
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "restamp_not_eligible", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    try:
+        original = _read_regular_file(contract_path)
+    except OSError as error:
+        msg = f"cannot read {contract_name}: {error}"
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "contract_read", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    new_bytes, reason = _restamp_bytes(original, str(atlas_release))
+    if new_bytes is None:
+        msg = (
+            f"--batch {RESTAMP_BATCH} refused to rewrite {contract_name}: {reason}; "
+            f"no file was written. Set \"atlas_release\": \"{CURRENT_RELEASE}\" by hand "
+            "if this store should carry the current stamp"
+        )
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "restamp_not_byte_safe", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    try:
+        _replace_contract(contract_path, new_bytes, stat.S_IMODE(original_stat.st_mode))
+    except OSError as error:
+        msg = f"cannot write {contract_name}: {error}"
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "contract_write", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    _print(as_json, {
+        "ok": True,
+        **base,
+        "atlas_release": CURRENT_RELEASE,
+        "previous_atlas_release": atlas_release,
+        "notes": [
+            f"set atlas_release {atlas_release} -> {CURRENT_RELEASE}; no other key or file changed",
+            f"compile this store with an Atlas {CURRENT_RELEASE} package; "
+            "beta.13 and earlier packages fail closed on this stamp",
+        ],
+    })
     return 0

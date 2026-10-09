@@ -223,12 +223,19 @@ def migrate_cmd(
     "--operation",
     required=True,
     type=click.Choice(["assess", "inventory", "apply"]),
-    help="assess/inventory write nothing; apply rewrites a pre-beta contract or an empty unstamped full beta.2 init",
+    help=(
+        "assess/inventory write nothing; apply rewrites a pre-beta contract or an empty "
+        "unstamped full beta.2 init, or restamps a current store with --batch restamp"
+    ),
 )
 @click.option(
     "--batch",
     default=None,
-    help="explicit batch token for apply (only 'contract-file' is implemented)",
+    help=(
+        "explicit batch token for apply: 'contract-file' (pre-beta or empty beta.2 "
+        "init -> CONTRACT.json stamped 0.13.0) or 'restamp' (current CONTRACT.json "
+        "stamped 0.13.0-beta.3/beta.4/beta.7 -> 0.13.0; atlas_release only)"
+    ),
 )
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def memory_migrate_cmd(
@@ -237,7 +244,7 @@ def memory_migrate_cmd(
     batch: str | None,
     as_json: bool,
 ) -> None:
-    """Pre-beta -> 0.13.0-beta.7 contract-file migration (path memory-migrate)."""
+    """Pre-beta -> 0.13.0 contract-file migration and opt-in restamp (path memory-migrate)."""
     raise SystemExit(cmd_memory_migrate.run(root, operation, batch, as_json))
 
 

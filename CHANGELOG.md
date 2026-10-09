@@ -1,7 +1,74 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 - 2026-10-09
 
+Final 0.13.0 release. Over v0.12.0 the beta series ships:
+
+- The four-layer memory model `index → schema → gist → memory`, as
+  optional progressive disclosure: an index may exist without a schema,
+  a page may skip the gist, and a residual `missing_gist` is not a
+  completeness failure. Recall stops at the first level that answers.
+- `CONTRACT.json` as the current root contract file, with stamp/shape
+  agreement (`stamp_shape`): exactly one of `SCHEMA.json` and
+  `CONTRACT.json`, known stamps only, unknown and malformed stamps fail
+  closed, and shipped `0.13.0-beta` and `0.13.0-beta.2` stores keep
+  reading as before.
+- CLI `atlas memory-migrate --operation assess|inventory|apply`: assess
+  and inventory write nothing; apply needs an explicit batch. The
+  `contract-file` batch moves a pre-beta store, or an empty unstamped
+  beta.2 init, to `CONTRACT.json` and adds the schema pages and index cues
+  it needs without rewriting existing pages.
+- Operator paths `atlas-memorise`, `atlas-recall`, `atlas-forget` and
+  `atlas-optimise`, which help agents use the four-layer model.
+- The standalone helper `scripts/atlas_optimise.py` (`plan`, `apply`) with
+  an explicit target, modes `path`, `full`, `custom` and `incremental`,
+  fill from evidence under the four-layer soft model (verbatim gist
+  descriptions, minimal-prose schemas, and fill-when-sensible same-folder
+  shared gists), a security scan, stale-plan refusal and a cost ceiling.
+  It is not an `atlas.py` command and never writes the contract file.
+- Bundled runtime help and getting-started baselines (shipped in v0.12.0)
+  updated for the four-layer model, `memory-migrate` and the new operator
+  paths; they still work with no Atlas mounted.
+- Release tooling: the `scripts/release_readiness.py --pre-tag` gate and
+  idempotent GitHub release creation that fails closed on a draft.
+- Docs-branch guards that keep `site/` off `main` and out of every
+  release tag (see below).
+
+Changes in this release:
+
+- `atlas init` and `memory-migrate --operation apply --batch
+  contract-file` now write `atlas_release` `0.13.0` (previously
+  `0.13.0-beta.7`) on `CONTRACT.json` with `memory.layers`
+  `["schema", "gist", "memory"]`. Stores stamped `0.13.0-beta.3`,
+  `0.13.0-beta.4` or `0.13.0-beta.7` stay current on read and need no
+  migration; apply with no batch or with `--batch contract-file` is still
+  a zero-write no-op on them. `SCHEMA.json` refuses `0.13.0` like every
+  other current stamp, and unknown stamps such as `0.13.0-beta.6`,
+  `0.13.0-rc.1` or `0.13.1` still fail closed.
+- New opt-in `memory-migrate --operation apply --batch restamp` moves a
+  current store's stamp from beta.3, beta.4 or beta.7 to `0.13.0` and
+  changes nothing else: it replaces only the top-level stamp value inside
+  the original `CONTRACT.json` bytes (spacing, line endings and literal
+  non-ASCII kept), writes them through an atomic replace that keeps the
+  file mode and never writes through a symlink, and touches no page,
+  template or other file. Any other unsupported `--batch` value, such as
+  `restmap`, now exits non-zero with zero writes on current stores too,
+  instead of falling through to the no-op. It is an
+  idempotent no-op on a `0.13.0` store and refuses
+  (`restamp_not_eligible`) with zero writes on pre-beta, in-beta,
+  `SCHEMA.json`, symlinked or unknown-stamp stores, and
+  (`restamp_not_byte_safe`) with zero writes when that single-value
+  replacement cannot be verified, such as duplicate keys or a nested
+  `atlas_release` carrying the same old stamp. Assess and
+  inventory now report `atlas_release` and `restamp_eligible`. Restamp
+  only after every reader of that store runs Atlas 0.13.0, because
+  `0.13.0-beta.13` and earlier packages fail closed on the new stamp.
+  Compile and `scripts/atlas_optimise.py` only read the stamp.
+- Package version, help baselines and CI ref pins move to `0.13.0` /
+  `v0.13.0`.
+- No dedicated sleep or consolidate command ships. Scheduling
+  `scripts/atlas_optimise.py plan --optimise-mode incremental` is the
+  interim, operator-chosen routine; it is not a sleep feature.
 - Docs-branch guards keep `site/` off `main` and out of every release tag:
   a new `no-site-guard` CI job fails unless the default branch is `main`,
   no `site/` or `DOCS_BRANCH*` file is tracked and `docs-site.yml` is still
