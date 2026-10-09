@@ -2,7 +2,7 @@
 """Contribution extension slot: one package-metadata key per overlay.
 
 The slot is the root key equal to contribution_id with '-' replaced by '_'.
-It must be an object, is never merged into the effective schema, and is
+It must be an object, is never merged into the effective contract, and is
 ignored by core. Every other extra overlay root key is still rejected on
 SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, and
 rechecks them under the lock that `schema install` shares. Locks are never

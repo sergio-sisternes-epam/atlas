@@ -17,7 +17,7 @@ smokes:
     expect: "Current CONTRACT.json pages use .schema.md, .gist.md, and .memory.md as search handles only; frontmatter type remains schema, gist, or memory. Index and hub filenames remain unsuffixed."
   - id: closed-current-compile-gates
     source: "scripts/atlas_cli/commands/validate.py"
-    expect: "Current shape fails for uncovered folder gists (gist_without_schema/schema_folder), schemas not cued by local index.md (schema_missing_from_index), and gist descriptions not found as exact substrings in derived memory body or description (stale_upper_page). Multiple schemas and schema-only folders are not compile failures."
+    expect: "Current shape fails for uncovered folder gists (schema_folder), schemas not cued by local index.md (schema_missing_from_index), and gist descriptions not found as exact substrings in derived memory body or description (stale_upper_page). Multiple schemas and schema-only folders are not compile failures."
   - id: shipped-beta-compatibility
     source: "scripts/atlas_cli/commands/validate.py; references/templates/frame.md"
     expect: "Shipped SCHEMA.json stores keep existing page type names and frame_members info/warn/error ladder; no current-shape schema gate is imposed on them."

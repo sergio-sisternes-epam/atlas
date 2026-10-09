@@ -277,7 +277,7 @@ def validate_store_v2(data: Any) -> list[str]:
 
 
 def validate_contribution(data: Any) -> list[str]:
-    """Validate a contribution overlay for a SCHEMA 2.0 host.
+    """Validate an Atlas overlay for a SCHEMA 2.0 host.
 
     The one package-metadata slot (see ``overlay.extension_key``) is checked to
     be an object and then excluded from the contribution-v1 JSON Schema check.

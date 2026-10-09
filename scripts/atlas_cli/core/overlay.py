@@ -57,7 +57,7 @@ def extension_key(cid: str) -> str | None:
 
     The slot is the contribution_id with '-' replaced by '_' (``atlas-tasks`` ->
     ``atlas_tasks``). Its value must be a JSON object; it is never merged into
-    the effective schema and core never reads it. Ids whose slot would equal a
+    the effective contract and core never reads it. Ids whose slot would equal a
     core or contribution-envelope key get no slot.
     """
     cid = str(cid or "").strip()

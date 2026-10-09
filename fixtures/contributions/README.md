@@ -1,6 +1,6 @@
-# Contribution overlay fixtures
+# Atlas overlay fixtures
 
-Released contribution overlays, kept verbatim so that changes to the
+Released Atlas overlays, kept verbatim so that changes to the
 contribution contract are tested against what packages actually ship.
 Do not edit these files. Add a new directory for a new release instead.
 
@@ -14,4 +14,4 @@ For each fixture, `scripts/test_overlay_extension.py`:
 - installs and compiles it on a SCHEMA 2.0 store;
 - installs and compiles it on a SCHEMA 1.0 store;
 - installs it on a SCHEMA 1.0 store, upgrades the store to 2.0 and compiles. See `references/paths/schema.md`
-(Contribution overlays) for the extension slot rule.
+(step 3a, **Extension slot**) for the extension slot rule.

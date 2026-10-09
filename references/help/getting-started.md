@@ -53,6 +53,11 @@ Then install CLI dependencies in the environment that will run Atlas:
 python3 -m pip install -r <atlas-skill>/scripts/requirements.txt
 ```
 
+Skill packages that contribute types to Atlas (a `contributions/<id>/`
+folder) install the same way, pinned to a tag. `apm install` never changes an
+Atlas store: mounting the Atlas overlay is a separate `schema install` on a
+store you name. See module **schema**, step 3a.
+
 ## Shortest useful first journey
 
 1. Install Atlas as above.

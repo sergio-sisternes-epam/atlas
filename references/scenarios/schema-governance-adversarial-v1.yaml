@@ -33,7 +33,7 @@ smokes:
     source: pin 9 fail-closed
     expect: path schema does not treat hand-edited SCHEMA as a legal writer
   - id: overlay-extension-slot-installs-on-2-0
-    source: released contribution overlays (fixtures/contributions)
+    source: released Atlas overlays (fixtures/contributions)
     expect: object under contribution_id with '-' → '_' installs and compiles on SCHEMA 2.0; never merged into effective SCHEMA
   - id: overlay-extension-other-keys-rejected
     source: contribution-v1 closed envelope
