@@ -86,8 +86,9 @@ macOS arm64. Atlas does not install it.
   `atlas.gq` (generated queries), `atlas.nano` (`nanograph init` then
   `nanograph load --mode overwrite`) and finally `ready.json`
   (`format`, `version`, `corpus_digest`, `built_at`; `format` is the
-  index layout version, bumped when the generated queries or edge type
-  naming change, so an older generation is rebuilt rather than reused). The build runs in a
+  index layout version, bumped when the generated queries, edge type
+  naming or the corpus digest change, so an older generation is rebuilt
+  rather than reused; format 3 is the content digest below). The build runs in a
   `.tmp-<generation>` sibling under an owner-checked `.lock` (see path
   `recall`, Atomic publish and lock), is renamed into place
   atomically and then `current.json` (generation, digest, version) is
@@ -150,7 +151,22 @@ path `recall`, Preferred engine and Managing engines and indexes.
 Availability comes from each driver's `detect()`; Atlas never builds an index
 for an unavailable driver. With a preference (or an explicit `--engine`),
 recall creates the index on first use and rebuilds it when the corpus digest
-or, for nanograph, the binary version changes. Builds go to a `.tmp-*`
+or, for nanograph, the binary version changes.
+
+**Freshness is decided by content.** The corpus digest is sha256 over the
+sorted lines `<relative path> NUL <sha256 of the file bytes>` of every
+eligible page, so an edit, rename, addition or removal changes it, even an
+edit that keeps the byte length and restores the old mtime. An index or
+generation counts as current (fts5 fast path for recall, `--engine bm25`
+and `atlas graph`; preferred-engine refresh; nanograph `ready.json` reuse;
+legacy `.atlas-index/` reuse; `atlas index show` / `status`) only when its
+recorded corpus digest equals the current one. The cheap
+path/size/mtime fingerprint stored in the pointer is only a fast pre-check:
+when it differs the index is stale without hashing, but a match never
+makes it fresh. The content digest hashes raw bytes without parsing
+YAML and is computed at most once per command; a projection, when one is
+needed, carries the same digest. Generations recorded before this rule
+(different digest formula) rebuild once. Builds go to a `.tmp-*`
 sibling under a `.lock` and are published with an atomic rename plus an
 atomic `current.json` pointer replace. On stores with an enabled recall
 profile the profile wins; see path `recall`.
@@ -258,6 +274,21 @@ covers it, and report `atlas_indexes_ignored` when they add the line. A
 committed `.gitignore` is never edited and a non-git project root is left
 alone. For this release the store's legacy `/.atlas-index/` line is still
 added as before (`atlas_index_ignored`).
+
+A guard that cannot do its job is reported, never treated as "already
+ignored": when `info/exclude` cannot be read or written (for example a
+read-only file, or `info` being a file), or `git rev-parse --git-path`
+fails, the command adds the warning item `atlas_indexes_ignore_failed`
+(`atlas_index_ignore_failed` for the legacy guard), for example `could not
+add /.atlas/indexes/ to <path>: <reason>; add it to .gitignore or
+info/exclude yourself to keep derived indexes out of commits`. The index is
+still built and exit codes do not change (validate treats both codes as
+non-blocking). Compile/validate, `atlas index build` / `set --build`,
+recall's auto-create and nanograph and tgrep builds all surface it.
+`atlas index show` and `atlas index status` report `ignore: ok`, `missing`
+or `failed` (with the reason; `n/a` outside git) by asking git itself
+(`git check-ignore -q` on a path under `.atlas/indexes/`), so a
+`.gitignore` line counts too.
 
 **Deprecated: `.atlas-index/`.** The old in-store locations
 (`.atlas-index/recall/`, `.atlas-index/nanograph/`, `.atlas-index/tgrep/`)

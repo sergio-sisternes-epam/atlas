@@ -2,6 +2,41 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Index freshness is decided by content: the corpus digest is now sha256
+  over sorted `<relative path> NUL <sha256 of the bytes>` lines, and an
+  index or generation counts as current only when its recorded digest
+  equals the current one. The path/size/mtime fingerprint is only a fast
+  pre-check that can rule an index stale, never fresh, so a same-length
+  edit that keeps its mtime is no longer served from the old generation.
+  This covers the fts5 fast path (recall, `--engine bm25`, `atlas graph`),
+  the preferred-engine refresh, nanograph reuse, legacy `.atlas-index/`
+  reuse and `atlas index show` / `status`. The digest is hashed from raw
+  bytes once per command; nanograph's index `format` is now 3, and
+  generations recorded with the old digest rebuild once.
+- `atlas graph neighbours PAGE`, `graph edges --from PAGE` and `graph edges
+  --to PAGE` refuse an exit-state page (`terminated`, `deprecated`,
+  `superseded`) with exit 2 unless `--include-exits` is passed, for example
+  "starting page old/dead.md is in exit state terminated; pass
+  --include-exits to traverse from it". The check runs before driver
+  dispatch, so `--driver nanograph` behaves the same.
+- Ignore guard failures are reported: an unreadable or unwritable
+  `info/exclude` (or `info` that is not a directory) or a failing `git
+  rev-parse` gives the warning `atlas_indexes_ignore_failed`
+  (`atlas_index_ignore_failed` for the legacy guard) from compile/validate,
+  `atlas index build` / `set --build`, recall auto-create and nanograph and
+  tgrep builds. It is never treated as already ignored, the index is still
+  built and exit codes do not change. `atlas index show` / `status` report
+  `ignore: ok|missing|failed` from `git check-ignore`.
+- `atlas-mesh.json` writes (`index set`/`unset`, mount's row upsert, store
+  removal) are serialised by `<project>/atlas-mesh.json.lock`, the
+  owner-token lock now shared with index builders (`core/owned_lock.py`):
+  the file is re-read under the lock, validated and replaced atomically, so
+  concurrent writers no longer lose updates. A stale lock (60 s, or a dead
+  pid) is taken over; a held lock makes a writer wait up to 10 s and then
+  exit 2 without writing. The lock and temp-file patterns are added to
+  `info/exclude`. Mount's row upsert and store removal now also write
+  atomically.
+
 - CLI bounds: `atlas graph nodes --limit`, `atlas graph neighbours
   --max-nodes/--max-edges` must be at least 1 and `--hops` must be 1..3;
   other values are Click usage errors (exit 2). A negative limit is no
@@ -91,8 +126,8 @@
   message pointing to `--profile`.
 - `atlas recall run --engine bm25` now ranks with SQLite FTS5 on stores
   where recall is not enabled (SCHEMA 1.0, or 2.0 with recall disabled).
-  It reuses a published generation when the cheap fingerprint matches,
-  otherwise it projects the current tree into a temporary index that is
+  It reuses a published generation when its corpus digest matches the
+  current content, otherwise it projects the current tree into a temporary index that is
   deleted after the query. Field filters and exit-state exclusion match
   grep mode, filter-only queries keep grep behaviour, and the payload
   reports `engine_used: "sqlite-fts5"`, `score_orientation`, `ephemeral`
@@ -120,7 +155,8 @@
   line. For this release the legacy guard still adds `/.atlas-index/` (or
   `/<store>/.atlas-index/`) to the store repository's `info/exclude` and
   reports `atlas_index_ignored`. A committed `.gitignore` is never edited,
-  non-git roots are left alone, and exit codes are unchanged.
+  non-git roots are left alone, and exit codes are unchanged. A guard that
+  fails reports a warning (see the ignore guard failure entry above).
 - Docs: `SKILL.md` and path `recall` describe the FTS5-backed
   `--engine bm25` and the any-word retry; BM25 is no longer listed as a
   non-goal.

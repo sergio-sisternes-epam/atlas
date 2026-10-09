@@ -57,7 +57,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    Run this step regardless of whether the hot list or abstraction walk already answered the ask — the exit receipt always records `recall_cmd`. Stopping at the gist (step 3) decides whether the parent memory page is opened, not whether search runs.
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
 
-   **Engine choice.** Grep is the basic default (`recall` off) and stays the default when no flag is passed. With `recall` off, `--engine bm25` ranks with SQLite FTS5 and, from 0.14.0, keeps its index on disk and refreshes it when the corpus changes (a temporary index is used only when the index location cannot be written). A configured preferred engine (see **Preferred engine** below) replaces the no-flag default. It falls back to grep with a warning only when FTS5 is unavailable or projection fails. In both `--engine bm25` and FTS5 presets such as `atlas:ranked`, one any-word retry runs only when no eligible all-words match exists (eligibility — field filters, `path:` and the exit-state rule — is applied before ranks are cut, so an eligible all-words match ranked behind excluded pages still counts); the payload says `match: "any"` and so does each retried hit, so treat those hits as weaker evidence. After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Published indexes live in the project at `.atlas/indexes/<driver-type>/<atlas-id>/` (project root and id from the matching `atlas-mesh.json` row, else the store's git top level with its origin id, or the store directory with a `local/` hash id; `references/drivers.md`, Index location). A `legacy_index_location` warning means Atlas read a deprecated in-store `.atlas-index/` (read-only for 0.14.x); rebuild with `atlas index build`, then you may delete `.atlas-index/`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
+   **Engine choice.** Grep is the basic default (`recall` off) and stays the default when no flag is passed. With `recall` off, `--engine bm25` ranks with SQLite FTS5 and, from 0.14.0, keeps its index on disk and refreshes it when the corpus changes (a temporary index is used only when the index location cannot be written). A configured preferred engine (see **Preferred engine** below) replaces the no-flag default. It falls back to grep with a warning only when FTS5 is unavailable or projection fails. In both `--engine bm25` and FTS5 presets such as `atlas:ranked`, one any-word retry runs only when no eligible all-words match exists (eligibility — field filters, `path:` and the exit-state rule — is applied before ranks are cut, so an eligible all-words match ranked behind excluded pages still counts); the payload says `match: "any"` and so does each retried hit, so treat those hits as weaker evidence. After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus content-digest fast path (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Published indexes live in the project at `.atlas/indexes/<driver-type>/<atlas-id>/` (project root and id from the matching `atlas-mesh.json` row, else the store's git top level with its origin id, or the store directory with a `local/` hash id; `references/drivers.md`, Index location). A `legacy_index_location` warning means Atlas read a deprecated in-store `.atlas-index/` (read-only for 0.14.x); rebuild with `atlas index build`, then you may delete `.atlas-index/`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
 6. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
 7. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
 8. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
@@ -99,15 +99,20 @@ directory and its freshness, without building anything.
 **Auto-create and refresh.** `bm25` uses the `fts5` index and `nanograph`
 the `nanograph` index under `.atlas/indexes/<driver-type>/<atlas-id>/`;
 `grep` has no index. Whenever the engine comes from `cli`, `env`, `store` or
-`project`, recall checks the cheap fingerprint and then the corpus digest
-(and, for nanograph, the binary version). If the index is missing or stale it
+`project`, recall checks the content-based corpus digest (sorted relative
+paths plus the sha256 of each file; the path/size/mtime fingerprint is only
+a pre-check that can rule an index stale, never fresh) and, for nanograph,
+the binary version. If the index is missing or stale it
 builds a new generation and publishes it before answering. Unchanged content
 means no rebuild. `atlas compile` / `validate` (not `--dry-run`) and
 `atlas index build` also refresh the preferred index after a
 successful run and report `preferred_index_refreshed` or
 `preferred_index_fresh` (driver and generation) as info. A build failure is
 the warning `preferred_index_failed`; exit codes never change because of
-index work.
+index work. If `/.atlas/indexes/` cannot be added to `info/exclude`
+(unreadable or unwritable file, failing `git rev-parse`), the build still
+happens and the warning `atlas_indexes_ignore_failed` says to add the line
+yourself; it is never treated as already ignored.
 
 **Atomic publish and lock.** A builder takes `<index-dir>/.lock`
 (`O_CREAT|O_EXCL`, JSON with a per-build `owner` token, pid, host and
@@ -200,11 +205,14 @@ atlas index build [--store <atlas-id> | --all] [--force]
   source, the effective engine after fallback and why, whether a store
   recall profile makes the preference ignored (with the profile name), and
   the project-relative index directory with its freshness: `fresh`,
-  `stale`, `missing` or `legacy-only`, plus the generation id and a corpus
-  digest prefix.
+  `stale`, `missing` or `legacy-only` (decided by the content digest), plus
+  the generation id and a corpus digest prefix, and `ignore: ok|missing|failed`
+  (with the reason; `n/a` outside git): whether git actually ignores
+  `.atlas/indexes/` (`git check-ignore`).
 - **`status`** shows every row of the project's `atlas-mesh.json` and the
   project default: id, mounted, configured engine and source, effective
-  engine, freshness and index directory (one row for a standalone store).
+  engine, freshness and index directory (one row for a standalone store),
+  plus the project's `ignore` status as in `show`.
 - **`build`** builds or refreshes the index for the effective engine of the
   store at `--root`, of `--store <atlas-id>`, or of every mounted row with
   `--all` (unmounted rows are skipped). It rebuilds only when stale unless
@@ -220,6 +228,18 @@ the new file is written to a temporary sibling, fsynced and renamed into
 place. A file that is not valid JSON or does not validate is refused (exit
 2, nothing written); the one exception is that `set`/`unset` may repair an
 invalid `recall` block on the target itself.
+
+**Locking.** Every `atlas-mesh.json` write (`index set`/`unset`, `mount`'s
+row upsert, store removal) takes `<project>/atlas-mesh.json.lock`, the same
+owner-token lock index builders use (`core/owned_lock.py`), re-reads the file
+under it, applies the change, validates, writes atomically and releases, so
+concurrent writers never lose each other's changes. A lock older than 60
+seconds, or whose process is gone on this host, is taken over. A writer
+waits up to 10 seconds for a held lock and then exits 2 naming the lock
+file, without writing. The lock and the `.atlas-mesh.json.*.tmp` temp
+files are short-lived; in a git work tree the writer also adds
+`/atlas-mesh.json.lock*` and `/.atlas-mesh.json.*.tmp` (anchored at the
+project directory) to `info/exclude` so a leftover never gets committed.
 
 **Deprecated:** `atlas recall index build` still works for 0.14.x as an alias
 of `atlas index build` for the store at `--root`, with the same payload plus

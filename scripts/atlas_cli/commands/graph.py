@@ -197,6 +197,8 @@ def run_neighbours(
         note: str | None = None
         result: dict[str, Any] | None = None
         warnings: list[dict[str, str]] = []
+        # Exit-state rule before any driver dispatch: no index build or query for a hidden seed.
+        core.check_seed(source["pages"], page, include_exits)
         if driver == "nanograph":
             nano = driver_overlay.get_driver("nanograph")
             det = nano.detect()

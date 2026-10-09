@@ -361,6 +361,7 @@ def _bm25_search(
     generation: str | None = None
     rebuilt = False
     note: str | None = None
+    guard_warnings: list[dict] = []
     if persist:
         try:
             fresh = recall_index.ensure_fresh(root, schema, guard_ignore=True)
@@ -369,6 +370,7 @@ def _bm25_search(
             legacy = fresh.generation.legacy
             generation = fresh.generation.pointer.get("generation")
             rebuilt = fresh.rebuilt
+            guard_warnings = [w for w in fresh.warnings if w.get("level") == "warning" and w.get("code")]
         except ProjectionError as e:
             warnings.append(f"BM25 projection failed ({e}); falling back to grep-mode search")
             return None, warnings, {}
@@ -426,6 +428,8 @@ def _bm25_search(
             meta_out["index_rebuilt"] = rebuilt
         if legacy:
             meta_out["legacy_warning"] = recall_index.legacy_warning(root)
+    if guard_warnings:
+        meta_out["index_warnings"] = guard_warnings
     return hits, warnings, meta_out
 
 
@@ -660,6 +664,12 @@ def run(
         index_warnings.append(bm25_meta["legacy_warning"])
     if mode_used == "nanograph" and (nano_meta.get("index") or {}).get("warning"):
         index_warnings.append(nano_meta["index"]["warning"])
+    if mode_used == "sqlite-fts5":
+        index_warnings += list(bm25_meta.get("index_warnings") or [])
+    if mode_used == "nanograph":
+        index_warnings += [
+            w for w in (nano_meta.get("index") or {}).get("warnings") or [] if w.get("level") == "warning" and w.get("code")
+        ]
 
     notes = [n for n in (_driver_note(requested, steps, _ENGINE_OF.get(mode_used, mode_used)), bm25_meta.get("note")) if n]
     payload = {

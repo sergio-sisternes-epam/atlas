@@ -230,6 +230,35 @@ def _resolve_page(pages_by: dict[str, ProjectedPage], page: str) -> ProjectedPag
 # --- verbs -----------------------------------------------------------------
 
 
+def exit_state(page: ProjectedPage) -> str | None:
+    """The page's exit state (first of kva, status), or ``None`` for a live page."""
+    for key in EXIT_FIELDS:
+        value = page.meta.get(key)
+        if is_exit_value(value):
+            return str(value).strip().lower()
+    return None
+
+
+def check_anchor(page: ProjectedPage, include_exits: bool, *, label: str = "starting page") -> None:
+    """Exit-state rule for anchors: refuse an exit-state page unless ``include_exits``."""
+    if include_exits:
+        return
+    state = exit_state(page)
+    if state is not None:
+        raise GraphError(
+            f"{label} {page.page_id} is in exit state {state}; pass --include-exits to traverse from it"
+            if label == "starting page"
+            else f"{label} {page.page_id} is in exit state {state}; pass --include-exits to include it"
+        )
+
+
+def check_seed(pages: list[ProjectedPage], seed: str, include_exits: bool) -> ProjectedPage:
+    """Resolve a neighbours starting page and apply the exit-state rule (``GraphError``: exit 2)."""
+    page = _resolve_page({p.page_id: p for p in pages}, seed)
+    check_anchor(page, include_exits)
+    return page
+
+
 def query_nodes(
     pages: list[ProjectedPage],
     *,
@@ -265,8 +294,14 @@ def query_edges(
     include_exits: bool = False,
 ) -> dict[str, Any]:
     by_id = {p.page_id: p for p in pages}
-    src = _resolve_page(by_id, from_page).page_id if from_page else None
+    src = None
+    if from_page:
+        src_page = _resolve_page(by_id, from_page)
+        check_anchor(src_page, include_exits)
+        src = src_page.page_id
     dst = normalise_target(to_page).lstrip("/") if to_page else None
+    if dst is not None and dst in by_id:
+        check_anchor(by_id[dst], include_exits, label="page")
     kind_set = set(kinds or ())
     out: list[dict[str, Any]] = []
     for edge in all_edges(pages):
@@ -311,6 +346,7 @@ def query_neighbours(
     wheres = wheres or []
     by_id = {p.page_id: p for p in pages}
     seed_page = _resolve_page(by_id, seed)
+    check_anchor(seed_page, include_exits)
     reveal = include_exits or asks_for_exit(wheres)
     kind_set = frozenset(kinds or ())
     if adjacency is None:

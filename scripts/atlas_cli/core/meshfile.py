@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,10 +22,59 @@ DEFAULT_STRATEGY = "dedicated"
 SHARED_REF = "atlas"
 RECALL_ENGINES = ("grep", "bm25", "nanograph")
 RECALL_KEYS = frozenset({"engine"})
+LOCK_NAME = f"{MESH_NAME}.lock"
+# Mesh writes take milliseconds: a lock this old is abandoned, and a writer
+# gives up (exit 2) rather than wait longer than MESH_LOCK_WAIT_SECONDS.
+MESH_LOCK_STALE_SECONDS = 60.0
+MESH_LOCK_WAIT_SECONDS = 10.0
+MESH_LOCK_POLL_SECONDS = 0.05
 
 
 class MeshFileError(ValueError):
     pass
+
+
+class MeshLockTimeout(MeshFileError):
+    """Another writer held ``atlas-mesh.json.lock`` for longer than the wait budget."""
+
+
+@contextmanager
+def mesh_lock(project: Path) -> Iterator[Any]:
+    """Serialise every mesh mutation on ``<project>/atlas-mesh.json.lock`` (owner-token lock).
+
+    Waits up to :data:`MESH_LOCK_WAIT_SECONDS`, taking over a stale lock
+    (older than :data:`MESH_LOCK_STALE_SECONDS` or a dead pid on this host);
+    raises :class:`MeshLockTimeout` otherwise. Nothing is written without it.
+    """
+    from .ignore_guard import ensure_mesh_lock_ignored
+    from .owned_lock import OwnedLock
+
+    lock = OwnedLock(project, LOCK_NAME, MESH_LOCK_STALE_SECONDS)
+    deadline = time.monotonic() + MESH_LOCK_WAIT_SECONDS
+    while True:
+        try:
+            got = lock.try_acquire()
+        except OSError as e:
+            raise MeshFileError(f"cannot take {lock.path}: {e.strerror or e}; not modified") from e
+        if got:
+            break
+        if time.monotonic() >= deadline:
+            raise MeshLockTimeout(
+                f"{lock.path} is held by another atlas process (waited {MESH_LOCK_WAIT_SECONDS:g}s); "
+                "retry, or remove the lock file if no atlas command is running; not modified"
+            )
+        time.sleep(MESH_LOCK_POLL_SECONDS)
+    try:
+        ensure_mesh_lock_ignored(project)
+        yield lock
+    finally:
+        lock.release()
+
+
+def _write_locked(lock: Any, fp: Path, doc: Any, indent: str | int = 2, trailing_newline: bool = True) -> None:
+    if not lock.still_owned():
+        raise MeshFileError(f"{lock.path} was taken over by another writer; {fp} not modified")
+    write_json_atomic(fp, doc, indent=indent, trailing_newline=trailing_newline)
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -222,6 +274,12 @@ def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
 
 
 def upsert(project: Path, row: dict[str, str]) -> Path:
+    """Add or replace a store row (keeping its ``recall`` block) under the mesh lock."""
+    with mesh_lock(project) as lock:
+        return _upsert_locked(lock, project, row)
+
+
+def _upsert_locked(lock: Any, project: Path, row: dict[str, str]) -> Path:
     doc = load(project)
     sid = row["id"]
     previous = next((s for s in doc["stores"] if s.get("id") == sid), None)
@@ -235,7 +293,7 @@ def upsert(project: Path, row: dict[str, str]) -> Path:
     if errs:
         raise MeshFileError("; ".join(errs))
     fp = mesh_path(project)
-    fp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    _write_locked(lock, fp, doc, indent=2)
     return fp
 
 
@@ -264,6 +322,17 @@ def detect_indent(text: str) -> str | int:
     return 2
 
 
+def _current_umask() -> int:
+    """The process umask without changing it (``os.umask`` would race other threads)."""
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="ascii").splitlines():
+            if line.startswith("Umask:"):
+                return int(line.split()[1], 8)
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0o022
+
+
 def write_json_atomic(fp: Path, doc: Any, indent: str | int = 2, trailing_newline: bool = True) -> None:
     """Temp file in the same directory, flush + fsync, then ``os.replace``; no temp file survives."""
     text = json.dumps(doc, indent=indent, ensure_ascii=False) + ("\n" if trailing_newline else "")
@@ -275,7 +344,12 @@ def write_json_atomic(fp: Path, doc: Any, indent: str | int = 2, trailing_newlin
             fh.flush()
             os.fsync(fh.fileno())
         try:
-            os.chmod(tmp, fp.stat().st_mode & 0o7777)
+            mode = fp.stat().st_mode & 0o7777
+        except OSError:
+            # New file: the mode a plain open() would give, not mkstemp's 0600.
+            mode = 0o666 & ~_current_umask()
+        try:
+            os.chmod(tmp, mode)
         except OSError:
             pass
         os.replace(tmp, fp)
@@ -302,13 +376,22 @@ def set_recall_engine(project: Path, target: str | None, value: str | None) -> R
     changes: key order, row order, unknown keys, indentation and the trailing
     newline are preserved. Unchanged values do not touch the file. A file that
     is not valid JSON, or a result that fails validation, raises
-    :class:`MeshFileError` and nothing is written.
+    :class:`MeshFileError` and nothing is written. The file is re-read and
+    written under the mesh lock (:func:`mesh_lock`), so concurrent writers
+    never lose each other's changes.
     """
     fp = mesh_path(project)
     if not fp.is_file():
         raise MeshFileError(f"{fp} not found")
     if value is not None and value not in RECALL_ENGINES:
         raise MeshFileError(f"engine {value!r} is not allowed; allowed values: {', '.join(RECALL_ENGINES)}")
+    with mesh_lock(project) as lock:
+        return _set_recall_engine_locked(lock, fp, target, value)
+
+
+def _set_recall_engine_locked(lock: Any, fp: Path, target: str | None, value: str | None) -> RecallWrite:
+    if not fp.is_file():
+        raise MeshFileError(f"{fp} not found")
     raw = fp.read_text(encoding="utf-8")
     try:
         doc = json.loads(raw)
@@ -347,7 +430,7 @@ def set_recall_engine(project: Path, target: str | None, value: str | None) -> R
     errs = validate_doc(doc, source=str(fp))
     if errs:
         raise MeshFileError("; ".join(errs) + "; not modified")
-    write_json_atomic(fp, doc, indent=detect_indent(raw), trailing_newline=raw.endswith("\n"))
+    _write_locked(lock, fp, doc, indent=detect_indent(raw), trailing_newline=raw.endswith("\n"))
     return RecallWrite(fp, label, previous, value, True)
 
 
@@ -365,11 +448,13 @@ def known_ids(project: Path) -> set[str]:
 
 
 def remove_store(project: Path, atlas_id: str) -> Path:
-    doc = load(project)
-    doc["stores"] = [s for s in doc.get("stores") or [] if s.get("id") != atlas_id]
-    errs = validate_doc(doc)
-    if errs:
-        raise MeshFileError("; ".join(errs))
-    fp = mesh_path(project)
-    fp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    return fp
+    """Drop a store row under the mesh lock (re-read, validate, atomic write)."""
+    with mesh_lock(project) as lock:
+        doc = load(project)
+        doc["stores"] = [s for s in doc.get("stores") or [] if s.get("id") != atlas_id]
+        errs = validate_doc(doc)
+        if errs:
+            raise MeshFileError("; ".join(errs))
+        fp = mesh_path(project)
+        _write_locked(lock, fp, doc, indent=2)
+        return fp

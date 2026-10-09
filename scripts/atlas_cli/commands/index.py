@@ -19,7 +19,7 @@ from typing import Any
 from ..core import engine_preference as ep
 from ..core import index_location, meshfile
 from ..core.identity import IdentityError, normalise
-from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
+from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored, indexes_ignore_status
 from ..core.paths import store_root
 from ..core.recall_config import RecallConfigError, recall_enabled, resolve_profile
 
@@ -303,12 +303,28 @@ def build_store(ref: StoreRef, force: bool = False) -> dict[str, Any]:
                         "engine_source": pref.source,
                     }
                 )
-    info += [item for item in (ensure_indexes_ignored(ref.path), ensure_index_ignored(ref.path)) if item]
+    warnings = [*(res.get("warnings") or []), *warnings]
+    for item in (ensure_indexes_ignored(ref.path), ensure_index_ignored(ref.path)):
+        if item:
+            (warnings if item.get("level") == "warning" else info).append(item)
     if info:
         res["info"] = info
     if warnings:
-        res["warnings"] = warnings
+        res["warnings"] = _dedupe_items(warnings)
     return res
+
+
+def _dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop repeats of the same warning (a driver build and the command may both guard)."""
+    seen: set[tuple[Any, ...]] = set()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        key = (item.get("code") or item.get("id"), item.get("path"), item.get("message") or item.get("msg"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
 
 
 def _build_line(res: dict[str, Any]) -> str:
@@ -578,7 +594,8 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
     info = describe_store(ref, doc)
     if info.get("error"):
         return _fail(as_json, str(info["error"]), root=str(ref.path))
-    payload = {"ok": True, "mesh_file": _rel(loc, loc.mesh_file) if ref.row is not None else None, **info}
+    ignore = indexes_ignore_status(ref.path, loc.project)
+    payload = {"ok": True, "mesh_file": _rel(loc, loc.mesh_file) if ref.row is not None else None, **info, "ignore": ignore}
     lv = info["levels"]
     lines = [
         f"store: {ref.store_id}" + (f" ({ref.rel})" if ref.rel else "") + ("" if ref.mounted else " — not mounted"),
@@ -597,8 +614,14 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
         lines.append(f"profile: {info['profile']} ({state})")
     idx = info.get("index") or {}
     lines.append(f"index: {idx.get('index_dir') or '-'} {_freshness_text(idx, ref.mounted)}")
+    lines.append(_ignore_line(ignore))
     _emit(as_json, payload, lines)
     return 0
+
+
+def _ignore_line(ignore: dict[str, Any]) -> str:
+    reason = ignore.get("reason")
+    return f"ignore: {ignore.get('status')}" + (f" ({reason})" if reason and ignore.get("status") != "ok" else "")
 
 
 def run_status(root: str | None, as_json: bool) -> int:
@@ -641,12 +664,14 @@ def run_status(root: str | None, as_json: bool) -> int:
                 **({"error": d["error"]} if d.get("error") else {}),
             }
         )
+    ignore = indexes_ignore_status(refs[0].path if refs else loc.root, loc.project)
     payload = {
         "ok": True,
         "mode": mode,
         "project": str(loc.project) if loc.project else None,
         "mesh_file": _rel(loc, loc.mesh_file),
         "default": default,
+        "ignore": ignore,
         "stores": rows,
     }
     lines = [f"project default: {default or '-'}" + (f" ({payload['mesh_file']})" if payload["mesh_file"] else " (standalone store)")]
@@ -662,5 +687,6 @@ def run_status(root: str | None, as_json: bool) -> int:
         table.append((row["store_id"], "yes" if row["mounted"] else "no", conf, eff, str(fresh), row["index_dir"] or "-"))
     widths = [max(len(str(r[i])) for r in table) for i in range(len(header))]
     lines += ["  ".join(str(c).ljust(w) for c, w in zip(r, widths)).rstrip() for r in table]
+    lines.append(_ignore_line(ignore))
     _emit(as_json, payload, lines)
     return 0

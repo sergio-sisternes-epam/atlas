@@ -72,10 +72,15 @@ def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
     return sorted(out)
 
 
-def cheap_fingerprint(root: Path, schema: dict[str, Any] | None) -> str:
-    """Path + size + mtime_ns over eligible files. Query gate, not content truth."""
+def cheap_fingerprint(root: Path, schema: dict[str, Any] | None, paths: list[Path] | None = None) -> str:
+    """Path + size + mtime_ns over eligible files.
+
+    A fast pre-check only: a mismatch proves an index stale, but a match never
+    proves it fresh (a same-length edit can keep its mtime). Freshness is
+    decided by :func:`content_digest`.
+    """
     h = hashlib.sha256()
-    for path in eligible_paths(root, schema):
+    for path in eligible_paths(root, schema) if paths is None else paths:
         try:
             st = path.stat()
         except OSError:
@@ -87,6 +92,35 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None) -> str:
         h.update(str(st.st_mtime_ns).encode("ascii"))
         h.update(b"\n")
     return h.hexdigest()
+
+
+def _corpus_digest(entries: list[tuple[str, str]]) -> str:
+    """sha256 over sorted ``relative path NUL sha256`` lines (renames change it too)."""
+    h = hashlib.sha256()
+    for path, digest in sorted(entries):
+        h.update(path.encode("utf-8"))
+        h.update(b"\0")
+        h.update(digest.encode("ascii"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def content_digest(root: Path, schema: dict[str, Any] | None, paths: list[Path] | None = None) -> str | None:
+    """Corpus digest from raw file bytes, without parsing (equals ``project_store``'s).
+
+    Returns ``None`` when an eligible file is unreadable or escapes the root:
+    such a corpus is incomplete and never matches a complete generation.
+    """
+    entries: list[tuple[str, str]] = []
+    for path in eligible_paths(root, schema) if paths is None else paths:
+        if not _contained(root, path):
+            return None
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return None
+        entries.append((rel(root, path), _sha256_bytes(raw)))
+    return _corpus_digest(entries)
 
 
 def normalise_target(target: str) -> str:
@@ -121,8 +155,9 @@ def project_store(
     version = schema_version(schema)
     pages: list[ProjectedPage] = []
     omitted: list[dict[str, str]] = []
-    bytes_blob: list[bytes] = []
-    for path in eligible_paths(root, schema):
+    entries: list[tuple[str, str]] = []
+    paths = eligible_paths(root, schema)
+    for path in paths:
         if not _contained(root, path):
             omitted.append({"path": rel(root, path), "reason": "root_escape"})
             continue
@@ -132,7 +167,7 @@ def project_store(
             omitted.append({"path": rel(root, path), "reason": f"unreadable:{e}"})
             continue
         digest = _sha256_bytes(raw)
-        bytes_blob.append(digest.encode("ascii"))
+        entries.append((rel(root, path), digest))
         role = "navigation" if path.name == "index.md" else "concept"
         if path.name == "log.md":
             role = "log"
@@ -161,12 +196,12 @@ def project_store(
     if omitted and not allow_partial:
         reasons = ", ".join(f"{row['path']} ({row['reason']})" for row in omitted[:8])
         raise ProjectionError(f"incomplete corpus: {reasons}")
-    corpus_digest = _sha256_bytes(b"".join(sorted(bytes_blob)))
+    corpus_digest = _corpus_digest(entries)
     return {
         "root": str(root),
         "schema_version": version,
         "corpus_digest": corpus_digest,
-        "cheap_fingerprint": cheap_fingerprint(root, schema),
+        "cheap_fingerprint": cheap_fingerprint(root, schema, paths),
         "complete": not omitted,
         "omitted": omitted,
         "pages": pages,

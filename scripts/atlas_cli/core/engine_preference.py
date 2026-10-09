@@ -191,10 +191,9 @@ def _short(digest: Any) -> str | None:
 
 def _fts5_freshness(store: Path, schema: dict[str, Any] | None) -> dict[str, Any]:
     from . import recall_index
-    from .projection import project_store
+    from .projection import content_digest
 
-    projection = project_store(store, schema, allow_partial=False)
-    digest = str(projection.get("corpus_digest") or "") if projection.get("complete") else ""
+    digest = content_digest(store, schema) or ""
     out: dict[str, Any] = {"corpus_digest": _short(digest)}
     root = recall_index.index_root(store)
     cur = recall_index._read_pointer(root / recall_index.CURRENT_NAME)

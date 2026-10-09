@@ -38,7 +38,9 @@ RUN_TIMEOUT = 30
 KEEP_GENERATIONS = 2
 # Bumped when generated queries or edge type naming change, so older ready
 # generations (for example with a capped bm25_text) are rebuilt, not reused.
-INDEX_FORMAT = 2
+# 3: the corpus digest now covers relative paths plus content (content-digest
+# freshness), so generations recorded with the old digest rebuild once.
+INDEX_FORMAT = 3
 QUERIES_NAME = "atlas.gq"
 DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
@@ -353,8 +355,12 @@ class NanographDriver(BaseDriver):
                 }
                 return legacy
 
+        lock_warnings: list[dict[str, Any]] = []
+
         def build(lock: index_publish.BuildLock) -> Path:
-            ensure_indexes_ignored(store)
+            guarded = ensure_indexes_ignored(store)
+            if guarded and guarded.get("level") == "warning":
+                lock_warnings.append(guarded)
             name = digest[:16]
             if (base / name).exists():
                 name = f"{name}-{index_publish.new_name()}"
@@ -390,7 +396,6 @@ class NanographDriver(BaseDriver):
             return dest
 
         reused = gen_dir is not None
-        lock_warnings: list[dict[str, Any]] = []
         if gen_dir is None:
             try:
                 gen_dir, built = index_publish.locked_build(

@@ -11,6 +11,7 @@ from .drivers import fts5 as fts5_driver
 from .drivers import scan as scan_driver
 from .drivers import tgrep as tgrep_driver
 from .overlay import merge_overlays
+from .ignore_guard import is_warning
 from .projection import ProjectedPage, ProjectionError, project_store
 from .recall_config import (
     RecallConfigError,
@@ -151,6 +152,7 @@ def run_recall(
                 generation_id = fresh.generation.pointer.get("generation")
                 legacy_used = fresh.generation.legacy
                 index_rebuilt = fresh.rebuilt
+                extra_warnings += [w for w in fresh.warnings if is_warning(w) and w.get("code")]
 
     pages: list[ProjectedPage] = [
         p for p in projection_pages if _eligible(p, filters, include_exits)
@@ -189,6 +191,7 @@ def run_recall(
         generation_id = tmeta.get("index")
         if tmeta.get("legacy_warning"):
             extra_warnings.append(tmeta["legacy_warning"])
+        extra_warnings += list(tmeta.get("index_warnings") or [])
         engine_used = "tgrep"
         if rank == "sqlite-fts5" and hits:
             fts_ephemeral = False

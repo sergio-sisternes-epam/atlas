@@ -153,6 +153,7 @@ def ensure_index(
     schema: dict[str, Any] | None = None,
     binary: Path | None = None,
     runner: Runner | None = None,
+    warnings: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, bool]:
     dest = index_dir(store)
     base = index_location.indexes_base(store)
@@ -171,7 +172,9 @@ def ensure_index(
     resolved = binary or find_binary()
     if resolved is None:
         raise TgrepError(MISSING)
-    ensure_indexes_ignored(store)
+    guarded = ensure_indexes_ignored(store)
+    if guarded and guarded.get("level") == "warning" and warnings is not None:
+        warnings.append(guarded)
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -259,10 +262,13 @@ def search(
     resolved = binary if binary is not None else (finder or find_binary)()
     if resolved is None:
         raise TgrepError(MISSING)
+    guard_warnings: list[dict[str, Any]] = []
     dest, rebuilt = ensure_index(
-        store, digest, schema=schema, binary=resolved, runner=runner
+        store, digest, schema=schema, binary=resolved, runner=runner, warnings=guard_warnings
     )
     meta = _meta(store, dest, rebuilt, resolved)
+    if guard_warnings:
+        meta["index_warnings"] = guard_warnings
     tokens = tokenise(query)
     if not tokens:
         return [], meta

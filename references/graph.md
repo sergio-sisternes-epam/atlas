@@ -16,8 +16,11 @@ and never build or publish a recall index. The one exception is the opt-in
 
 - Works on every store: `SCHEMA.json` or `CONTRACT.json`, schema 1.0 or
   2.0, recall on or off. No index is required.
-- When a published recall generation exists and its cheap fingerprint
-  matches the tree, pages come from it (`fast_path: true`, `generation`
+- When a published recall generation exists and its recorded corpus
+  digest equals the tree's content digest (sorted relative paths plus the
+  sha256 of each file; the path/size/mtime fingerprint is only a fast
+  pre-check that can rule a generation stale, never fresh), pages come
+  from it (`fast_path: true`, `generation`
   set, plus `index_dir` and `index_location`; the generation lives under
   `.atlas/indexes/fts5/<atlas-id>/`, or the deprecated in-store
   `.atlas-index/recall/` with a `legacy_index_location` warning). Otherwise
@@ -44,6 +47,16 @@ or `superseded` is hidden unless `--include-exits` is passed, or a
 `--where kva=<exit>` / `--where status=<exit>` explicitly asks for an exit
 value. An edge touching a hidden page (at either end that exists) is hidden
 too. Exports always include every page.
+
+The rule also covers the page you start from. `graph neighbours PAGE`,
+`graph edges --from PAGE` and `graph edges --to PAGE` (when PAGE exists)
+refuse an exit-state page with exit 2 unless `--include-exits` is passed,
+for example `starting page old/dead.md is in exit state terminated; pass
+--include-exits to traverse from it` (`--to` says `page ... is in exit
+state ...; pass --include-exits to include it`). A `--where` reveal does not
+lift this; only `--include-exits` does. The check runs before any driver is
+chosen, so `--driver nanograph` refuses the same way without building or
+querying an index.
 
 ## Verbs
 

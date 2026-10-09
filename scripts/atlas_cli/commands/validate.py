@@ -41,6 +41,9 @@ NON_BLOCKING_WARNING_IDS = {
     # Preferred recall engine index work never changes compile exit codes.
     "preferred_engine_invalid",
     "preferred_index_failed",
+    # A failed ignore guard is reported, never fatal: the index is still built.
+    "atlas_indexes_ignore_failed",
+    "atlas_index_ignore_failed",
 }
 
 # Memory layers (frame / gist / page, original shipped 0.13.0-beta;
@@ -1151,7 +1154,7 @@ def run(
     if not dry_run:
         for ignored in (ensure_indexes_ignored(r), ensure_index_ignored(r)):
             if ignored:
-                info.append(ignored)
+                (warnings if ignored.get("level") == "warning" else info).append(ignored)
 
     result = {
         "root": str(r),

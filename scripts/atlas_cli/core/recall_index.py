@@ -16,7 +16,7 @@ from typing import Any
 from . import index_location, index_publish
 from .ignore_guard import ensure_indexes_ignored
 from .index_location import IndexLocationError
-from .projection import ProjectedPage, cheap_fingerprint, project_store
+from .projection import ProjectedPage, cheap_fingerprint, content_digest, eligible_paths, project_store
 from .recall_config import fts5_available, recall_enabled
 
 INDEX_DIR = index_location.LEGACY_DIR
@@ -168,14 +168,12 @@ class Freshness:
     warnings: tuple[dict[str, Any], ...] = ()
 
 
-def _fresh_new(root: Path, *, digest: str | None = None, fingerprint: str | None = None) -> Generation | None:
+def _fresh_new(root: Path, *, digest: str | None) -> Generation | None:
+    """The current new-location generation when its recorded corpus digest equals ``digest``."""
     cur = _read_pointer(root / CURRENT_NAME)
     if not cur or not cur.get("complete"):
         return None
-    if fingerprint is not None:
-        if not cur.get("cheap_fingerprint") or cur.get("cheap_fingerprint") != fingerprint:
-            return None
-    elif digest is None or cur.get("corpus_digest") != digest:
+    if digest is None or cur.get("corpus_digest") != digest:
         return None
     db = _pointer_db(root, cur.get("db"))
     return Generation(db, cur, False) if db is not None else None
@@ -213,10 +211,13 @@ def ensure_fresh(
 ) -> Freshness:
     """Return a generation matching the current corpus, building one when needed.
 
-    Order: cheap fingerprint on the current pointer (no projection), then the
-    content digest (pointer fingerprint refreshed in place), then a fresh
-    legacy ``.atlas-index/`` generation when the new location has none (read
-    only), else build under the lock and publish atomically. Raises
+    Freshness is decided by the content digest (sorted relative paths plus the
+    sha256 of each file, see :func:`projection.content_digest`), computed once:
+    from ``projection`` when given, else from raw bytes without parsing. A hit
+    refreshes the pointer's cheap fingerprint in place. Otherwise a fresh
+    legacy ``.atlas-index/`` generation is used when the new location has none
+    (read only), else the store is projected (once) and a generation is built
+    under the lock and published atomically. Raises
     :class:`IndexLocationError` (unsafe path), :class:`IndexNotBuilt`
     (incomplete corpus), :class:`index_publish.IndexBusy`, ``OSError`` or
     ``sqlite3.Error``; callers fall back to a temporary index. ``force`` skips every freshness check
@@ -225,23 +226,31 @@ def ensure_fresh(
     root = index_root(store)
     base = index_location.indexes_base(store)
     _reject_symlink_escape(base, root)
-    fingerprint = cheap_fingerprint(store, schema)
-    hit = None if force else _fresh_new(root, fingerprint=fingerprint)
+    paths = eligible_paths(store, schema)
+    fingerprint = cheap_fingerprint(store, schema, paths)
+    if projection is not None:
+        if not projection.get("complete"):
+            raise IndexNotBuilt("incomplete")
+        digest: str | None = str(projection["corpus_digest"])
+    elif force:
+        digest = None
+    else:
+        digest = content_digest(store, schema, paths)
+    hit = None if force or digest is None else _fresh_new(root, digest=digest)
     if hit is not None:
-        return Freshness(hit, False)
+        pointer = hit.pointer
+        if pointer.get("cheap_fingerprint") != fingerprint:
+            pointer = {**pointer, "cheap_fingerprint": fingerprint}
+            try:
+                _write_pointer(root, pointer)
+            except OSError:
+                pass
+        return Freshness(Generation(hit.db, pointer, False), False)
     if projection is None:
         projection = project_store(store, schema, allow_partial=False)
-    if not projection.get("complete"):
-        raise IndexNotBuilt("incomplete")
+        if not projection.get("complete"):
+            raise IndexNotBuilt("incomplete")
     digest = str(projection["corpus_digest"])
-    hit = None if force else _fresh_new(root, digest=digest)
-    if hit is not None:
-        pointer = {**hit.pointer, "cheap_fingerprint": fingerprint}
-        try:
-            _write_pointer(root, pointer)
-        except OSError:
-            pass
-        return Freshness(Generation(hit.db, pointer, False), False)
     current = _read_pointer(root / CURRENT_NAME)
     if allow_legacy and not force and not (current and current.get("complete") and _pointer_db(root, current.get("db"))):
         legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
@@ -250,10 +259,13 @@ def ensure_fresh(
             if db is not None:
                 return Freshness(Generation(db, legacy, True), False)
     previous = str((current or {}).get("generation") or "") or None
+    lock_warnings: list[dict[str, Any]] = []
 
     def build(lock: index_publish.BuildLock) -> Generation:
         if guard_ignore:
-            ensure_indexes_ignored(store)
+            guarded = ensure_indexes_ignored(store)
+            if guarded and guarded.get("level") == "warning":
+                lock_warnings.append(guarded)
         gen_id = time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         tmp_dir = root / f"{index_publish.TMP_PREFIX}{gen_id}"
         dest = root / "generations" / gen_id
@@ -284,7 +296,6 @@ def ensure_fresh(
         _prune(root, gen_id)
         return Generation(dest / DB_NAME, pointer, False)
 
-    lock_warnings: list[dict[str, Any]] = []
     gen, built = index_publish.locked_build(
         root, lambda: None if force else _fresh_new(root, digest=digest), build, wait=wait, warnings=lock_warnings
     )
@@ -391,18 +402,29 @@ def find_generation(
     schema: dict[str, Any] | None = None,
     fast_path: bool = False,
 ) -> Generation | None:
-    """First usable generation matching ``digest`` (or the cheap fingerprint).
+    """First usable generation whose recorded corpus digest is current.
 
-    The new location is preferred; the legacy location is only consulted when
-    the new one has no match, and is never modified.
+    With ``fast_path`` the current digest is the content digest of the store's
+    raw bytes (no projection); a generation whose cheap fingerprint differs is
+    skipped first without hashing, but a matching fingerprint alone never makes
+    it current. The new location is preferred; the legacy location is only
+    consulted when the new one has no match, and is never modified.
     """
-    fingerprint = cheap_fingerprint(store, schema) if fast_path else None
+    fingerprint: str | None = None
+    current: str | None = digest
+    hashed = not fast_path
+    paths = eligible_paths(store, schema) if fast_path else None
     for gen in _candidates(store):
         cur = gen.pointer
         if fast_path:
+            if fingerprint is None:
+                fingerprint = cheap_fingerprint(store, schema, paths)
             if not cur.get("cheap_fingerprint") or cur.get("cheap_fingerprint") != fingerprint:
                 continue
-        elif cur.get("corpus_digest") != digest:
+            if not hashed:
+                current = content_digest(store, schema, paths)
+                hashed = True
+        if current is None or cur.get("corpus_digest") != current:
             continue
         return gen
     return None
