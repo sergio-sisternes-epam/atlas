@@ -57,6 +57,10 @@ LOCK_NAME = ".atlas-upgrade.lock"
 UPGRADE_LOCK_TAG = "schema-upgrade-2.0"
 INSTALL_LOCK_TAG = "schema-install"
 UNINSTALL_LOCK_TAG = "schema-uninstall"
+NEW_LOCK_TAG = "schema-new"
+MEMORY_RUNG_LOCK_TAG = "schema-memory-rung"
+INIT_FORCE_LOCK_TAG = "init-force"
+MEMORY_MIGRATE_LOCK_TAG = "memory-migrate-apply"
 
 
 class UpgradeError(ValueError):
@@ -107,8 +111,16 @@ def lock_held_message(root: Path) -> str:
         what = "a schema upgrade is running or was interrupted"
     elif holder == UNINSTALL_LOCK_TAG:
         what = "a schema uninstall is running or was interrupted"
+    elif holder == NEW_LOCK_TAG:
+        what = "a schema new is running or was interrupted"
+    elif holder == MEMORY_RUNG_LOCK_TAG:
+        what = "a schema memory-rung is running or was interrupted"
+    elif holder == INIT_FORCE_LOCK_TAG:
+        what = "an init --force is running or was interrupted"
+    elif holder == MEMORY_MIGRATE_LOCK_TAG:
+        what = "a memory-migrate apply is running or was interrupted"
     else:
-        what = "a schema upgrade, install or uninstall is running or was interrupted"
+        what = "an Atlas command that writes the contract file or schema.d/ is running or was interrupted"
     return (
         f"{LOCK_NAME} present: {what}; retry when it finishes. Remove the lock only if "
         "no Atlas command is running and the contract file and schema.d/ have been checked"
@@ -217,7 +229,8 @@ def apply(root: Path) -> dict[str, Any]:
         lock = acquire_store_lock(root, UPGRADE_LOCK_TAG)
     except FileExistsError as e:
         raise UpgradeError(lock_held_message(root)) from e
-    # Installs and uninstalls take the same lock, so the overlay set is stable from here on.
+    # Every other writer of schema.d/ or the contract file on an existing store takes the
+    # same lock, so the overlay set and contract are stable from here on.
     # Recheck it before any write; nothing is written yet, so release on refusal.
     try:
         pre = preview(root)

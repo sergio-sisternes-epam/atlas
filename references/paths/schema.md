@@ -104,7 +104,7 @@ python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <root> [--
 
 Install copies **new-type** templates only. It will not overwrite core `templates/work.md`.
 
-Install, `schema uninstall` and `schema upgrade --apply` share the store lock `.atlas-upgrade.lock`. If the lock is present, each exits 2 and writes nothing. Atlas never removes a lock it did not create, whatever the contract version. Retry when the other command finishes. A lock left by an interrupted install, uninstall or upgrade stays until an operator deletes it. Delete it only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
+These verbs share the store lock `.atlas-upgrade.lock`: `schema install`, `schema uninstall`, `schema new`, `schema memory-rung --set`, `schema upgrade --apply`, `init --force` and `memory-migrate --operation apply` (both batches). If the lock is present, each exits 2 and writes nothing. Atlas never removes a lock it did not create, whatever the contract version. Retry when the other command finishes. A lock left by an interrupted run of any of these verbs stays until an operator deletes it. Delete it only when no Atlas command is running and the store's contract file and `schema.d/` have been checked.
 
 ### 3a. Shipping an Atlas overlay in an APM package
 

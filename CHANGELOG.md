@@ -37,8 +37,14 @@
   instead of a traceback. `schema uninstall` now takes the same lock for its
   whole read and delete, and exits 2 with zero writes while it is held, so it
   can no longer remove an overlay, such as `atlas-compat-v1`, after an
-  upgrade's recheck.
-- The lock now carries a unique token. An install, uninstall or upgrade only
+  upgrade's recheck. `schema new`, `schema memory-rung --set`,
+  `init --force` on an existing store and `memory-migrate --operation apply`
+  (both the `contract-file` and `restamp` batches) also write `schema.d/` or
+  the contract file, so they now take the same lock and exit 2 with zero
+  writes while it is held. Previously `schema new atlas-compat-v1` could run
+  after an upgrade's recheck, and the upgrade then overwrote that overlay
+  and its receipt and still reported success.
+- The lock now carries a unique token. A command that takes it only
   removes a lock whose token matches the one it wrote. Apply no longer reclaims an
   existing lock when the contract already reads 2.0: since v0.10.0 that let
   a second, concurrent upgrade delete the first upgrade's live lock. Every
@@ -51,7 +57,7 @@
 
 - Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
   documents the extension slot, its minimum reader and rollback steps, the
-  `overlay_extension` issue and the shared install/uninstall/upgrade lock,
+  `overlay_extension` issue and the shared store lock and the verbs that take it,
   and asks packages to test overlays on both store versions. Path `configure` notes
   that installed overlays can block the upgrade, that apply rechecks them
   under the lock, and that a kept slot needs Atlas >= 0.13.1 after the

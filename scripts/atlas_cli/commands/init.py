@@ -8,6 +8,12 @@ from ..core.recall_config import default_recall_block
 from ..core.schema import BETA3_LAYERS, CURRENT_RELEASE, skill_root
 from ..core.paths import CONTRACT_NAME, has_contract_file
 from ..core.paths import store_root
+from ..core.schema_upgrade import (
+    INIT_FORCE_LOCK_TAG,
+    acquire_store_lock,
+    lock_held_message,
+    release_store_lock,
+)
 
 
 DEFAULT_CONTRACT = {
@@ -130,6 +136,28 @@ def run(
         else:
             print(f"atlas init — {msg}")
         return 2
+    if not has_contract_file(r):
+        return _init_locked(r, version, force, as_json)
+    # --force on an existing store: share the upgrade lock so an upgrade never
+    # races this contract-file rewrite.
+    try:
+        lock = acquire_store_lock(r, INIT_FORCE_LOCK_TAG)
+    except (FileExistsError, OSError) as e:
+        msg = lock_held_message(r) if isinstance(e, FileExistsError) else f"cannot lock store: {e}"
+        if as_json:
+            print(json.dumps({"ok": False, "error": msg, "root": str(r)}))
+        else:
+            print(f"atlas init — {msg}")
+        return 2
+    # On an exception, keep the lock: a partial write needs an operator to check the store.
+    code = _init_locked(r, version, force, as_json)
+    release_store_lock(lock)
+    return code
+
+
+def _init_locked(r: Path, version: str, force: bool, as_json: bool) -> int:
+    contract_path = r / CONTRACT_NAME
+    schema_path = r / "SCHEMA.json"
     schema = json.loads(json.dumps(DEFAULT_CONTRACT))
     schema["schema_version"] = version
     schema["atlas_id"] = r.name or "new-atlas"

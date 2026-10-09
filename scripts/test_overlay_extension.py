@@ -6,8 +6,9 @@ It must be an object, is never merged into the effective contract, and is
 ignored by core. Every other extra overlay root key is still rejected on
 SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, each
 against contribution-v1, and rechecks them under the lock that `schema
-install` and `schema uninstall` share. Locks are never reclaimed and only
-their owner removes them.
+install`, `schema uninstall`, `schema new`, `schema memory-rung`, `init
+--force` and `memory-migrate --operation apply` share. Locks are never
+reclaimed and only their owner removes them.
 
 Released overlays under fixtures/contributions/ are installed verbatim.
 """
@@ -477,6 +478,168 @@ def main() -> int:
         )
         r = compile_(s)
         check("u-race-compile-after-upgrade", r.returncode == 0, out(r)[-300:])
+
+        # W: schema new, schema memory-rung, init --force and memory-migrate apply
+        # take the same lock; while it is held each exits 2 and writes nothing.
+        def snapshot(s: Path) -> dict[str, bytes]:
+            return {
+                str(p.relative_to(s)): p.read_bytes()
+                for p in sorted(s.rglob("*"))
+                if p.is_file() and p.name != lock_name
+            }
+
+        def restampable(s: Path) -> None:
+            contract = s / "CONTRACT.json"
+            body = json.loads(contract.read_text())
+            body["atlas_release"] = "0.13.0-beta.7"
+            contract.write_text(json.dumps(body, indent=2) + "\n")
+
+        writers = {
+            "new": lambda s: ["schema", "new", "atlas-notes", "--root", str(s), "--json"],
+            "new-compat": lambda s: ["schema", "new", schema_upgrade.COMPAT_ID, "--root", str(s), "--json"],
+            "memory-rung": lambda s: ["schema", "memory-rung", "--set", "warn", "--root", str(s), "--json"],
+            "init-force": lambda s: ["init", "--force", "--root", str(s), "--json"],
+            "memory-migrate-restamp": lambda s: [
+                "memory-migrate", "--operation", "apply", "--batch", "restamp", "--root", str(s), "--json"
+            ],
+            "memory-migrate-contract-file": lambda s: [
+                "memory-migrate", "--operation", "apply", "--batch", "contract-file", "--root", str(s), "--json"
+            ],
+        }
+        s = store("w-blocked")
+        install(v06, s)
+        restampable(s)
+        for holder in (schema_upgrade.UPGRADE_LOCK_TAG, schema_upgrade.INSTALL_LOCK_TAG):
+            (s / lock_name).write_text(holder + "\n")
+            before = snapshot(s)
+            for name, argv in writers.items():
+                r = run(argv(s))
+                check(
+                    f"w-{name}-refused-while-{holder}-holds-lock",
+                    r.returncode == 2
+                    and "Remove the lock only if" in out(r)
+                    and snapshot(s) == before
+                    and (s / lock_name).read_text() == holder + "\n",
+                    out(r)[:300],
+                )
+        r = run(["memory-migrate", "--operation", "assess", "--root", str(s), "--json"])
+        check("w-memory-migrate-assess-ignores-lock", r.returncode == 0, out(r)[:200])
+        (s / lock_name).unlink()
+
+        for tag, phrase in (
+            (schema_upgrade.NEW_LOCK_TAG, "schema new is running"),
+            (schema_upgrade.MEMORY_RUNG_LOCK_TAG, "schema memory-rung is running"),
+            (schema_upgrade.INIT_FORCE_LOCK_TAG, "init --force is running"),
+            (schema_upgrade.MEMORY_MIGRATE_LOCK_TAG, "memory-migrate apply is running"),
+        ):
+            (s / lock_name).write_text(tag + "\n")
+            r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+            check(f"w-upgrade-names-{tag}-holder", r.returncode == 2 and phrase in out(r), out(r)[:300])
+            (s / lock_name).unlink()
+
+        s = store("w-releases")
+        r = run(writers["new"](s))
+        check(
+            "w-new-releases-on-success",
+            r.returncode == 0
+            and overlay_path(s, "atlas-notes").is_file()
+            and receipt_path(s, "atlas-notes").is_file()
+            and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        r = run(writers["new"](s))
+        check("w-new-releases-on-refusal", r.returncode == 2 and not (s / lock_name).exists(), out(r)[:200])
+        r = run(writers["memory-rung"](s))
+        rung = json.loads((s / "CONTRACT.json").read_text()).get("memory", {}).get("rung")
+        check(
+            "w-memory-rung-releases-on-success",
+            r.returncode == 0 and rung == "warn" and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        restampable(s)
+        r = run(writers["memory-migrate-restamp"](s))
+        stamp = json.loads((s / "CONTRACT.json").read_text()).get("atlas_release")
+        check(
+            "w-memory-migrate-releases-on-success",
+            r.returncode == 0 and stamp == "0.13.0" and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        r = run(writers["init-force"](s))
+        check("w-init-force-releases-on-success", r.returncode == 0 and not (s / lock_name).exists(), out(r)[:300])
+        r = run(writers["new"](stores / "w-fresh"))
+        check(
+            "w-new-on-fresh-root-no-lock",
+            r.returncode == 0 and overlay_path(stores / "w-fresh", "atlas-notes").is_file()
+            and not (stores / "w-fresh" / lock_name).exists(),
+            out(r)[:300],
+        )
+
+        # W2: a schema new interrupted mid-write keeps its lock and blocks the upgrade.
+        s = store("w-new-interrupted")
+        schema_cmd.write_receipt = receipt_fails
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                schema_cmd.run_new("atlas-notes", str(s))
+            check("w-new-interrupted-raises", False, "schema new returned normally")
+        except OSError as e:
+            check("w-new-interrupted-raises", "simulated interruption" in str(e), str(e)[:200])
+        finally:
+            schema_cmd.write_receipt = original_receipt
+        lock_text = (s / lock_name).read_text() if (s / lock_name).is_file() else ""
+        check("w-new-interrupted-keeps-lock", lock_text.split()[:1] == [schema_upgrade.NEW_LOCK_TAG], lock_text[:100])
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        check("w-new-interrupted-blocks-upgrade", r.returncode == 2 and "schema new is running" in out(r), out(r)[:300])
+
+        # W3: writers attempted while an upgrade holds the lock, after its
+        # recheck and before any write, cannot write. In particular
+        # `schema new atlas-compat-v1` cannot create the overlay the upgrade
+        # then overwrites.
+        s = store("w-race")
+        restampable(s)
+        original_preview = schema_upgrade.preview
+        race_attempts: dict[str, int] = {}
+
+        def recheck_then_writers(root: Path) -> dict:
+            res = original_preview(root)
+            if (root / lock_name).is_file() and not race_attempts:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    race_attempts["new-compat"] = schema_cmd.run_new(schema_upgrade.COMPAT_ID, str(root))
+                    race_attempts["memory-rung"] = schema_cmd.run_memory_rung("warn", str(root))
+                for name in ("init-force", "memory-migrate-restamp"):
+                    race_attempts[name] = run(writers[name](root)).returncode
+            return res
+
+        schema_upgrade.preview = recheck_then_writers
+        try:
+            schema_upgrade.apply(s)
+            upgrade_err = ""
+        except schema_upgrade.UpgradeError as e:
+            upgrade_err = str(e)
+        finally:
+            schema_upgrade.preview = original_preview
+        schema = json.loads((s / "CONTRACT.json").read_text())
+        compat = json.loads(overlay_path(s, schema_upgrade.COMPAT_ID).read_text())
+        compat_receipt = json.loads(receipt_path(s, schema_upgrade.COMPAT_ID).read_text())
+        check(
+            "w-race-writers-refused",
+            race_attempts == {"new-compat": 2, "memory-rung": 2, "init-force": 2, "memory-migrate-restamp": 2},
+            str(race_attempts),
+        )
+        check(
+            "w-race-upgrade-owns-compat-overlay",
+            not upgrade_err
+            and schema.get("schema_version") == "2.0"
+            and schema.get("atlas_release") == "0.13.0-beta.7"
+            and "rung" not in (schema.get("memory") or {})
+            and "bindings" in compat
+            and "templates" not in compat
+            and compat_receipt.get("written")
+            == sorted([f"schema.d/{schema_upgrade.COMPAT_ID}.json", f"schema.d/{schema_upgrade.COMPAT_ID}.receipt.json"])
+            and not (s / lock_name).exists(),
+            upgrade_err[:300],
+        )
+        r = run(writers["new-compat"](s))
+        check("w-race-new-compat-after-upgrade-exists", r.returncode == 2 and "already exists" in out(r), out(r)[:200])
 
         # D: locks are never reclaimed from contract state, and only their owner removes them.
         s = store("d-token")
