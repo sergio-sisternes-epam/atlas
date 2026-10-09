@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
+import stat
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -588,6 +591,25 @@ def _print(as_json: bool, payload: dict) -> None:
         print(f"note: {note}")
 
 
+def _unsupported_batch(
+    r: Path, contract_name: str, lineage: str, batch_value: str, as_json: bool
+) -> int:
+    payload = {
+        "ok": False,
+        "root": str(r),
+        "operation": "apply",
+        "contract_file": contract_name,
+        "lineage": lineage,
+        "error": (
+            f"unsupported --batch {batch_value!r}; supported batches are "
+            f"{LEGACY_BATCH!r} (pre-beta or empty beta.2 init -> {CURRENT_RELEASE}) "
+            f"and {RESTAMP_BATCH!r} (current store stamp -> {CURRENT_RELEASE})"
+        ),
+    }
+    _print(as_json, payload)
+    return 2
+
+
 def run(
     root: str | None,
     operation: str,
@@ -687,6 +709,10 @@ def run(
     batch_value = (batch or "").strip()
     if batch_value == RESTAMP_BATCH:
         return _apply_restamp(r, contract_path, schema, lineage, restamp, as_json)
+    # Reject typos such as "restmap" before any lineage-specific no-op or
+    # refusal, so a mistyped batch never exits 0 on a current store.
+    if batch_value.lower() not in REFUSE_BATCH_TOKENS and batch_value not in SUPPORTED_BATCHES:
+        return _unsupported_batch(r, contract_name, lineage, batch_value, as_json)
 
     if contract_lineage == "current":
         payload = {
@@ -754,20 +780,7 @@ def run(
         return 2
 
     if batch_value != LEGACY_BATCH:
-        payload = {
-            "ok": False,
-            "root": str(r),
-            "operation": "apply",
-            "contract_file": contract_name,
-            "lineage": lineage,
-            "error": (
-                f"unsupported --batch {batch_value!r}; supported batches are "
-                f"{LEGACY_BATCH!r} (pre-beta or empty beta.2 init -> {CURRENT_RELEASE}) "
-                f"and {RESTAMP_BATCH!r} (current store stamp -> {CURRENT_RELEASE})"
-            ),
-        }
-        _print(as_json, payload)
-        return 2
+        return _unsupported_batch(r, contract_name, lineage, batch_value, as_json)
 
     # batch == "contract-file": rename SCHEMA.json -> CONTRACT.json, stamp
     # atlas_release/memory.layers to the current shape. Existing pages stay
@@ -1111,6 +1124,39 @@ def _restamp_bytes(original: bytes, old_stamp: str) -> tuple[bytes | None, str]:
     return new_bytes, ""
 
 
+def _read_regular_file(path: Path) -> bytes:
+    """Read ``path`` without following a final-component symlink where possible."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read()
+
+
+def _replace_contract(contract_path: Path, data: bytes, mode: int) -> None:
+    """Atomically replace ``contract_path`` with ``data``, keeping ``mode``.
+
+    The bytes go to a sibling temporary file that is fsynced and then moved
+    over the contract with ``os.replace``, which swaps the directory entry
+    and never writes through a symlink. The temporary file is removed on
+    any error.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=contract_path.parent, prefix=".CONTRACT.json.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, contract_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _apply_restamp(
     r: Path,
     contract_path: Path,
@@ -1140,7 +1186,7 @@ def _apply_restamp(
     if restamp == "already":
         _print(as_json, {"ok": True, **base, "notes": ["already at current stamp; no-op write"]})
         return 0
-    if restamp != "eligible" or contract_path.is_symlink():
+    if restamp != "eligible":
         msg = _restamp_refusal_msg(contract_name, lineage, atlas_release)
         _print(as_json, {
             "ok": False,
@@ -1150,8 +1196,28 @@ def _apply_restamp(
         })
         return 2
 
+    # Re-check immediately before reading: only a regular file, never a
+    # symlink swapped in after find_contract_path ran.
+    lstat_error = ""
     try:
-        original = contract_path.read_bytes()
+        original_stat = os.lstat(contract_path)
+    except OSError as error:
+        original_stat = None
+        lstat_error = f" ({error})"
+    if original_stat is None or not stat.S_ISREG(original_stat.st_mode):
+        msg = (
+            f"{contract_name} is not a regular file{lstat_error}; "
+            "refusing to restamp, no file was written"
+        )
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "restamp_not_eligible", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    try:
+        original = _read_regular_file(contract_path)
     except OSError as error:
         msg = f"cannot read {contract_name}: {error}"
         _print(as_json, {
@@ -1176,7 +1242,7 @@ def _apply_restamp(
         })
         return 2
     try:
-        contract_path.write_bytes(new_bytes)
+        _replace_contract(contract_path, new_bytes, stat.S_IMODE(original_stat.st_mode))
     except OSError as error:
         msg = f"cannot write {contract_name}: {error}"
         _print(as_json, {

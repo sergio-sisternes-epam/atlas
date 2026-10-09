@@ -208,7 +208,9 @@ Eligibility (`apply`):
   the same `memory.layers` stays current on read and needs no migration.
   `apply` with no `--batch` or with `--batch contract-file` is a no-op
   write (exit 0) for all four stamps and never rewrites an existing
-  current stamp; only the explicit `--batch restamp` below does. Unknown
+  current stamp; only the explicit `--batch restamp` below does. Any
+  other `--batch` value, such as the typo `restmap`, exits non-zero as an
+  unsupported batch and writes nothing, on every lineage. Unknown
   stamps fail closed, including `0.13.0-beta.5`, `0.13.0-beta.6` (which
   never wrote a store stamp), `0.13.0-rc.1` and `0.13.1`; a malformed
   stamp never matches by prefix. `SCHEMA.json` cannot carry any current
@@ -278,8 +280,10 @@ python3 <atlas-skill>/scripts/atlas.py memory-migrate \
   the top-level `atlas_release` string value with `0.13.0` inside the
   original bytes, so encoding (UTF-8, non-ASCII kept literal), spacing,
   indentation, line endings (including CRLF), key order and every other
-  byte stay exactly as they were. No page, template or other file is
-  touched.
+  byte stay exactly as they were. The new bytes go to a sibling temporary
+  file that replaces `CONTRACT.json` atomically, keeping its permission
+  bits, so a symlink swapped in mid-run is replaced rather than written
+  through. No page, template or other file is touched.
 - **Not byte-safe** — apply first requires exactly one
   `"atlas_release": "<old stamp>"` member in the raw file (any whitespace
   around the colon), then checks that the result parses to the original

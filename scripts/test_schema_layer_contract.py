@@ -6,10 +6,14 @@ Run: python3 scripts/test_schema_layer_contract.py
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,6 +24,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+from atlas_cli.commands import memory_migrate
 from atlas_cli.core.frontmatter import read_page
 from atlas_cli.core.schema import classify_lineage, compute_stamp_shape
 
@@ -2383,6 +2388,91 @@ def main() -> int:
             str(payload),
         )
 
+        # TOCTOU: a CONTRACT.json swapped for a symlink after the CLI resolved
+        # it is caught by the lstat re-check inside restamp, with zero writes.
+        toctou_store = tmp / "restamp-toctou-symlink"
+        toctou_store.mkdir(parents=True)
+        toctou_target = tmp / "restamp-toctou-target.json"
+        toctou_contract = {
+            "schema_version": "1.0", "atlas_id": "t", "atlas_release": "0.13.0-beta.7",
+            "structure": {}, "compile": {},
+            "memory": {"layers": ["schema", "gist", "memory"]},
+        }
+        toctou_target.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        (toctou_store / "CONTRACT.json").symlink_to(toctou_target)
+        toctou_target_before = sha(toctou_target)
+        toctou_before = snapshot(toctou_store)
+        toctou_out = io.StringIO()
+        with contextlib.redirect_stdout(toctou_out):
+            toctou_code = memory_migrate._apply_restamp(
+                toctou_store, toctou_store / "CONTRACT.json", toctou_contract,
+                "current", "eligible", True,
+            )
+        toctou_payload = json.loads(toctou_out.getvalue())
+        check(
+            "restamp refuse symlink (TOCTOU): lstat re-check refuses with zero writes and the target is unchanged",
+            toctou_code != 0 and toctou_payload.get("ok") is False
+            and "restamp_not_eligible" in findings_by_id(toctou_payload, "findings")
+            and sha(toctou_target) == toctou_target_before
+            and (toctou_store / "CONTRACT.json").is_symlink()
+            and snapshot(toctou_store) == toctou_before
+            and sorted(p.name for p in toctou_store.iterdir()) == ["CONTRACT.json"],
+            str(toctou_payload),
+        )
+
+        # A symlink swapped in between the read and the write is never written
+        # through: the atomic replace swaps the directory entry instead.
+        swap_store = tmp / "restamp-toctou-swap"
+        swap_store.mkdir(parents=True)
+        swap_contract = swap_store / "CONTRACT.json"
+        swap_contract.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        swap_target = tmp / "restamp-toctou-swap-target.json"
+        swap_target.write_text("outside\n", encoding="utf-8")
+        swap_target_before = sha(swap_target)
+        real_restamp_bytes = memory_migrate._restamp_bytes
+
+        def swapping_restamp_bytes(original: bytes, old_stamp: str):
+            result = real_restamp_bytes(original, old_stamp)
+            swap_contract.unlink()
+            swap_contract.symlink_to(swap_target)
+            return result
+
+        memory_migrate._restamp_bytes = swapping_restamp_bytes
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                memory_migrate._apply_restamp(
+                    swap_store, swap_contract, toctou_contract, "current", "eligible", True,
+                )
+        finally:
+            memory_migrate._restamp_bytes = real_restamp_bytes
+        check(
+            "restamp TOCTOU swap: a symlink swapped in before the write is replaced, not written through",
+            sha(swap_target) == swap_target_before
+            and not swap_contract.is_symlink()
+            and json.loads(swap_contract.read_bytes())["atlas_release"] == "0.13.0"
+            and sorted(p.name for p in swap_store.iterdir()) == ["CONTRACT.json"],
+        )
+
+        # Restamp keeps the original permission bits (where the platform has them)
+        # and leaves no temporary file behind.
+        mode_store = tmp / "restamp-mode"
+        mode_store.mkdir(parents=True)
+        (mode_store / "index.md").write_text("# Store\n", encoding="utf-8")
+        mode_contract = mode_store / "CONTRACT.json"
+        mode_contract.write_text(json.dumps(toctou_contract, indent=2) + "\n", encoding="utf-8")
+        os.chmod(mode_contract, 0o640)
+        mode_before = stat.S_IMODE(os.lstat(mode_contract).st_mode)
+        code, payload = restamp(mode_store)
+        check(
+            "restamp mode: succeeds, keeps the file mode and leaves no temporary file",
+            code == 0 and payload.get("ok") is True
+            and json.loads(mode_contract.read_bytes())["atlas_release"] == "0.13.0"
+            and stat.S_IMODE(os.lstat(mode_contract).st_mode) == mode_before
+            and (os.name == "nt" or mode_before == 0o640)
+            and not any(p.name.endswith(".tmp") for p in mode_store.iterdir()),
+            f"{payload} mode={oct(stat.S_IMODE(os.lstat(mode_contract).st_mode))}",
+        )
+
         # Restamp preserves the original CONTRACT.json bytes: it replaces only
         # the top-level stamp value, whatever the layout, encoding or line
         # endings, and refuses with zero writes when that is not provably safe.
@@ -2502,6 +2592,37 @@ def main() -> int:
             code == 2 and "'contract-file'" in payload.get("error", "")
             and "'restamp'" in payload.get("error", ""),
             str(payload),
+        )
+
+        # A mistyped batch is rejected before the current-lineage no-op and the
+        # pre-beta guard: non-zero, zero writes, and the error names both batches.
+        typo_current = tmp / "restamp-typo-current-beta7"
+        init_r = run(["init", "--root", str(typo_current), "--json"])
+        check("unsupported batch typo: init ok", init_r.returncode == 0, init_r.stderr)
+        typo_contract = typo_current / "CONTRACT.json"
+        typo_contract.write_bytes(
+            typo_contract.read_bytes().replace(
+                b'"atlas_release": "0.13.0",', b'"atlas_release": "0.13.0-beta.7",'
+            )
+        )
+        for label, store in (("beta.7 current", typo_current), ("pre-beta", unsupported)):
+            before = snapshot(store)
+            code, payload = run_json([
+                "memory-migrate", "--root", str(store), "--operation", "apply",
+                "--batch", "restmap", "--json",
+            ])
+            error = payload.get("error", "")
+            check(
+                f"unsupported batch typo ({label}): --batch restmap exits non-zero, writes nothing, names supported batches",
+                code != 0 and payload.get("ok") is False
+                and "unsupported --batch 'restmap'" in error
+                and "'contract-file'" in error and "'restamp'" in error
+                and snapshot(store) == before,
+                str(payload),
+            )
+        check(
+            "unsupported batch typo: beta.7 store keeps its stamp",
+            json.loads(typo_contract.read_bytes())["atlas_release"] == "0.13.0-beta.7",
         )
 
         # === memory-rung-preserves-lineage =======================================

@@ -49,7 +49,11 @@ Changes in this release:
   current store's stamp from beta.3, beta.4 or beta.7 to `0.13.0` and
   changes nothing else: it replaces only the top-level stamp value inside
   the original `CONTRACT.json` bytes (spacing, line endings and literal
-  non-ASCII kept), and touches no page, template or other file. It is an
+  non-ASCII kept), writes them through an atomic replace that keeps the
+  file mode and never writes through a symlink, and touches no page,
+  template or other file. Any other unsupported `--batch` value, such as
+  `restmap`, now exits non-zero with zero writes on current stores too,
+  instead of falling through to the no-op. It is an
   idempotent no-op on a `0.13.0` store and refuses
   (`restamp_not_eligible`) with zero writes on pre-beta, in-beta,
   `SCHEMA.json`, symlinked or unknown-stamp stores, and
