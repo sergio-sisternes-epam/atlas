@@ -7,7 +7,9 @@ deterministic export. It is a separate command from `atlas recall run`
 (which ranks text) but reads the same projection.
 
 All verbs are read-only and dependency-free. They never write to the store
-and never build or publish a recall index.
+and never build or publish a recall index. The one exception is the opt-in
+`neighbours --driver nanograph`, which may build a nanograph index under
+`.atlas-index/nanograph/` and nowhere else; see `references/drivers.md`.
 
 ## Data source
 
@@ -111,6 +113,21 @@ edges; `truncated: true` when a cap bites.
 
 Node records add `hop`; edge records are
 `{"from", "to", "kind", "direction": "in"|"out", "hop"}`.
+
+`--driver native|nanograph` (default `native`) picks the traversal driver.
+Results are identical; the payload reports `driver_used` (`native-graph`
+or `nanograph`) and, when nanograph was asked for but could not run,
+`driver_note` (for example `nanograph unavailable on linux-x86_64`) with
+exit 0. See `references/drivers.md`.
+
+### drivers
+
+```text
+atlas graph drivers [--root R] [--json]
+```
+
+Lists the driver registry, each driver's capabilities and platforms, the
+platform matrix, the current platform and each driver's detection result.
 
 ### export
 

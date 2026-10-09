@@ -61,6 +61,36 @@
   verbs and routes structural questions to them, and path `recall` notes
   that `atlas graph neighbours` gives the Expand step as structured JSON.
 
+- Driver overlay (`core/driver_overlay.py`): one driver interface
+  (`id`, `capabilities`, `platforms`, `external`, `detect`, `build`,
+  `bm25_search`, `neighbours`, `health`; unsupported capabilities raise
+  `NotSupported`), a registry with the built-in `sqlite-fts5`
+  (bm25_search) and `native-graph` (graph_traversal) drivers as the
+  defaults on every platform, and a platform matrix. macOS arm64 has
+  nanograph; darwin x86_64, linux x86_64, linux aarch64 and win32 AMD64
+  are empty slots (`planned: none`).
+- Optional nanograph driver, macOS arm64 only, nanograph 1.3.0 or newer
+  (`ATLAS_NANOGRAPH_BIN` or `nanograph` on PATH). It is never selected
+  implicitly and never runs on another platform, even with the binary on
+  PATH. Argv-only subprocesses with timeouts, embedding credentials
+  (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `NANOGRAPH_EMBED*`) stripped from
+  its environment, no `.env.nano`. Its index lives under
+  `.atlas-index/nanograph/<generation>/` (export, generated `atlas.gq`,
+  `atlas.nano`, `ready.json`), is reused while the corpus digest matches,
+  and only the two newest generations are kept.
+- `atlas recall run --engine nanograph` (where `--engine bm25` is
+  allowed) ranks with nanograph BM25 (`score_orientation:
+  "higher_better"`, same field filters and exit-state rule). When
+  nanograph is unavailable or fails it falls back to the sqlite-fts5
+  path with `driver_used: "sqlite-fts5"` and a `driver_note`, exit 0.
+  `--engine bm25` payloads now also carry `driver_used`.
+- `atlas graph neighbours --driver native|nanograph` (default `native`)
+  with the same fallback; payloads carry `driver_used`. New
+  `atlas graph drivers [--json]` lists the registry, platform matrix and
+  detection results.
+- Docs: new `references/drivers.md`; `SKILL.md` lists `--engine
+  nanograph`, `--driver` and `atlas graph drivers`.
+
 ## 0.13.0 - 2026-10-09
 
 Final 0.13.0 release. Over v0.12.0 the beta series ships:

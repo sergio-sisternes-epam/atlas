@@ -358,9 +358,9 @@ def recall_group() -> None:
 @click.option("--limit", default=10, show_default=True, help="max hits")
 @click.option(
     "--engine",
-    type=click.Choice(["grep", "bm25"], case_sensitive=False),
+    type=click.Choice(["grep", "bm25", "nanograph"], case_sensitive=False),
     default=None,
-    help="override SCHEMA query.search_engine",
+    help="override SCHEMA query.search_engine (nanograph: optional, macOS arm64, falls back to bm25)",
 )
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option(
@@ -524,6 +524,13 @@ def graph_edges_cmd(
 @click.option("--max-edges", type=int, default=500, show_default=True)
 @click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@click.option(
+    "--driver",
+    type=click.Choice(["native", "nanograph"]),
+    default="native",
+    show_default=True,
+    help="traversal driver (nanograph: optional, macOS arm64, falls back to native)",
+)
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_neighbours_cmd(
     page: str,
@@ -536,15 +543,24 @@ def graph_neighbours_cmd(
     max_edges: int,
     include_exits: bool,
     allow_partial: bool,
+    driver: str,
     as_json: bool,
 ) -> None:
     """Bounded breadth-first neighbourhood of PAGE."""
     raise SystemExit(
         cmd_graph.run_neighbours(
             root, page, kinds, direction, hops, where, max_nodes, max_edges,
-            include_exits, allow_partial, as_json,
+            include_exits, allow_partial, as_json, driver,
         )
     )
+
+
+@graph_group.command("drivers")
+@click.option("--root", default=None, help=_ROOT_HELP)
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def graph_drivers_cmd(root: str | None, as_json: bool) -> None:
+    """Driver registry, platform matrix and what this machine can use."""
+    raise SystemExit(cmd_graph.run_drivers(root, as_json))
 
 
 @graph_group.command("export")

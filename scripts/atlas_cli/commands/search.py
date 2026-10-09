@@ -10,6 +10,8 @@ from pathlib import Path
 from ..core.frontmatter import FrontmatterError, read_page
 from ..core.overlay import merge_overlays
 from ..core import recall_index
+from ..core import graph as graph_core
+from ..core.driver_overlay import DriverError, get_driver
 from ..core.drivers import fts5 as fts5_driver
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
 from ..core.projection import ProjectedPage, ProjectionError, project_store
@@ -393,10 +395,16 @@ def _bm25_search(
         if ephemeral and db_path is not None:
             db_path.unlink(missing_ok=True)
 
-    tokens = _tokenise(rest)
+    hits = _enrich_hits(ranked[:limit] if limit else ranked, pages, rest)
+    meta_out = {"ephemeral": ephemeral, "fast_path": not ephemeral, "match": match_mode}
+    return hits, warnings, meta_out
+
+
+def _enrich_hits(ranked: list[dict], pages: list[ProjectedPage], text: str) -> list[dict]:
+    tokens = _tokenise(text)
     by_id = {p.page_id: p for p in pages}
     hits: list[dict] = []
-    for h in ranked[:limit] if limit else ranked:
+    for h in ranked:
         page = by_id.get(h["path"])
         if page is not None:
             h["title"] = page.title or Path(page.path).stem
@@ -409,8 +417,40 @@ def _bm25_search(
         else:
             h["relates_to"] = []
         hits.append(h)
-    meta_out = {"ephemeral": ephemeral, "fast_path": not ephemeral, "match": match_mode}
-    return hits, warnings, meta_out
+    return hits
+
+
+def _nanograph_search(
+    root: Path,
+    query: str,
+    limit: int,
+    include_exits: bool,
+) -> tuple[list[dict] | None, list[str], dict]:
+    """Rank with the optional nanograph driver.
+
+    Returns (None, [], {"note": ...}) when the caller must fall back to sqlite-fts5.
+    """
+    driver = get_driver("nanograph")
+    det = driver.detect()
+    if not det.available:
+        return None, [], {"note": f"nanograph {det.reason}"}
+    warnings: list[str] = []
+    filters, rest = _split_filters(query)
+    prefix, path_warn = _path_constraint(root, filters.get("path"))
+    if path_warn:
+        warnings.append(path_warn)
+    try:
+        source = graph_core.load_source(root)
+        if prefix is not None and not prefix.exists():
+            return [], warnings, {"index": None}
+        pages = source["pages"]
+        eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+        ranked = driver.bm25_search(root, rest, 0, source=source)
+    except (graph_core.GraphError, DriverError) as e:
+        return None, [], {"note": f"nanograph {e}"}
+    ranked = [h for h in ranked if h["path"] in eligible]
+    hits = _enrich_hits(ranked[:limit] if limit else ranked, pages, rest)
+    return hits, warnings, {"index": driver.last_index}
 
 
 def run(
@@ -505,7 +545,7 @@ def run(
         return 2
     staging_name = staging_dir_name(schema)
     engine = (engine_override or _search_engine(schema)).lower()
-    if engine not in ("grep", "bm25"):
+    if engine not in ("grep", "bm25", "nanograph") or (engine == "nanograph" and not engine_override):
         engine = "grep"
 
     warning: str | None = None
@@ -514,8 +554,15 @@ def run(
     page_ver = schema_version(effective) if effective else "1.0"
 
     bm25_meta: dict = {}
+    nano_meta: dict = {}
+    hits: list[dict] | None = None
     _, free_text = _split_filters(query)
-    if engine == "bm25" and fts5_driver.query_tokens(free_text):
+    has_terms = bool(fts5_driver.query_tokens(free_text))
+    if engine == "nanograph" and has_terms:
+        hits, extra_warnings, nano_meta = _nanograph_search(r, query, limit, include_exits)
+        if hits is not None:
+            mode_used = "nanograph"
+    if hits is None and engine in ("bm25", "nanograph") and has_terms:
         bm25_hits, bm25_warnings, bm25_meta = _bm25_search(r, schema, query, limit, include_exits)
         if bm25_hits is None:
             warning = bm25_warnings[-1] if bm25_warnings else None
@@ -529,12 +576,12 @@ def run(
             hits = bm25_hits
             extra_warnings = bm25_warnings
             mode_used = "sqlite-fts5"
-    elif engine == "bm25":
+    elif hits is None and engine in ("bm25", "nanograph"):
         mode_used = "grep"
         hits, extra_warnings = _grep_search(
             r, query, staging_name, limit, include_exits, page_ver
         )
-    else:
+    elif hits is None:
         hits, extra_warnings = _grep_search(
             r, query, staging_name, limit, include_exits, page_ver
         )
@@ -554,11 +601,18 @@ def run(
         "agentic_guidance": AGENTIC_GUIDANCE if mode_used == "grep" else None,
         "discipline": DISCIPLINE if mode_used == "grep" else None,
     }
+    if engine in ("bm25", "nanograph"):
+        payload["driver_used"] = mode_used
+    if nano_meta.get("note"):
+        payload["driver_note"] = nano_meta["note"]
     if mode_used == "sqlite-fts5":
         payload["score_orientation"] = "lower_better"
         payload["ephemeral"] = bool(bm25_meta.get("ephemeral"))
         payload["fast_path"] = bool(bm25_meta.get("fast_path"))
         payload["match"] = bm25_meta.get("match") or "all"
+    elif mode_used == "nanograph":
+        payload["score_orientation"] = "higher_better"
+        payload["nanograph_index"] = nano_meta.get("index")
 
     if as_json:
         print(json.dumps(payload, indent=2))
@@ -566,6 +620,8 @@ def run(
         print(f"atlas recall run — root={r}")
         print(f"query: {query}")
         print(f"engine: configured={engine} used={mode_used}")
+        if payload.get("driver_note"):
+            print(f"driver: {mode_used} ({payload['driver_note']})")
         if mode_used == "sqlite-fts5":
             index_kind = "temporary" if payload.get("ephemeral") else "published"
             print(f"index: {index_kind}  match: {payload.get('match')}")

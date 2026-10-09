@@ -12,7 +12,7 @@ import re
 import sqlite3
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import recall_index
 from .overlay import merge_overlays
@@ -289,7 +289,10 @@ def query_neighbours(
     max_nodes: int = DEFAULT_MAX_NODES,
     max_edges: int = DEFAULT_MAX_EDGES,
     include_exits: bool = False,
+    adjacency: Callable[[str, str, frozenset[str]], list[tuple[str, str, str]]] | None = None,
 ) -> dict[str, Any]:
+    """Bounded BFS. ``adjacency(page_id, direction, kinds)`` may replace the
+    in-memory edge lookup (drivers); it returns (other, kind, outgoing|incoming)."""
     if direction not in ("in", "out", "both"):
         raise GraphError("--direction must be in, out or both")
     if hops < 1 or hops > MAX_HOPS:
@@ -298,8 +301,12 @@ def query_neighbours(
     by_id = {p.page_id: p for p in pages}
     seed_page = _resolve_page(by_id, seed)
     reveal = include_exits or asks_for_exit(wheres)
-    incoming = build_incoming(pages)
     kind_set = frozenset(kinds or ())
+    if adjacency is None:
+        incoming = build_incoming(pages)
+
+        def adjacency(page_id: str, direction: str, kinds: frozenset[str]) -> list[tuple[str, str, str]]:
+            return adjacent(by_id[page_id], incoming, direction=direction, kinds=kinds)
 
     hop_of: dict[str, int] = {seed_page.page_id: 0}
     nodes: list[dict[str, Any]] = []
@@ -312,7 +319,7 @@ def query_neighbours(
         next_level: list[str] = []
         for current in sorted(level):
             steps = sorted(
-                adjacent(by_id[current], incoming, direction=direction, kinds=kind_set),
+                adjacency(current, direction, kind_set),
                 key=lambda s: (s[0], s[1], s[2]),
             )
             for other, kind, step_dir in steps:

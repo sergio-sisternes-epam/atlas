@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from ..core import driver_overlay
 from ..core import graph as core
 from ..core.paths import store_root
 
@@ -165,6 +166,7 @@ def run_neighbours(
     include_exits: bool,
     allow_partial: bool,
     as_json: bool,
+    driver: str = "native",
 ) -> int:
     if hops < 1 or hops > core.MAX_HOPS:
         return _fail(store_root(root), "neighbours", f"--hops must be between 1 and {core.MAX_HOPS}", as_json)
@@ -173,20 +175,38 @@ def run_neighbours(
     except core.GraphError as e:
         return _fail(store_root(root), "neighbours", str(e), as_json)
 
-    def body(_: Path, source: dict[str, Any]):
-        result = core.query_neighbours(
-            source["pages"],
-            page,
-            kinds=kinds,
-            direction=direction,
-            hops=hops,
-            wheres=wheres,
-            max_nodes=max_nodes,
-            max_edges=max_edges,
-            include_exits=include_exits,
-        )
-        extra = {"count": len(result["nodes"]), **result}
+    def body(r: Path, source: dict[str, Any]):
+        options = {
+            "wheres": wheres,
+            "max_nodes": max_nodes,
+            "max_edges": max_edges,
+            "include_exits": include_exits,
+        }
+        note: str | None = None
+        result: dict[str, Any] | None = None
+        if driver == "nanograph":
+            nano = driver_overlay.get_driver("nanograph")
+            det = nano.detect()
+            if not det.available:
+                note = f"nanograph {det.reason}"
+            else:
+                try:
+                    result = nano.neighbours(
+                        r, page, kinds, direction, hops, source=source, **options
+                    )
+                except driver_overlay.DriverError as e:
+                    note = f"nanograph {e}"
+        if result is None:
+            result = driver_overlay.get_driver("native-graph").neighbours(
+                r, page, kinds, direction, hops, source=source, **options
+            )
+        driver_used = result.pop("driver")
+        extra = {"count": len(result["nodes"]), **result, "driver_used": driver_used}
+        if note:
+            extra["driver_note"] = note
         lines = [f"seed {result['seed']}"]
+        if note:
+            lines.append(f"driver: {driver_used} ({note})")
         lines += [_node_line(n) for n in result["nodes"]]
         lines += [_edge_line(e) for e in result["edges"]]
         return extra, lines
@@ -220,3 +240,28 @@ def run_export(
         return extra, [str(out_dir / f) for f in files]
 
     return _run(root, "export", allow_partial, as_json, body)
+
+
+def run_drivers(root: str | None, as_json: bool) -> int:
+    r = store_root(root)
+    info = driver_overlay.describe_all()
+    payload = {"ok": True, "root": str(r), "verb": "drivers", **info}
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+        return 0
+    print(f"platform: {info['platform']['label']}")
+    for d in info["drivers"]:
+        det = d["detect"]
+        kind = "external" if d["external"] else "built-in"
+        default = f" default={','.join(d['default_for'])}" if d["default_for"] else ""
+        version = f" version={det['version']}" if det.get("version") else ""
+        print(
+            f"{d['id']}\t{kind}\t{','.join(d['capabilities'])}\tplatforms={','.join(d['platforms'])}"
+            f"{default}\tavailable={str(det['available']).lower()} ({det['reason']}){version}"
+        )
+    print("# matrix")
+    for row in info["matrix"]:
+        ext = ", ".join(f"{k}: {v}" for k, v in sorted(row["external"].items())) or "none"
+        planned = f" planned: {row['planned']}" if row.get("planned") else ""
+        print(f"{row['platform']}-{row['machine']}\texternal: {ext}{planned}")
+    return 0
