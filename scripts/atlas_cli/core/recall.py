@@ -118,6 +118,8 @@ def run_recall(
     complete = True
 
     legacy_used = False
+    index_note: str | None = None
+    index_rebuilt: bool | None = None
     extra_warnings: list[dict[str, str]] = []
     fast_gen = recall_index.find_generation(root, schema=schema, fast_path=True)
     if fast_gen is not None:
@@ -137,18 +139,18 @@ def run_recall(
         complete = bool(projection["complete"])
         omitted = list(projection["omitted"])
         if recall_enabled(effective) and complete:
-            found = recall_index.find_generation(root, digest=corpus_digest)
-            if found is None:
-                published = recall_index.publish_generation(
-                    root, schema, False, projection=projection
+            # Same freshness + atomic publish path as a preferred bm25 engine.
+            try:
+                fresh = recall_index.ensure_fresh(
+                    root, schema, projection=projection, guard_ignore=True
                 )
-                if published.get("published") and published.get("db"):
-                    db_path = recall_index.index_root(root) / str(published["db"])
-                    generation_id = published.get("generation")
+            except Exception as e:  # noqa: BLE001 - unwritable/unsafe/busy -> temporary index
+                index_note = f"index not written ({e}); used a temporary index"
             else:
-                db_path = found.db
-                generation_id = found.pointer.get("generation")
-                legacy_used = found.legacy
+                db_path = fresh.generation.db
+                generation_id = fresh.generation.pointer.get("generation")
+                legacy_used = fresh.generation.legacy
+                index_rebuilt = fresh.rebuilt
 
     pages: list[ProjectedPage] = [
         p for p in projection_pages if _eligible(p, filters, include_exits)
@@ -308,6 +310,10 @@ def run_recall(
             "limits": policy["limits"],
         },
     }
+    if index_rebuilt is not None:
+        payload["recall"]["index_rebuilt"] = index_rebuilt
+    if index_note:
+        payload["driver_note"] = index_note
     if db_path is not None and not ephemeral:
         try:
             payload["recall"].update(recall_index.index_location.describe(root, "fts5"))

@@ -14,6 +14,7 @@ from ..core.recall_config import recall_enabled, schema_version, validate_store_
 from ..core import index_location
 from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
 from ..core.recall_index import IndexError_, publish_generation
+from ..core.engine_preference import refresh_preferred
 from ..core.schema import (
     by_type_map,
     compute_stamp_shape,
@@ -35,7 +36,12 @@ from ..core.schema import (
 IGNORE_RE = re.compile(r"<!--\s*atlas-ignore:\s*([a-z0-9_\-]+)\s*-->", re.I)
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
-NON_BLOCKING_WARNING_IDS = {"atlas_uri_unmounted"}
+NON_BLOCKING_WARNING_IDS = {
+    "atlas_uri_unmounted",
+    # Preferred recall engine index work never changes compile exit codes.
+    "preferred_engine_invalid",
+    "preferred_index_failed",
+}
 
 # Memory layers (frame / gist / page, original shipped 0.13.0-beta;
 # frame / gist / memory, 0.13.0-beta.2; schema / gist / memory, beta.3) are
@@ -1137,6 +1143,10 @@ def run(
                         "msg": f"failed to publish recall generation: {e}",
                     }
                 )
+
+    if not dry_run and not focused and not critical:
+        for item in refresh_preferred(r, schema):
+            (warnings if item.get("level") == "warning" else info).append(item)
 
     if not dry_run:
         for ignored in (ensure_indexes_ignored(r), ensure_index_ignored(r)):

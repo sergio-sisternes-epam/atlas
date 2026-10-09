@@ -10,7 +10,8 @@
     "stores": {
       "type": "array",
       "items": { "$ref": "#/$defs/store" }
-    }
+    },
+    "recall": { "$ref": "#/$defs/recall" }
   },
   "$defs": {
     "store": {
@@ -22,7 +23,16 @@
         "subpath": { "type": "string" },
         "ref": { "type": "string" },
         "path": { "type": "string" },
-        "strategy": { "type": "string", "enum": ["shared", "dedicated"] }
+        "strategy": { "type": "string", "enum": ["shared", "dedicated"] },
+        "recall": { "$ref": "#/$defs/recall" }
+      }
+    },
+    "recall": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Preferred recall engine for this consumer (see references/paths/recall.md).",
+      "properties": {
+        "engine": { "type": "string", "enum": ["grep", "bm25", "nanograph"] }
       }
     }
   }

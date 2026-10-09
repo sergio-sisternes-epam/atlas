@@ -55,13 +55,97 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    Run this step regardless of whether the hot list or abstraction walk already answered the ask — the exit receipt always records `recall_cmd`. Stopping at the gist (step 3) decides whether the parent memory page is opened, not whether search runs.
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.
 
-   **Engine choice.** Grep is the basic default (`recall` off) and stays the default when no flag is passed. With `recall` off, `--engine bm25` ranks with SQLite FTS5: it reuses a published generation when the cheap fingerprint matches, otherwise it builds a temporary index and deletes it after the query. It falls back to grep with a warning only when FTS5 is unavailable or projection fails. In both `--engine bm25` and FTS5 presets such as `atlas:ranked`, if an all-words query finds nothing, one any-word retry runs; the payload says `match: "any"` and so does each retried hit, so treat those hits as weaker evidence. After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Published indexes live in the project at `.atlas/indexes/<driver-type>/<atlas-id>/` (project root and id from the matching `atlas-mesh.json` row, else the store's git top level with its origin id, or the store directory with a `local/` hash id; `references/drivers.md`, Index location). A `legacy_index_location` warning means Atlas read a deprecated in-store `.atlas-index/` (read-only for 0.14.x); rebuild with `atlas recall index build`, then you may delete `.atlas-index/`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
+   **Engine choice.** Grep is the basic default (`recall` off) and stays the default when no flag is passed. With `recall` off, `--engine bm25` ranks with SQLite FTS5 and, from 0.14.0, keeps its index on disk and refreshes it when the corpus changes (a temporary index is used only when the index location cannot be written). A configured preferred engine (see **Preferred engine** below) replaces the no-flag default. It falls back to grep with a warning only when FTS5 is unavailable or projection fails. In both `--engine bm25` and FTS5 presets such as `atlas:ranked`, if an all-words query finds nothing, one any-word retry runs; the payload says `match: "any"` and so does each retried hit, so treat those hits as weaker evidence. After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus cheap fingerprint (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Published indexes live in the project at `.atlas/indexes/<driver-type>/<atlas-id>/` (project root and id from the matching `atlas-mesh.json` row, else the store's git top level with its origin id, or the store directory with a `local/` hash id; `references/drivers.md`, Index location). A `legacy_index_location` warning means Atlas read a deprecated in-store `.atlas-index/` (read-only for 0.14.x); rebuild with `atlas recall index build`, then you may delete `.atlas-index/`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
 6. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
 7. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
 8. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
 9. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror. `atlas graph neighbours <page> --root <root> --json` gives the same `relates_to` expansion as structured JSON (direction, kind and hop per edge); see `references/graph.md`.
 10. **Never** treat `staging/` as an answer source.
 11. **Answer** from claims on those pages, citing paths. If nothing relevant → honest **gap**. After the one rewrite search, stop. A grep spiral is not allowed.
+
+## Preferred engine
+
+A consuming project can choose the engine recall uses when no `--engine` is
+given, and Atlas creates and refreshes its index automatically. There is no
+daemon and no file watcher.
+
+**Configuration** (values `grep`, `bm25`, `nanograph`):
+
+- store row in the project's `atlas-mesh.json`:
+  `{"id": "...", "path": "...", "recall": {"engine": "bm25"}}`;
+- project default, top level of the same file: `"recall": {"engine": "bm25"}`;
+- environment: `ATLAS_RECALL_ENGINE=bm25`;
+- command: `atlas recall run "<q>" --engine bm25`.
+
+Unknown keys inside `recall` or other values are rejected with an error that
+names the file, the store id (or "project default") and the allowed values;
+`recall run` exits 2. Mesh files without `recall` behave exactly as before.
+`atlas recall engine set <value> [--project]` writes the entry safely
+(`default` removes it); editing `atlas-mesh.json` by hand works too.
+
+**Precedence**, highest first: `--engine` (`cli`) > `ATLAS_RECALL_ENGINE`
+(`env`) > store row `recall.engine` (`store`, the row matched by the index
+location's mesh resolution) > top-level `recall.engine` (`project`) >
+built-in default (`default`: SCHEMA `query.search_engine` when it is `bm25`,
+else `grep`). A standalone store (no matching mesh row) skips the two mesh
+levels. Recall payloads report `engine_requested`, `engine_source`,
+`engine_used`, `driver_used` and, when something was substituted,
+`driver_note`. `atlas recall engine [--root R] [--json]` prints the resolved
+preference, its source, the effective engine after fallback, the index
+directory and whether the index is fresh, without building anything.
+
+**Auto-create and refresh.** `bm25` uses the `fts5` index and `nanograph`
+the `nanograph` index under `.atlas/indexes/<driver-type>/<atlas-id>/`;
+`grep` has no index. Whenever the engine comes from `cli`, `env`, `store` or
+`project`, recall checks the cheap fingerprint and then the corpus digest
+(and, for nanograph, the binary version). If the index is missing or stale it
+builds a new generation and publishes it before answering. Unchanged content
+means no rebuild. `atlas compile` / `validate` (not `--dry-run`) and
+`atlas recall index build` also refresh the preferred index after a
+successful run and report `preferred_index_refreshed` or
+`preferred_index_fresh` (driver and generation) as info. A build failure is
+the warning `preferred_index_failed`; exit codes never change because of
+index work.
+
+**Atomic publish and lock.** A builder takes `<index-dir>/.lock`
+(`O_CREAT|O_EXCL`, JSON with pid, host and time). A lock older than ten
+minutes is treated as abandoned and broken. The builder writes into a
+`.tmp-<generation>` sibling, fsyncs, renames it into place with
+`os.replace`, then replaces the pointer (`current.json`) atomically. Readers
+resolve the pointer once, so they never see a half-built generation; leftover
+`.tmp-*` entries are ignored and removed by the next builder. Pruning keeps
+the pointer's generation plus the newest other one (fts5 and nanograph alike).
+A reader that finds the lock held waits up to five seconds for a fresh
+generation; if none appears, bm25 answers from a temporary index and
+nanograph falls back to bm25, both with a `driver_note`. When the index
+location cannot be written (read-only file system, permissions, unsafe
+path), bm25 also answers from a temporary index (`ephemeral: true`) and says
+why in `driver_note`.
+
+**Legacy.** A fresh deprecated `.atlas-index/` index is still read in place
+with a `legacy_index_location` warning; when it is stale, Atlas builds the new
+location and never writes to `.atlas-index/`.
+
+**Fallback** never fails recall: nanograph -> bm25 -> grep, bm25 -> grep
+(FTS5 unavailable). Availability comes from the driver overlay (nanograph:
+macOS arm64, binary present, version 1.3.0 or later); no index is built for
+an unavailable driver. Example: `driver_note: "preferred engine nanograph
+unavailable: unavailable on linux-x86_64; used bm25"`, exit 0.
+
+**Stores with their own recall profile** (SCHEMA 2.0, recall enabled). The
+profile is authored in the store and versioned with it, so it is the stronger
+contract; mesh and environment preferences are a per-consumer convenience.
+The profile therefore stays authoritative for the rank pipeline:
+
+- preference `bm25`: no-op for ranking (the profile's `sqlite-fts5` is BM25
+  already); its index lives in the new location and is auto-refreshed by
+  recall and compile with the same freshness and atomic-publish code;
+- preference `nanograph` or `grep` from `store`, `project` or `env`: not
+  applied; the payload carries info `preferred_engine_ignored` ("store recall
+  profile <name> is authoritative; preferred engine <x> from <source> not
+  applied") and no nanograph index is built;
+- explicit `--engine`: still a conflict (exit 2); the error points to
+  `--profile` and explains that preferences are ignored on profile stores.
 
 ## Exit receipt
 

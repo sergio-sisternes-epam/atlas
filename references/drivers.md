@@ -77,9 +77,13 @@ macOS arm64. Atlas does not install it.
   writes `export/` (the `atlas graph export --format nanograph` files),
   `atlas.gq` (generated queries), `atlas.nano` (`nanograph init` then
   `nanograph load --mode overwrite`) and finally `ready.json`
-  (`version`, `corpus_digest`, `built_at`). A generation is reused while
-  `ready.json` matches the digest and version; the two newest generations
-  are kept and older ones deleted. Symlinked index paths are refused, and a
+  (`version`, `corpus_digest`, `built_at`). The build runs in a
+  `.tmp-<generation>` sibling under a `.lock`, is renamed into place
+  atomically and then `current.json` (generation, digest, version) is
+  replaced atomically; a rebuild for the same digest after a version change
+  gets a `-<8 hex>` suffix. A generation is reused while the pointer (and
+  its `ready.json`) matches the digest and version; the pointer's generation
+  plus the newest other one are kept and older ones deleted. Symlinked index paths are refused, and a
   build never writes outside `.atlas/indexes/nanograph/<atlas-id>/`.
 - **Queries:** `bm25_text($q)` ranks pages on `text`; rows with score 0 or
   less are dropped and scores are higher-better. Graph traversal uses one
@@ -91,7 +95,23 @@ macOS arm64. Atlas does not install it.
 ## Selection and fallback
 
 Nothing selects nanograph implicitly: it is not a recall profile, not a
-`query.search_engine` value and not a default.
+`query.search_engine` value and not a default. A project can prefer it (or
+`bm25`) explicitly through `atlas-mesh.json` `recall.engine` or
+`ATLAS_RECALL_ENGINE`; see path `recall`, Preferred engine.
+
+| Preferred engine | Driver | Index (driver type) | Fallback when unavailable |
+| --- | --- | --- | --- |
+| `grep` | `grep` | none | — |
+| `bm25` | `sqlite-fts5` | `fts5` | `grep` (no FTS5) |
+| `nanograph` | `nanograph` | `nanograph` | `bm25`, then `grep` |
+
+Availability comes from each driver's `detect()`; Atlas never builds an index
+for an unavailable driver. With a preference (or an explicit `--engine`),
+recall creates the index on first use and rebuilds it when the corpus digest
+or, for nanograph, the binary version changes. Builds go to a `.tmp-*`
+sibling under a `.lock` and are published with an atomic rename plus an
+atomic `current.json` pointer replace. On stores with an enabled recall
+profile the profile wins; see path `recall`.
 
 - `atlas recall run "<q>" --engine nanograph` (allowed wherever
   `--engine bm25` is) uses nanograph when it is available:
@@ -103,8 +123,9 @@ Nothing selects nanograph implicitly: it is not a recall profile, not a
   uses nanograph traversal and reports `driver_used: "nanograph"`.
 - When nanograph is unavailable or fails, both fall back to the built-in
   driver (`sqlite-fts5` / `native-graph`), report it in `driver_used`, add
-  `driver_note: "nanograph <reason>"` (for example
-  `nanograph unavailable on linux-x86_64`) and keep exit 0.
+  a `driver_note` (recall: `preferred engine nanograph unavailable:
+  unavailable on linux-x86_64; used bm25`; graph: `nanograph unavailable on
+  linux-x86_64`) and keep exit 0.
 - `atlas graph drivers [--root R] [--json]` lists the registry,
   capabilities, platform matrix, current platform and each `detect()`.
 
@@ -133,12 +154,14 @@ history. Every driver keeps its index under
 ```
 
 with driver type first: `fts5` (the published recall index:
-`current.json` plus `generations/<gen_id>/`), `nanograph`
-(`<generation>/` as above, two newest kept) and `tgrep` (its index files).
+`current.json` plus `generations/<gen_id>/`, the pointer's generation and
+the newest other one kept), `nanograph` (`current.json` plus
+`<generation>/` as above) and `tgrep` (its index files).
 `.atlas/` already holds mounted stores as `.atlas/<host>/<owner>/<repo>`, so
-one project gets one index per store across the mesh. Temporary FTS5
-indexes for `--engine bm25` without a published generation still live in
-the system temporary directory. `scripts/atlas_cli/core/index_location.py`
+one project gets one index per store across the mesh. `--engine bm25` and a
+preferred `bm25` persist their FTS5 index here; temporary FTS5 indexes (only
+when this location cannot be written, or a build is in progress elsewhere)
+live in the system temporary directory. `scripts/atlas_cli/core/index_location.py`
 is the single source of truth.
 
 **Resolution rule** for a store directory `S` (resolved):

@@ -2,6 +2,48 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Preferred recall engine: a consuming project can set
+  `"recall": {"engine": "grep|bm25|nanograph"}` on a store row of its
+  `atlas-mesh.json` or as a project-wide top-level default, or set
+  `ATLAS_RECALL_ENGINE`. Precedence is `--engine` > `ATLAS_RECALL_ENGINE` >
+  store row > project default > built-in default (SCHEMA
+  `query.search_engine` when `bm25`, else `grep`), resolved in one place
+  (`core/engine_preference.py`). Recall payloads add `engine_requested` and
+  `engine_source` (`cli|env|store|project|default`) alongside
+  `engine_used`, `driver_used` and `driver_note`.
+- Auto-created, self-refreshing indexes: with an indexed engine (bm25 ->
+  `fts5`, nanograph -> `nanograph`) recall builds the index under
+  `.atlas/indexes/<driver-type>/<atlas-id>/` when it is missing or its corpus
+  digest (or nanograph version) changed, and publishes it before answering.
+  `atlas compile` / `validate` (not `--dry-run`) and `atlas recall index
+  build` refresh the preferred index and report `preferred_index_refreshed`
+  or `preferred_index_fresh`; a failure is the warning
+  `preferred_index_failed` and never changes exit codes. Builds take a
+  `.lock` (stale after ten minutes), write a `.tmp-*` sibling and publish
+  with an atomic rename plus an atomic pointer replace; fts5 now prunes to
+  the current generation plus one, and nanograph gains a `current.json`
+  pointer. Unavailable preferences fall back nanograph -> bm25 -> grep with
+  a `driver_note` and exit 0; no index is built for an unavailable driver.
+- New `atlas recall engine [--root R] [--json]` (read-only: preference,
+  source, effective engine, index directory and freshness) and
+  `atlas recall engine set <grep|bm25|nanograph|default> [--project]`, which
+  writes `atlas-mesh.json` atomically.
+- New environment variable `ATLAS_RECALL_ENGINE` (invalid values exit 2 for
+  `recall run`, naming the variable and the allowed values).
+- Mesh schema: optional `recall` object (only `engine`) on store rows and at
+  the top level of `atlas-mesh.json`. Unknown keys or values are rejected
+  with an error naming the file, the store id or "project default", and the
+  allowed values. Mesh files without `recall` are unchanged.
+- Behaviour change: an explicit `--engine bm25` now persists its FTS5 index
+  in the project and refreshes it on change instead of building a temporary
+  index per query. The temporary index remains only as a fallback when the
+  index location cannot be written or another builder holds the lock
+  (`ephemeral: true`, reason in `driver_note`).
+- Stores with an enabled recall profile keep the profile authoritative: a
+  `bm25` preference is a no-op (the profile index uses the same new location
+  and auto-refresh), a `nanograph` or `grep` preference is reported as info
+  `preferred_engine_ignored`, and explicit `--engine` still exits 2 with a
+  message pointing to `--profile`.
 - `atlas recall run --engine bm25` now ranks with SQLite FTS5 on stores
   where recall is not enabled (SCHEMA 1.0, or 2.0 with recall disabled).
   It reuses a published generation when the cheap fingerprint matches,

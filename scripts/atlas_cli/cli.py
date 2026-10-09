@@ -360,7 +360,7 @@ def recall_group() -> None:
     "--engine",
     type=click.Choice(["grep", "bm25", "nanograph"], case_sensitive=False),
     default=None,
-    help="override SCHEMA query.search_engine (nanograph: optional, macOS arm64, falls back to bm25)",
+    help="override the preferred engine (ATLAS_RECALL_ENGINE, atlas-mesh.json recall.engine, SCHEMA query.search_engine); nanograph: optional, macOS arm64, falls back to bm25",
 )
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 @click.option(
@@ -434,6 +434,26 @@ def recall_activate_cmd(profile: str, root: str | None, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True)
 def recall_disable_cmd(root: str | None, as_json: bool) -> None:
     raise SystemExit(cmd_recall.run_disable(root, as_json))
+
+
+@recall_group.group("engine", invoke_without_command=True)
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True)
+@click.pass_context
+def recall_engine_group(ctx: click.Context, root: str | None, as_json: bool) -> None:
+    """Show the preferred recall engine, its source, effective engine and index freshness."""
+    if ctx.invoked_subcommand is None:
+        raise SystemExit(cmd_recall.run_engine(root, as_json))
+
+
+@recall_engine_group.command("set")
+@click.argument("value", type=click.Choice(["grep", "bm25", "nanograph", "default"], case_sensitive=False))
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--project", is_flag=True, help="set the project-wide default instead of the store row")
+@click.option("--json", "as_json", is_flag=True)
+def recall_engine_set_cmd(value: str, root: str | None, project: bool, as_json: bool) -> None:
+    """Write recall.engine into atlas-mesh.json (default = remove the setting)."""
+    raise SystemExit(cmd_recall.run_engine_set(root, value, project, as_json))
 
 
 @recall_group.group("index")

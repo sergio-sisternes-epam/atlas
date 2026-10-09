@@ -381,8 +381,6 @@ def main() -> int:
         nlegacy = gstore / ".atlas-index" / "nanograph"
         nlegacy.mkdir(parents=True)
         shutil.move(str(new_base / gen), str(nlegacy / gen))
-        # The fake binary records absolute paths at load time; repoint them for the moved fixture.
-        (nlegacy / gen / "atlas.nano" / "seed-path").write_text(str(nlegacy / gen / "export" / "seed.jsonl"), encoding="utf-8")
         shutil.rmtree(gstore / ".atlas")
         nbefore = tree_snapshot(nlegacy)
         inits = len([e for e in read_log(log) if e["argv"][:1] == ["init"]])

@@ -113,8 +113,11 @@ def main() -> int:
                 bm.returncode == 0
                 and bp.get("engine_configured") == "bm25"
                 and bp.get("engine_used") == "sqlite-fts5"
-                and bp.get("ephemeral") is True
-                and bp.get("fast_path") is False
+                and bp.get("engine_source") == "cli"
+                # An explicit --engine bm25 persists its index (0.14.0) instead of a temporary one.
+                and bp.get("ephemeral") is False
+                and bp.get("fast_path") is True
+                and bp.get("index_rebuilt") is True
                 and bp.get("match") == "all",
                 bm.stderr[:200] or str({k: bp.get(k) for k in ("engine_used", "warning", "match")}),
             )
@@ -137,8 +140,11 @@ def main() -> int:
             )
             check("no-stub-warning", not bp.get("warnings"), str(bp.get("warnings")))
             check(
-                "no-ephemeral-left-in-store",
-                not (v1 / ".atlas-index").exists() and not (v1 / ".atlas").exists(),
+                "bm25-index-persisted-not-legacy",
+                not (v1 / ".atlas-index").exists()
+                and (v1 / ".atlas" / "indexes" / "fts5").is_dir()
+                and str(bp.get("index_dir") or "").startswith(".atlas/indexes/fts5/local/v1-"),
+                str(bp.get("index_dir")),
             )
 
             # Exit-state exclusion.

@@ -193,6 +193,7 @@ python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py recall index build --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py recall engine [set grep|bm25|nanograph|default [--project]] --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N]
 python3 <atlas-skill>/scripts/atlas.py graph edges --root <atlas> (--from <page> | --to <page> | --all) [--kind K]... [--include-exits]
 python3 <atlas-skill>/scripts/atlas.py graph neighbours <page> --root <atlas> [--kind K]... [--direction in|out|both] [--hops 1..3] [--where field=value]... [--driver native|nanograph]
@@ -218,7 +219,7 @@ python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --targ
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
 
-Search engine: grep until recall is enabled, and grep stays the default when no flag is passed. Without recall, `--engine bm25` ranks with SQLite FTS5 (a published generation when it matches, otherwise a temporary index deleted after the query); it falls back to grep with a warning only when FTS5 is unavailable or projection fails. When an all-words FTS5 query finds nothing, one any-word retry runs and is labelled `match: "any"`. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
+Search engine: grep until recall is enabled, and grep stays the default when no flag is passed. Without recall, `--engine bm25` ranks with SQLite FTS5 and keeps its index fresh on disk; it falls back to grep with a warning only when FTS5 is unavailable or projection fails. A preferred engine (`atlas-mesh.json` `recall.engine` or `ATLAS_RECALL_ENGINE`) becomes the default, with its index created and refreshed automatically; an enabled store recall profile still wins. When an all-words FTS5 query finds nothing, one any-word retry runs and is labelled `match: "any"`. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
 
 Structural questions (which pages have `field=value`, what links to X and how, bounded neighbourhoods, exports) use read-only `atlas graph`, not `recall run`; see `references/graph.md`.
 

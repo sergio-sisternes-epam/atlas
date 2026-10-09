@@ -61,8 +61,8 @@ if cmd == "init":
     sys.exit(0)
 if cmd == "load":
     assert opt(args, "--mode") == "overwrite"
-    with open(os.path.join(db, "seed-path"), "w") as fh:
-        fh.write(os.path.abspath(opt(args, "--data")))
+    with open(opt(args, "--data"), encoding="utf-8") as src, open(os.path.join(db, "seed.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(src.read())
     sys.exit(0)
 if cmd == "run":
     if FAIL == "garble":
@@ -74,7 +74,7 @@ if cmd == "run":
         print("unknown query " + name, file=sys.stderr)
         sys.exit(4)
     params = dict(a.split("=", 1) for i, a in enumerate(args) if i and args[i - 1] == "--param")
-    seed_path = open(os.path.join(db, "seed-path")).read()
+    seed_path = os.path.join(db, "seed.jsonl")
     nodes, edges = {}, []
     for line in open(seed_path, encoding="utf-8"):
         rec = json.loads(line)
@@ -295,13 +295,16 @@ def main() -> int:
         base = index_location.index_dir(store, "nanograph")
         check("index-under-project", base == store / ".atlas" / "indexes" / "nanograph" / "local" / base.name, str(base))
         check("no-legacy-index-written", not (store / ".atlas-index").exists())
-        gens = sorted(d.name for d in base.iterdir()) if base.is_dir() else []
+        gens = sorted(d.name for d in base.iterdir() if d.is_dir()) if base.is_dir() else []
         gen = gens[0] if gens else ""
         ready = {}
         if gen:
             ready = json.loads((base / gen / "ready.json").read_text(encoding="utf-8"))
         check("index-generation", len(gens) == 1 and len(gen) == 16 and ready.get("corpus_digest", "").startswith(gen), str(gens))
         check("index-ready", ready.get("version") == "1.3.0" and bool(ready.get("built_at")), str(ready))
+        pointer = json.loads((base / "current.json").read_text(encoding="utf-8")) if (base / "current.json").is_file() else {}
+        check("index-pointer", pointer.get("generation") == gen and pointer.get("version") == "1.3.0", str(pointer))
+        check("index-no-temp-or-lock", not [d.name for d in base.iterdir() if d.name.startswith(".")])
         check(
             "index-files",
             all((base / gen / f).exists() for f in ("atlas.gq", "atlas.nano", "export/schema.pg", "export/seed.jsonl")),
@@ -329,20 +332,29 @@ def main() -> int:
         inits = [e for e in entries if e["argv"][:1] == ["init"]]
         loads = [e for e in entries if e["argv"][:1] == ["load"]]
         check("index-reused", len(inits) == 1 and len(loads) == 1, f"inits={len(inits)} loads={len(loads)}")
+        # Builds run in a temporary sibling (.tmp-<generation>) published by one atomic rename.
+        building = base / f".tmp-{gen}"
         check(
             "init-argv",
             bool(inits)
-            and inits[0]["argv"] == ["init", "--db", str(base / gen / "atlas.nano"), "--schema", str(base / gen / "export" / "schema.pg")],
+            and inits[0]["argv"] == ["init", "--db", str(building / "atlas.nano"), "--schema", str(building / "export" / "schema.pg")],
             str(inits[:1]),
         )
         check(
             "load-argv",
             bool(loads)
-            and loads[0]["argv"] == ["load", "--db", str(base / gen / "atlas.nano"), "--data", str(base / gen / "export" / "seed.jsonl"), "--mode", "overwrite"],
+            and loads[0]["argv"] == ["load", "--db", str(building / "atlas.nano"), "--data", str(building / "export" / "seed.jsonl"), "--mode", "overwrite"],
             str(loads[:1]),
         )
         check("env-stripped", entries and not any(e["openai"] or e["gemini"] or e["embed"] for e in entries))
-        check("cwd-index", all(e["cwd"] == str(base / gen) for e in entries if e["argv"] != ["--version"]))
+        check(
+            "cwd-index",
+            all(
+                e["cwd"] == str(building if e["argv"][:1] in (["init"], ["load"]) else base / gen)
+                for e in entries
+                if e["argv"] != ["--version"]
+            ),
+        )
         check("no-env-nano", not list(store.rglob(".env.nano")))
         check("store-untouched", snapshot(store) == before)
 
@@ -379,13 +391,13 @@ def main() -> int:
             and p.get("engine_configured") == "nanograph"
             and p.get("engine_used") == "sqlite-fts5"
             and p.get("driver_used") == "sqlite-fts5"
-            and p.get("driver_note") == "nanograph run failed (exit 3)"
+            and p.get("driver_note") == "preferred engine nanograph failed: run failed (exit 3); used bm25"
             and p.get("count", 0) > 0
             and not p.get("warnings"),
             out,
         )
         code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", FAKE_NANOGRAPH_FAIL="garble")
-        check("fallback-non-json", code == 0 and p.get("driver_note") == "nanograph run bm25_text returned non-JSON output", out)
+        check("fallback-non-json", code == 0 and p.get("driver_note") == "preferred engine nanograph failed: run bm25_text returned non-JSON output; used bm25", out)
         code, p, out = cli("graph", "neighbours", "work/hub.md", "--driver", "nanograph", FAKE_NANOGRAPH_FAIL="run")
         check(
             "fallback-neighbours",
@@ -395,13 +407,15 @@ def main() -> int:
         code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
         check(
             "fallback-platform",
-            code == 0 and p.get("engine_used") == "sqlite-fts5" and p.get("driver_note") == "nanograph unavailable on linux-x86_64",
+            code == 0
+            and p.get("engine_used") == "sqlite-fts5"
+            and p.get("driver_note") == "preferred engine nanograph unavailable: unavailable on linux-x86_64; used bm25",
             out,
         )
         code, p, out = cli("graph", "neighbours", "work/hub.md", "--driver", "nanograph", ATLAS_PLATFORM_OVERRIDE="linux-x86_64")
         check("fallback-platform-neighbours", code == 0 and p.get("driver_note") == "nanograph unavailable on linux-x86_64", out)
         code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", FAKE_NANOGRAPH_VERSION="1.2.0")
-        check("fallback-old-version", code == 0 and p.get("driver_note") == "nanograph nanograph version 1.2.0 below minimum 1.3.0", out)
+        check("fallback-old-version", code == 0 and p.get("driver_note") == "preferred engine nanograph unavailable: nanograph version 1.2.0 below minimum 1.3.0; used bm25", out)
         code, p, out = cli("recall", "run", "hub", "--engine", "bm25")
         check("bm25-unchanged", p.get("engine_used") == "sqlite-fts5" and "driver_note" not in p, out)
         code, p, out = cli("graph", "neighbours", "work/hub.md")
@@ -415,7 +429,7 @@ def main() -> int:
             )
             code, p, out = cli("recall", "run", "hub", "--engine", "nanograph")
             check(f"rebuild-{i}", code == 0 and p.get("engine_used") == "nanograph" and (p.get("nanograph_index") or {}).get("reused") is False, out)
-        gens_after = sorted(d.name for d in base.iterdir())
+        gens_after = sorted(d.name for d in base.iterdir() if d.is_dir())
         current = (p.get("nanograph_index") or {}).get("generation")
         check("generations-pruned", len(gens_after) == 2 and current in gens_after and gen not in gens_after, str(gens_after))
 

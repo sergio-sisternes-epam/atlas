@@ -3,7 +3,10 @@
 Argv-only subprocess (never a shell), bounded timeouts, embedding credentials
 stripped from the environment, and an Atlas-owned index under
 ``<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`` (see
-core/index_location.py). A ready generation in the deprecated in-store
+core/index_location.py). Builds run in a ``.tmp-<generation>`` sibling under
+the shared builder lock, are published with an atomic rename and then an
+atomic replace of ``current.json`` (see core/index_publish.py), so readers
+never see a half-built generation. A ready generation in the deprecated in-store
 ``.atlas-index/nanograph/`` is reused read-only for 0.14.x. Any failure raises
 DriverError so callers fall back to the built-in driver.
 """
@@ -19,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .. import driver_overlay, graph, index_location
+from .. import driver_overlay, graph, index_location, index_publish
 from ..driver_overlay import BaseDriver, Detection, DriverError
 from ..ignore_guard import ensure_indexes_ignored
 from ..index_location import IndexLocationError
@@ -35,6 +38,8 @@ BM25_ROW_CAP = 500
 QUERIES_NAME = "atlas.gq"
 DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
+CURRENT_NAME = "current.json"
+_GEN_NAME = re.compile(r"[0-9a-f]{16}(?:-[0-9a-f]{8})?")
 STRIPPED_ENV = frozenset({"OPENAI_API_KEY", "GEMINI_API_KEY"})
 STRIPPED_ENV_PREFIX = "NANOGRAPH_EMBED"
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
@@ -257,6 +262,26 @@ class NanographDriver(BaseDriver):
             and (gen_dir / QUERIES_NAME).is_file()
         )
 
+    def _current(self, base: Path, digest: str, version: str | None) -> Path | None:
+        """Resolve ``current.json`` once; fall back to a pre-pointer ``<digest16>`` generation."""
+        try:
+            pointer = json.loads((base / CURRENT_NAME).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pointer = None
+        names: list[str] = []
+        if isinstance(pointer, dict) and isinstance(pointer.get("generation"), str):
+            names.append(pointer["generation"])
+        names.append(digest[:16])
+        for name in names:
+            if not _GEN_NAME.fullmatch(name):
+                continue
+            gen_dir = base / name
+            if gen_dir.is_symlink():
+                continue
+            if self._reusable(gen_dir, digest, version):
+                return gen_dir
+        return None
+
     def _legacy_generation(self, store: Path, digest: str, version: str | None) -> Path | None:
         """A ready generation in the deprecated in-store location, used read-only."""
         base = self.legacy_base(store)
@@ -270,17 +295,32 @@ class NanographDriver(BaseDriver):
             return None
         return gen_dir if self._reusable(gen_dir, digest, version) else None
 
-    def ensure_index(self, store: Path, source: dict[str, Any]) -> Path:
+    def index_state(self, store: Path, digest: str) -> dict[str, Any]:
+        """Read-only freshness of the new-location index for ``digest`` (no build)."""
+        det = self.detect()
+        if not det.available:
+            return {"fresh": False, "reason": det.reason}
+        base = self.index_base(store)
+        gen = self._current(base, digest, det.version)
+        if gen is not None:
+            return {"fresh": True, "generation": gen.name}
+        legacy = self._legacy_generation(store, digest, det.version)
+        if legacy is not None:
+            return {"fresh": True, "generation": legacy.name, "legacy": True}
+        return {"fresh": False, "reason": "missing or stale"}
+
+    def ensure_index(
+        self, store: Path, source: dict[str, Any], wait: float | None = None, allow_legacy: bool = True
+    ) -> Path:
         det = self._ready()
         digest = str(source.get("corpus_digest") or "")
         if not re.fullmatch(r"[0-9a-f]{16,}", digest):
             raise DriverError("corpus digest unavailable")
         base = self.index_base(store)
-        gen_dir = base / digest[:16]
-        self._guard(store, gen_dir)
+        self._guard(store, base / digest[:16])
         where = index_location.describe(store, "nanograph")
-        reused = self._reusable(gen_dir, digest, det.version)
-        if not reused:
+        gen_dir = self._current(base, digest, det.version)
+        if gen_dir is None and allow_legacy:
             legacy = self._legacy_generation(store, digest, det.version)
             if legacy is not None:
                 self.last_index = {
@@ -292,18 +332,49 @@ class NanographDriver(BaseDriver):
                     **where,
                 }
                 return legacy
+
+        def build() -> Path:
             ensure_indexes_ignored(store)
-            if gen_dir.exists():
-                shutil.rmtree(gen_dir)
-            gen_dir.mkdir(parents=True)
-            self._guard(store, gen_dir)
+            name = digest[:16]
+            if (base / name).exists():
+                name = f"{name}-{index_publish.new_name()}"
+            tmp_dir = base / f"{index_publish.TMP_PREFIX}{name}"
+            dest = base / name
+            self._guard(store, tmp_dir)
+            self._guard(store, dest)
+            tmp_dir.mkdir(parents=True)
             try:
-                graph.export_nanograph(source, gen_dir / "export")
-                self.build(gen_dir / "export", gen_dir)
-            except Exception:
-                shutil.rmtree(gen_dir, ignore_errors=True)
+                graph.export_nanograph(source, tmp_dir / "export")
+                self.build(tmp_dir / "export", tmp_dir)
+                index_publish.publish_dir(tmp_dir, dest)
+            except BaseException:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
                 raise
-        self._prune(base, gen_dir)
+            ready = self._read_ready(dest) or {}
+            index_publish.write_json_atomic(
+                base / CURRENT_NAME,
+                {
+                    "generation": name,
+                    "corpus_digest": digest,
+                    "version": det.version,
+                    "built_at": ready.get("built_at"),
+                },
+            )
+            return dest
+
+        reused = gen_dir is not None
+        if gen_dir is None:
+            try:
+                gen_dir, built = index_publish.locked_build(
+                    base, lambda: self._current(base, digest, det.version), build, wait=wait
+                )
+            except index_publish.IndexBusy as e:
+                raise DriverError(str(e)) from e
+            except OSError as e:
+                raise DriverError(f"index build failed ({e.strerror or e})") from e
+            reused = not built
+            if built:
+                self._prune(base, gen_dir)
         self.last_index = {
             "generation": gen_dir.name,
             "path": index_location.project_relative(store, gen_dir),
@@ -316,6 +387,8 @@ class NanographDriver(BaseDriver):
         others: list[tuple[str, float, Path]] = []
         for child in base.iterdir():
             if child == keep or child.is_symlink() or not child.is_dir():
+                continue
+            if child.name.startswith(index_publish.TMP_PREFIX):
                 continue
             ready = self._read_ready(child) or {}
             others.append((str(ready.get("built_at") or ""), child.stat().st_mtime, child))

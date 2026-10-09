@@ -100,12 +100,25 @@ def _local_id(store: Path) -> str:
     return f"local/{name}-{digest}"
 
 
-def _mesh_match(store: Path) -> tuple[Path, str] | None:
+@dataclass(frozen=True)
+class MeshMatch:
+    directory: Path
+    row: dict[str, Any]
+    doc: dict[str, Any]
+
+    @property
+    def mesh_file(self) -> Path:
+        return self.directory / meshfile.MESH_NAME
+
+
+def mesh_match(store: Path) -> MeshMatch | None:
+    """The first ``atlas-mesh.json`` row (walking up from ``store.parent``) whose path is ``store``."""
+    store = Path(store).expanduser().resolve()
     for directory in [store.parent, *store.parent.parents]:
         if not (directory / meshfile.MESH_NAME).is_file():
             continue
         try:
-            doc = meshfile.load(directory)
+            doc = meshfile.load_for_location(directory)
         except (meshfile.MeshFileError, OSError, ValueError):
             continue
         for row in doc.get("stores") or []:
@@ -120,8 +133,13 @@ def _mesh_match(store: Path) -> tuple[Path, str] | None:
             except (OSError, RuntimeError):
                 continue
             if candidate == store:
-                return directory, sid
+                return MeshMatch(directory, row, doc)
     return None
+
+
+def _mesh_match(store: Path) -> tuple[Path, str] | None:
+    found = mesh_match(store)
+    return (found.directory, str(found.row["id"])) if found else None
 
 
 def _standalone(store: Path) -> tuple[Path, str, str]:
