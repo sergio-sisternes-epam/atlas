@@ -1401,6 +1401,54 @@ def main() -> int:
             else:
                 print("[PASS] prune rewrites a live edge whose prose contains ref")
 
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (commented / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (commented / "living.md").write_text(
+                page(
+                    "Living",
+                    "relates_to:\n"
+                    "  - note: |\n"
+                    "      path: dead.md\n"
+                    "    path: dead.md\n"
+                    "    kind: related\n"
+                    "  - note: |\n"
+                    "      path: dead.md\n"
+                    "    path: summary.md\n"
+                    "    kind: implements\n",
+                    prose,
+                ),
+                encoding="utf-8",
+            )
+            git(commented, ["add", "."])
+            git(commented, ["commit", "-m", "path inside note"])
+            prose_prune = run(
+                [
+                    "ref",
+                    "prune",
+                    "--summary",
+                    "summary.md",
+                    "--drop",
+                    "dead.md",
+                    "--ref",
+                    "HEAD",
+                    "--kind",
+                    "derived_from",
+                    "--root",
+                    str(commented),
+                    "--json",
+                ]
+            )
+            living = (commented / "living.md").read_text(encoding="utf-8")
+            if (
+                prose_prune.returncode != 0
+                or living.count("path: dead.md") != 2
+                or living.count("path: summary.md") < 2
+                or "kind: implements" not in living
+            ):
+                failures.append(f"block-scalar path was treated as a relation: {prose_prune.stdout}\n{living}")
+            else:
+                print("[PASS] prune leaves a block-scalar path line unchanged")
+
         shown = tmp / "shown"
         shown_init = run(["init", "--root", str(shown), "--json"])
         if shown_init.returncode != 0:
@@ -3329,6 +3377,56 @@ def main() -> int:
                 )
             else:
                 print("[PASS] prune continues rollback after one restore fails")
+
+        warned = tmp / "new-warning"
+        warned_init = run(["init", "--root", str(warned), "--json"])
+        if warned_init.returncode != 0:
+            failures.append(f"warning-gate store init failed: {warned_init.stdout}")
+        else:
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            git(warned, ["init", "-b", "main"])
+            (warned / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (warned / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (warned / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", prose),
+                encoding="utf-8",
+            )
+            git(warned, ["add", "."])
+            git(warned, ["commit", "-m", "warning gate"])
+            before_living = (warned / "living.md").read_text(encoding="utf-8")
+            calls = {"n": 0}
+            real_warnings = refcmd._blocking_warnings
+
+            def gained_warning(store):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return set()
+                return {("page_contract", "living.md", "injected blocking warning")}
+
+            refcmd._blocking_warnings = gained_warning
+            warn_buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(warn_buf):
+                    warn_code = run_prune(
+                        str(warned),
+                        "summary.md",
+                        ("dead.md",),
+                        "HEAD",
+                        "derived_from",
+                        True,
+                    )
+            finally:
+                refcmd._blocking_warnings = real_warnings
+            if (
+                warn_code == 0
+                or "would fail compile" not in warn_buf.getvalue()
+                or "injected blocking warning" not in warn_buf.getvalue()
+                or not (warned / "dead.md").is_file()
+                or (warned / "living.md").read_text(encoding="utf-8") != before_living
+            ):
+                failures.append(f"new blocking warning should roll prune back: {warn_buf.getvalue()}")
+            else:
+                print("[PASS] prune rolls back when compile gains a blocking warning")
 
         import builtins
 

@@ -461,6 +461,95 @@ relates_to:
         self.assertIn("ref: nested-only", keeper)
         self.assertNotIn("(old.md)", keeper)
 
+    def test_block_scalar_path_is_not_a_relation_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "keeper.md",
+            """
+type: document
+title: Keeper
+created: 2026-10-05
+relates_to:
+  - note: |
+      path: old.md
+    path: old.md
+    kind: related
+""",
+            "## Content\n\nSee [old](old.md). This keeper page has enough prose.",
+        )
+        page(
+            root / "prose-only.md",
+            """
+type: document
+title: Prose only
+created: 2026-10-05
+relates_to:
+  - note: |
+      path: old.md
+    path: other.md
+    kind: related
+""",
+            "## Content\n\nThis page has enough prose and no live link to the moved page.",
+        )
+        store = opt.Store(root)
+        self.assertIn("keeper.md", opt._referrers(store, "old.md"))
+        self.assertNotIn("prose-only.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["keeper.md", "prose-only.md"])
+        keeper = (root / "keeper.md").read_text(encoding="utf-8")
+        prose_only = (root / "prose-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", keeper.split("path: new.md", 1)[0])
+        self.assertIn("path: new.md", keeper)
+        self.assertEqual(prose_only.count("path: old.md"), 1)
+        self.assertIn("path: other.md", prose_only)
+        self.assertNotIn("path: new.md", prose_only)
+
+    def test_unparsed_relation_is_not_rewritten(self) -> None:
+        import atlas_optimise as opt
+        from atlas_cli.core.frontmatter import FrontmatterError
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "history-only.md",
+            """
+type: document
+title: History only
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nHistory only page has enough prose and no live link.",
+        )
+        store = opt.Store(root)
+
+        def fail_load(_text: str):
+            raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter")
+
+        original = opt.load_yaml_value
+        opt.load_yaml_value = fail_load
+        try:
+            self.assertNotIn("history-only.md", opt._referrers(store, "old.md"))
+            opt._rewrite_refs(store, "old.md", "new.md", ["history-only.md"])
+        finally:
+            opt.load_yaml_value = original
+        history_only = (root / "history-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history_only)
+        self.assertIn("ref: abcdef1234567890", history_only)
+        self.assertNotIn("new.md", history_only)
+
     def test_no_contract_write_and_stamp(self) -> None:
         self.assertEqual(CURRENT_RELEASE, "0.13.0")
         root = shared_parent_store(self.base)

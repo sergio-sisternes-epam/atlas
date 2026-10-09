@@ -322,31 +322,77 @@ def _item_spans(lines: list[str], start: int, end: int) -> list[tuple[int, int]]
     return spans
 
 
-def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
-    for i in range(*span):
-        m = re.match(r"^\s*-?\s*path:\s*(.+?)\s*$", lines[i])
-        if m:
-            v = m.group(1)
-            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-                v = v[1:-1]
-            return v
-    return None
+_BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
+_FIELD_LINE = re.compile(
+    r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
+)
+_PATH_LINE = re.compile(r"^\s*-?\s*path:\s*\S")
 
 
-def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
-    """True when the parsed item has a top-level ref. Nested prose is not history."""
-    chunk = lines[span[0] : span[1]]
+def _parsed_span(lines: list[str], span: tuple[int, int]) -> dict | None:
+    chunk = [line.rstrip("\r\n") for line in lines[span[0] : span[1]]]
     try:
         value = load_yaml_value("\n".join(chunk))
     except FrontmatterError:
-        return False
+        return None
     if isinstance(value, list) and len(value) == 1:
         value = value[0]
-    return isinstance(value, dict) and bool(str(value.get("ref") or "").strip())
+    return value if isinstance(value, dict) else None
+
+
+def _top_level_indexes(lines: list[str], span: tuple[int, int]) -> list[int]:
+    """Mapping keys of one relation item. Block-scalar prose is not a key."""
+    start, end = span
+    if start >= end:
+        return []
+    first = _FIELD_LINE.match(lines[start].rstrip("\r\n"))
+    if not first:
+        return []
+    base = len(first.group(1))
+    indexes: list[int] = []
+    index = start
+    while index < end:
+        raw = lines[index].rstrip("\r\n")
+        if not raw.strip():
+            index += 1
+            continue
+        field = _FIELD_LINE.match(raw)
+        indent = len(raw) - len(raw.lstrip(" \t"))
+        if field and (index == start or (len(field.group(1)) == base and indent == base)):
+            indexes.append(index)
+            if _BLOCK_SCALAR.match(field.group(5).strip()):
+                index += 1
+                while index < end:
+                    nxt = lines[index].rstrip("\r\n")
+                    if not nxt.strip():
+                        index += 1
+                        continue
+                    if len(nxt) - len(nxt.lstrip(" \t")) <= base:
+                        break
+                    index += 1
+                continue
+        index += 1
+    return indexes
+
+
+def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
+    parsed = _parsed_span(lines, span)
+    if parsed is None:
+        return None
+    value = str(parsed.get("path") or "").strip()
+    return value or None
+
+
+def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
+    """True when the parsed item has a top-level ref, or the item cannot be parsed."""
+    parsed = _parsed_span(lines, span)
+    if parsed is None:
+        return True
+    return bool(str(parsed.get("ref") or "").strip())
 
 
 def _history_path_lines(text: str) -> set[int]:
-    """Line numbers of path fields inside ref-bearing relates_to items."""
+    """Path-looking lines that are not a live relation's top-level path."""
     parsed = _fm_lines(text)
     if parsed is None:
         return set()
@@ -356,11 +402,17 @@ def _history_path_lines(text: str) -> set[int]:
         return set()
     found: set[int] = set()
     for span in _item_spans(lines, *block):
-        if not _span_is_history(lines, span):
-            continue
-        for i in range(*span):
-            if re.match(r"^\s*-?\s*path:\s*\S", lines[i]):
-                found.add(i)
+        history = _span_is_history(lines, span)
+        live_path = set()
+        if not history:
+            live_path = {
+                index
+                for index in _top_level_indexes(lines, span)
+                if _PATH_LINE.match(lines[index].rstrip("\r\n"))
+            }
+        for index in range(*span):
+            if _PATH_LINE.match(lines[index]) and index not in live_path:
+                found.add(index)
     return found
 
 

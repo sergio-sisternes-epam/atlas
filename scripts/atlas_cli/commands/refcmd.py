@@ -232,12 +232,41 @@ def _field_parts(line: str) -> tuple[str, str, str] | None:
     return match.group(1), match.group(3) or match.group(4), match.group(5)
 
 
-def _item_field(lines: list[str], key: str) -> str | None:
-    for line in lines:
+_BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
+
+
+def _top_level_field_indexes(lines: list[str]) -> list[int]:
+    """Mapping keys of one relation item. Block-scalar prose is not a key."""
+    if not lines:
+        return []
+    first = _field_parts(lines[0])
+    if first is None:
+        return []
+    base = len(first[0])
+    indexes: list[int] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
         field = _field_parts(line)
-        if field and field[1] == key:
-            return _norm_path(field[2])
-    return None
+        indent = len(line) - len(line.lstrip(" \t"))
+        if field and (index == 0 or (len(field[0]) == base and indent == base)):
+            indexes.append(index)
+            if _BLOCK_SCALAR.match(field[2].strip()):
+                index += 1
+                while index < len(lines):
+                    nxt = lines[index]
+                    if not nxt.strip():
+                        index += 1
+                        continue
+                    if len(nxt) - len(nxt.lstrip(" \t")) <= base:
+                        break
+                    index += 1
+                continue
+        index += 1
+    return indexes
 
 
 def _parsed_item(lines: list[str]) -> dict | None:
@@ -291,20 +320,28 @@ def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
 
 def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str] | None, bool]:
     lines = _coerce_block_item(lines, drop)
-    path = _item_field(lines, "path")
-    if path is None or path not in drop or _item_has_ref(lines):
+    parsed = _parsed_item(lines)
+    if parsed is None:
+        return lines, False
+    path = _norm_path(str(parsed.get("path") or "").strip())
+    if not path or path not in drop or str(parsed.get("ref") or "").strip():
         return lines, False
     if on_summary:
         return None, True
+    top = set(_top_level_field_indexes(lines))
     rewritten: list[str] = []
-    for line in lines:
-        field = _field_parts(line)
+    rewritten_path = False
+    for index, line in enumerate(lines):
+        field = _field_parts(line) if index in top else None
         if field and field[1] == "path":
             rewritten.append(f"{field[0]}path: {_yaml_scalar(summary)}")
+            rewritten_path = True
             continue
         if field and field[1] == "ref":
             continue
         rewritten.append(line)
+    if not rewritten_path:
+        raise RefError("cannot retarget relates_to path")
     return rewritten, True
 
 
@@ -610,10 +647,11 @@ def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
         parsed = _parsed_item(item)
         if parsed is None or not str(parsed.get("ref") or "").strip():
             continue
-        path = _item_field(item, "path")
-        ref = _item_field(item, "ref")
+        path = _norm_path(str(parsed.get("path") or "").strip())
+        ref = _norm_path(str(parsed.get("ref") or "").strip())
+        kind = str(parsed.get("kind") or "").strip()
         if path and ref:
-            found.add((path, _item_field(item, "kind"), ref))
+            found.add((path, _norm_path(kind) if kind else None, ref))
     return found
 
 
@@ -906,8 +944,8 @@ def _lock_dir(dirfd: int, label: str) -> None:
         raise RefError(f"refusing to update locked page {label}") from e
 
 
-def _compile_critical(store: Path) -> set[tuple[str, str, str]]:
-    """Critical compile findings for the tip. Dry-run, so mesh and recall are not published."""
+def _compile_payload(store: Path) -> dict:
+    """Dry-run compile payload. Mesh and recall are not published."""
     from .validate import run as validate_run
 
     buffer = io.StringIO()
@@ -917,9 +955,37 @@ def _compile_critical(store: Path) -> set[tuple[str, str, str]]:
         payload = json.loads(buffer.getvalue() or "{}")
     except json.JSONDecodeError as e:
         raise RefError("refusing to prune without a compile result") from e
+    return payload if isinstance(payload, dict) else {}
+
+
+def _finding_set(items: object) -> set[tuple[str, str, str]]:
     found: set[tuple[str, str, str]] = set()
-    for item in payload.get("critical") or []:
+    if not isinstance(items, list):
+        return found
+    for item in items:
         if isinstance(item, dict):
+            found.add(
+                (
+                    str(item.get("id") or ""),
+                    str(item.get("path") or ""),
+                    str(item.get("msg") or ""),
+                )
+            )
+    return found
+
+
+def _compile_critical(store: Path) -> set[tuple[str, str, str]]:
+    """Critical compile findings for the tip."""
+    return _finding_set(_compile_payload(store).get("critical"))
+
+
+def _blocking_warnings(store: Path) -> set[tuple[str, str, str]]:
+    """Warnings that make atlas compile exit non-zero. Unmounted atlas URIs do not."""
+    from .validate import NON_BLOCKING_WARNING_IDS
+
+    found: set[tuple[str, str, str]] = set()
+    for item in _compile_payload(store).get("warnings") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") not in NON_BLOCKING_WARNING_IDS:
             found.add(
                 (
                     str(item.get("id") or ""),
@@ -1833,6 +1899,7 @@ def run_prune(
         try:
             _lock_fd(root_fd, summary_rel)
             try:
+                before_warnings = _blocking_warnings(store)
                 for rel, updated, original_bytes, _mode, dev, ino in pending:
                     new_bytes = updated.encode("utf-8")
                     try:
@@ -1874,8 +1941,9 @@ def run_prune(
                     finally:
                         os.close(dirfd)
                 remaining = sorted(_compile_critical(store))
-                if remaining:
-                    ident, path, msg = remaining[0]
+                new_warnings = sorted(_blocking_warnings(store) - before_warnings)
+                if remaining or new_warnings:
+                    ident, path, msg = (remaining or new_warnings)[0]
                     raise RefError(f"prune would fail compile: [{ident}] {path}: {msg}")
             except Exception as exc:
                 restore_errors: list[str] = []
