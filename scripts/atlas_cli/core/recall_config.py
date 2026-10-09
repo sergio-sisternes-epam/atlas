@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .jsonutil import StrictJsonError, load_strict, loads_strict
+from .overlay import extension_key
 from .schema import skill_root
 
 RECALL_VERSION = 1
@@ -276,9 +277,24 @@ def validate_store_v2(data: Any) -> list[str]:
 
 
 def validate_contribution(data: Any) -> list[str]:
+    """Validate a contribution overlay for a SCHEMA 2.0 host.
+
+    The one package-metadata slot (see ``overlay.extension_key``) is checked to
+    be an object and then excluded from the contribution-v1 JSON Schema check.
+    """
     if not isinstance(data, dict):
         return ["contribution must be an object"]
-    return validate_against("contribution-v1.schema.json", data)
+    errs: list[str] = []
+    body = dict(data)
+    ext = extension_key(str(data.get("contribution_id") or ""))
+    if ext is not None and ext in body:
+        if not isinstance(body[ext], dict):
+            errs.append(f"$.{ext}: extension metadata must be an object")
+        body.pop(ext)
+    errs.extend(validate_against("contribution-v1.schema.json", body))
+    if ext is not None and any("Unevaluated properties" in e for e in errs):
+        errs.append(f"hint: package metadata may only live under the extension key '{ext}'")
+    return errs
 
 
 def load_json_file(path: Path) -> Any:

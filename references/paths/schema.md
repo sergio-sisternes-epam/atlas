@@ -124,6 +124,7 @@ Effective SCHEMA = the store's single core contract file (`SCHEMA.json` or `CONT
 | `overlay_core_clash` | Overlay set a forbidden core key | 2 |
 | `overlay_core_type` | Overlay redeclared a core `by_type` | 2 |
 | `overlay_key_clash` | Two overlays claim the same extra key or type | 2 |
+| `overlay_extension` | Extension slot is not a JSON object (SCHEMA 2.0) | 2 |
 | `overlay_undeclared_root` | Receipt lists a path outside claimed prefixes / `schema.d/` | 2 |
 | `overlay_receipt` | Installed overlay has no receipt | 2 |
 | `overlay_json` / `overlay_id` | Unreadable overlay or id ≠ filename | 2 |
@@ -180,7 +181,15 @@ contributions/<id>/
   templates/<newtype>.md    # optional; copied on install for new types only
 ```
 
-Extra root keys (for example `kva`) are allowed if they are **not** already on core SCHEMA and **not** used by another overlay.
+Root keys an overlay may carry:
+
+- **Contract keys**: `contribution_id`, `claimed_folders`, `templates`, `types`, `bindings`, `presets`.
+- **One extension slot** for package metadata. Its key is the `contribution_id` with `-` replaced by `_` (`atlas-tasks` → `atlas_tasks`, `discuss` → `discuss`). The value must be a JSON object. Atlas checks that it is an object and that no other overlay claims the same key. It is **never** merged into the effective SCHEMA and core never reads it. Ids whose slot would equal a core or envelope key (`memory`, `atlas-release`, `templates`, …) get no slot. Do not make agent behaviour depend on the slot. Keep the package's operational contract in its own docs.
+- **Other extra root keys** (for example `kva`):
+  - On a SCHEMA 1.0 store, they are allowed if they are **not** already on core SCHEMA and **not** used by another overlay.
+  - On a SCHEMA 2.0 store, `schema install` rejects them (`contribution-v1`). `schema upgrade --to 2.0` blocks until they are removed.
+
+Test a package overlay on both a 1.0 store and a `init --schema-version 2.0` store before you release it.
 
 ## Worked sequences
 

@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from .jsonutil import StrictJsonError, load_strict
-from .overlay import SCHEMA_D, overlay_path, receipt_path, write_json, write_receipt
+from .overlay import (
+    SCHEMA_D,
+    merge_overlays,
+    overlay_path,
+    receipt_path,
+    write_json,
+    write_receipt,
+)
 from .recall_config import default_recall_block, schema_version, validate_store_v2
 from .schema import find_contract_path, load_schema
 
@@ -57,6 +64,11 @@ def preview(root: Path) -> dict[str, Any]:
     overlay = _compat_overlay(schema)
     target = _target_schema(schema)
     v2_errs = validate_store_v2(target) if not unknown else []
+    if not unknown and not v2_errs:
+        # Installed overlays must also hold under 2.0 rules, or compile fails after upgrade.
+        merged, critical, _ = merge_overlays(target, root)
+        v2_errs = [f"installed overlays: {i['path']}: {i['id']}: {i['msg']}" for i in critical]
+        v2_errs += [f"installed overlays: {e}" for e in validate_store_v2(merged)]
     return {
         "ok": version != "2.0" and not unknown and not v2_errs,
         "from": version,

@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://atlas.local/schemas/contribution-v1",
   "title": "Atlas SCHEMA contribution v1",
+  "$comment": "One package-metadata slot is allowed beside these keys: the root key equal to contribution_id with '-' replaced by '_' (atlas-tasks -> atlas_tasks). Its value must be an object; it is checked and removed by the CLI before this schema runs, is never merged into the effective schema and is ignored by core. Ids whose slot would equal a core or envelope key get no slot. Every other extra root key is rejected.",
   "type": "object",
   "unevaluatedProperties": false,
   "required": ["contribution_id"],

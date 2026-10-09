@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.13.1 - 2026-10-09
+
+### Fixed
+
+- Contribution overlays may carry one package-metadata **extension slot**.
+  Its root key is the `contribution_id` with `-` replaced by `_`
+  (`atlas-tasks` → `atlas_tasks`). Since v0.10.0, `schema install` on a
+  SCHEMA 2.0 store rejected such overlays with
+  `$: Unevaluated properties are not allowed`, although the overlay docs
+  allowed extra root keys and SCHEMA 1.0 stores accepted them. As a result,
+  released atlas-tasks overlays (v0.2.0 to v0.6.0) could not be installed on
+  2.0 stores. The slot must be a JSON object (`overlay_extension`
+  otherwise). It is never merged into the effective SCHEMA and core never
+  reads it. A second overlay that claims the same key is still an
+  `overlay_key_clash`. Ids whose slot would equal a core or envelope key,
+  such as `memory` or `atlas-release`, get no slot.
+- On SCHEMA 2.0, every other extra overlay root key is still rejected,
+  including `x-` prefixed keys and another package's slot. The error now
+  adds a hint that names the allowed extension key.
+- `schema upgrade --to 2.0` now checks installed overlays against the 2.0
+  rules. A store whose overlays would fail compile after the upgrade (for
+  example a generic `kva` root key) previews `ok=false` with the overlay
+  errors in `target_errors`, and `--apply` refuses with zero writes.
+  Previously the upgrade succeeded and the next compile failed `schema_v2`.
+
+### Docs
+
+- Path `schema` lists the overlay root keys allowed on 1.0 and 2.0 stores,
+  documents the extension slot and the `overlay_extension` issue, and asks
+  packages to test overlays on both store versions. Path `configure` notes
+  that installed overlays can block the upgrade.
+- `contribution-v1.schema.json` gains a `$comment` that describes the slot.
+  Its `$id` and its closed shape are unchanged.
+- New fixtures `fixtures/contributions/` hold released overlays verbatim.
+  They are covered by `scripts/test_overlay_extension.py`.
+
+### Unchanged
+
+- The contract stamp stays `0.13.0`: `atlas init` still writes
+  `atlas_release` `0.13.0`, and a `0.13.1` stamp still fails closed. No
+  store migration is needed, and v0.13.0 readers are unaffected.
+- SCHEMA 1.0 stores keep accepting generic extra overlay root keys as
+  before. The only difference is that the extension slot is no longer
+  copied into the effective SCHEMA.
+- Apart from the package version, help baselines and CI ref pins, which
+  move to `0.13.1` / `v0.13.1`, no release surface changes.
+
 ## 0.13.0 - 2026-10-09
 
 Final 0.13.0 release. Over v0.12.0 the beta series ships:
