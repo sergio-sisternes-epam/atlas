@@ -1,0 +1,12 @@
+{
+  "contribution_id": "atlas-todo",
+  "claimed_folders": ["todo"],
+  "templates": {
+    "by_type": {}
+  },
+  "atlas_todo": {
+    "extends_core_type": "task",
+    "extension_mode": "skill-enforced-frontmatter",
+    "note": "Atlas SCHEMA forbids overlay redeclaration of core templates.by_type.task (overlay_core_type). This overlay claims todo/ and documents the task extension contract; skills enforce todo_* / assignees / parent / sub_tasks / depends_on fields on type:task pointer pages. Blocked is derived, not a stored status."
+  }
+}

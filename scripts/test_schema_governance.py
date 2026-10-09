@@ -335,6 +335,39 @@ def main() -> int:
         pathf = ROOT / "references" / "paths" / "schema.md"
         check("path-registry-lists-schema", "| **schema** |" in skill and pathf.is_file())
 
+        # schema-path-documents-apm-contribution
+        schema_doc = pathf.read_text(encoding="utf-8") if pathf.is_file() else ""
+        required = [
+            "### 3a. Shipping an Atlas overlay in an APM package",
+            "predate the contract/schema-layer split",
+            "**Shipping an Atlas overlay in an APM package** (step 3a)",
+            "The CLI verbs and file names stay as they are in this release.",
+            "apm install",
+            "apm_modules/<owner>/<pkg>/",
+            "apm.lock.yaml",
+            "schema uninstall <id>",
+        ]
+        missing = [s for s in required if s not in schema_doc]
+        if "never mounts" not in schema_doc.lower():
+            missing.append("never mounts")
+        step_3a = schema_doc.split("### 3a.", 1)[-1].split("\n### 4.", 1)[0] if "### 3a." in schema_doc else ""
+        schema_row = next((ln for ln in skill.splitlines() if ln.startswith("| **schema** |")), "")
+        started = (ROOT / "references" / "help" / "getting-started.md").read_text(encoding="utf-8")
+        check(
+            "schema-path-documents-apm-contribution",
+            not missing
+            and bool(step_3a)
+            and "schema overlay" not in step_3a.lower()
+            and "contribution overlay" not in step_3a.lower()
+            and "atlas-tasks >= 0.6.1" not in schema_doc
+            and "Atlas overlays from APM packages (step 3a)" in schema_row
+            and "step 3a" in started,
+            f"missing={missing} step_3a={bool(step_3a)} "
+            f"schema_overlay_in_3a={'schema overlay' in step_3a.lower()} "
+            f"contribution_overlay_in_3a={'contribution overlay' in step_3a.lower()} "
+            f"row_apm={'APM' in schema_row} started_3a={'step 3a' in started}",
+        )
+
         # schema new invalid id
         r = run(["schema", "new", "Not_Kebab", "--root", str(store), "--json"])
         check("kebab-id-required", r.returncode == 2, f"exit={r.returncode}")

@@ -32,3 +32,18 @@ smokes:
   - id: hand-edit-not-a-writer
     source: pin 9 fail-closed
     expect: path schema does not treat hand-edited SCHEMA as a legal writer
+  - id: overlay-extension-slot-installs-on-2-0
+    source: released Atlas overlays (fixtures/contributions)
+    expect: object under contribution_id with '-' → '_' installs and compiles on SCHEMA 2.0; never merged into effective SCHEMA
+  - id: overlay-extension-other-keys-rejected
+    source: contribution-v1 closed envelope
+    expect: x- prefixed, other-package, non-object, reserved-name or second extra key → schema install exit 2 on SCHEMA 2.0
+  - id: upgrade-validates-installed-overlays
+    source: schema upgrade 1.0 → 2.0
+    expect: installed overlay with a generic extra key → upgrade preview ok=false; apply refused
+  - id: install-upgrade-share-lock
+    source: schema upgrade 1.0 → 2.0 concurrent with schema install
+    expect: install refuses while .atlas-upgrade.lock is held; apply rechecks installed overlays under the lock before any write
+  - id: lock-never-reclaimed
+    source: concurrent schema upgrade --apply
+    expect: second upgrade meeting a live lock on a 2.0 contract refuses; only the token owner removes the lock
