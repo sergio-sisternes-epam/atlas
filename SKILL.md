@@ -1,6 +1,6 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, atlas restamp. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
 version: 0.13.0
 activation_card: on
 ---
@@ -142,7 +142,7 @@ still copies into staging; do not use it for strategy moves.
 | **mount** | Mount-if-missing and resolve `--root` | `references/paths/mount.md` |
 | **init** | New Atlas; default shared (`atlas` branch) or dedicated existing remote; never creates the repo | `references/paths/init.md` |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated | `references/paths/migrate.md` |
-| **memory-migrate** | Assess, inventory, or apply a named batch from a document-era store toward memory | `references/paths/memory-migrate.md` |
+| **memory-migrate** | Assess, inventory, or apply a named batch from a document-era or pre-beta store toward memory; also the explicit opt-in restamp of a current 0.13.0-beta.3/beta.4/beta.7 store to 0.13.0 | `references/paths/memory-migrate.md` |
 | **recall** | Find / answer from an Atlas | `references/paths/recall.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **atlas-memorise** | Choose the four-layer write target, then load path remember | `references/paths/atlas-memorise.md` |

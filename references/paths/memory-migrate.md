@@ -1,7 +1,7 @@
 ---
 name: atlas/paths/memory-migrate
 path_id: memory-migrate
-description: Use this path when a store still treats documents as the core record, or when compile is only reporting legacy document and missing gist noise, and you need to migrate toward Atlas memory. Triggers include document-era store, old scheme, legacy type document, missing gist, memory rung, opt in from info to warn. Do not use it to relocate a store (path migrate), to install the recall index (path configure), to edit SCHEMA.json by hand, or to run a Discuss checkpoint.
+description: Use this path when a store still treats documents as the core record, when compile is only reporting legacy document and missing gist noise, or when a pre-beta SCHEMA.json needs the contract-file migration toward Atlas memory. It also owns the explicit opt-in restamp of a current CONTRACT.json store stamped 0.13.0-beta.3, beta.4 or beta.7 to 0.13.0. Triggers include document-era store, old scheme, legacy type document, missing gist, memory rung, opt in from info to warn, pre-beta store, restamp atlas, atlas restamp, move store stamp to 0.13.0. Do not use it to relocate a store (path migrate), to install the recall index (path configure), to edit SCHEMA.json by hand, or to run a Discuss checkpoint.
 ---
 
 # Path: memory-migrate
@@ -14,6 +14,11 @@ wants to move that store toward the memory layers (`frame`/`schema`, `gist`,
 `memory`). A residual `missing_gist` is not a completeness failure. This
 path does not create gists; do not invent gist text or a title-only stub to
 clear that finding.
+
+Also load it when a pre-beta `SCHEMA.json` needs the CLI contract-file
+migration, or when the operator explicitly asks to restamp a **current**
+`CONTRACT.json` store stamped `0.13.0-beta.3`, `0.13.0-beta.4` or
+`0.13.0-beta.7` to `0.13.0` (`--batch restamp`, opt-in, never automatic).
 
 Not for relocating a store (use path **migrate**). Not for installing the
 recall index (use path **configure**). Not for hand-editing `SCHEMA.json`.
@@ -28,10 +33,11 @@ mode: run
 subject: atlas | <project>
 path: memory-migrate
 path_module: references/paths/memory-migrate.md
-intent: assess or migrate a document-era store
+intent: assess or migrate a document-era or pre-beta store, or restamp a current store
 root: <resolved SCHEMA root>
 rung: info | warn | error
 operation: assess | inventory | apply
+batch: <named batch> | contract-file | restamp
 ```
 
 Then **read this file**. Missing card or unloaded module means Enter is
@@ -268,10 +274,22 @@ python3 <atlas-skill>/scripts/atlas.py memory-migrate \
 - **Eligible** — the contract file is `CONTRACT.json` (not a symlink),
   lineage is `current`, `memory.layers` is `["schema", "gist", "memory"]`,
   and `atlas_release` is `0.13.0-beta.3`, `0.13.0-beta.4` or
-  `0.13.0-beta.7`. Apply rewrites only the `atlas_release` value to
-  `0.13.0`; every other key, key order and value is kept, and the file is
-  serialised the same way as the contract-file batch (two-space JSON
-  indent, trailing newline). No page, template or other file is touched.
+  `0.13.0-beta.7`. Apply does not re-serialise the file: it replaces only
+  the top-level `atlas_release` string value with `0.13.0` inside the
+  original bytes, so encoding (UTF-8, non-ASCII kept literal), spacing,
+  indentation, line endings (including CRLF), key order and every other
+  byte stay exactly as they were. No page, template or other file is
+  touched.
+- **Not byte-safe** — apply first requires exactly one
+  `"atlas_release": "<old stamp>"` member in the raw file (any whitespace
+  around the colon), then checks that the result parses to the original
+  object, key order included, with only the top-level `atlas_release`
+  changed. A nested key with the same name and the same old stamp,
+  duplicate keys at any depth, or an escaped key or value fails that
+  check: exit non-zero (finding id `restamp_not_byte_safe`) and write
+  nothing. A nested `atlas_release` with a different value is left
+  untouched and does not block the restamp. Set the stamp by hand if a
+  refused store should still move to `0.13.0`.
 - **Already `0.13.0`** — exit 0, note `already at current stamp`, writes
   nothing. Re-running restamp is idempotent.
 - **Anything else** — a pre-beta, in-beta or `empty-beta2-init` store,

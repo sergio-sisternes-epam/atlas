@@ -2383,6 +2383,109 @@ def main() -> int:
             str(payload),
         )
 
+        # Restamp preserves the original CONTRACT.json bytes: it replaces only
+        # the top-level stamp value, whatever the layout, encoding or line
+        # endings, and refuses with zero writes when that is not provably safe.
+        def raw_contract_store(label: str, raw: bytes) -> Path:
+            store = tmp / f"restamp-bytes-{label}"
+            store.mkdir(parents=True)
+            (store / "index.md").write_text("# Store\n", encoding="utf-8")
+            (store / "CONTRACT.json").write_bytes(raw)
+            return store
+
+        layers_json = '"memory": {"layers": ["schema", "gist", "memory"]}'
+        pretty_unicode = (
+            "{\n"
+            '  "schema_version": "1.0",\n'
+            '  "atlas_id": "u",\n'
+            '  "atlas_release": "0.13.0-beta.7",\n'
+            '  "título": "Café ✓",\n'
+            '  "structure": {},\n'
+            '  "compile": {},\n'
+            f"  {layers_json}\n"
+            "}\n"
+        )
+        byte_safe_cases = {
+            "compact": (
+                '{"schema_version":"1.0","atlas_id":"c","atlas_release":"0.13.0-beta.3",'
+                '"structure":{},"compile":{},"memory":{"layers":["schema","gist","memory"]}}'
+            ).encode("utf-8"),
+            "non-ascii": pretty_unicode.encode("utf-8"),
+            "crlf": pretty_unicode.replace("\n", "\r\n").encode("utf-8"),
+            "unusual-spacing": (
+                '{ "schema_version" : "1.0" ,\n\t"atlas_id":"s",\n'
+                '\t"atlas_release" :  "0.13.0-beta.7"  ,\n'
+                f'\t"structure" : {{}} , "compile":{{ }},\n\t{layers_json}\n}}\n'
+            ).encode("utf-8"),
+            "nested-other-stamp": (
+                '{\n  "schema_version": "1.0",\n  "atlas_id": "n",\n'
+                '  "atlas_release": "0.13.0-beta.4",\n'
+                '  "provenance": {"atlas_release": "0.12.0"},\n'
+                f'  "structure": {{}},\n  "compile": {{}},\n  {layers_json}\n}}\n'
+            ).encode("utf-8"),
+        }
+        for label, raw in byte_safe_cases.items():
+            old_value = json.loads(raw)["atlas_release"]
+            store = raw_contract_store(label, raw)
+            before = snapshot(store)
+            code, payload = restamp(store)
+            after = snapshot(store)
+            old_member = f'"{old_value}"'.encode()
+            expected = raw.replace(old_member, b'"0.13.0"')
+            check(
+                f"restamp bytes {label}: output equals input with only the stamp substring replaced",
+                code == 0 and payload.get("ok") is True
+                and payload.get("previous_atlas_release") == old_value
+                and raw.count(old_member) == 1
+                and after["CONTRACT.json"] == expected
+                and {k: v for k, v in after.items() if k != "CONTRACT.json"}
+                == {k: v for k, v in before.items() if k != "CONTRACT.json"},
+                f"{payload} {after['CONTRACT.json']!r}",
+            )
+        check(
+            "restamp bytes: literal non-ASCII and CRLF survive unescaped",
+            "Café ✓".encode("utf-8") in (tmp / "restamp-bytes-non-ascii" / "CONTRACT.json").read_bytes()
+            and (tmp / "restamp-bytes-crlf" / "CONTRACT.json").read_bytes().count(b"\r\n")
+            == pretty_unicode.count("\n"),
+        )
+        check(
+            "restamp bytes nested-other-stamp: nested atlas_release is left untouched",
+            json.loads((tmp / "restamp-bytes-nested-other-stamp" / "CONTRACT.json").read_bytes())
+            == {
+                "schema_version": "1.0", "atlas_id": "n", "atlas_release": "0.13.0",
+                "provenance": {"atlas_release": "0.12.0"}, "structure": {}, "compile": {},
+                "memory": {"layers": ["schema", "gist", "memory"]},
+            },
+        )
+
+        byte_unsafe_cases = {
+            "nested-same-stamp": (
+                '{"schema_version": "1.0", "atlas_id": "n", "atlas_release": "0.13.0-beta.4", '
+                '"provenance": {"atlas_release": "0.13.0-beta.4"}, '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+            "duplicate-key": (
+                '{"schema_version": "1.0", "atlas_id": "d", "atlas_release": "0.13.0-beta.3", '
+                '"atlas_release": "0.13.0-beta.4", '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+            "escaped-key": (
+                '{"schema_version": "1.0", "atlas_id": "e", "atlas\\u005frelease": "0.13.0-beta.7", '
+                f'"structure": {{}}, "compile": {{}}, {layers_json}}}\n'
+            ),
+        }
+        for label, text in byte_unsafe_cases.items():
+            store = raw_contract_store(label, text.encode("utf-8"))
+            before = snapshot(store)
+            code, payload = restamp(store)
+            check(
+                f"restamp bytes {label}: refuses with restamp_not_byte_safe and writes nothing",
+                code != 0 and payload.get("ok") is False
+                and "restamp_not_byte_safe" in findings_by_id(payload, "findings")
+                and snapshot(store) == before,
+                str(payload),
+            )
+
         # The unsupported-batch error names both supported batches.
         unsupported = tmp / "restamp-unsupported-batch"
         unsupported.mkdir(parents=True)

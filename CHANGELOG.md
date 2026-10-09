@@ -47,10 +47,15 @@ Changes in this release:
   `0.13.0-rc.1` or `0.13.1` still fail closed.
 - New opt-in `memory-migrate --operation apply --batch restamp` moves a
   current store's stamp from beta.3, beta.4 or beta.7 to `0.13.0` and
-  changes nothing else: no other key, value or key order, and no page,
-  template or other file. It is an idempotent no-op on a `0.13.0` store
-  and refuses (`restamp_not_eligible`) with zero writes on pre-beta,
-  in-beta, `SCHEMA.json`, symlinked or unknown-stamp stores. Assess and
+  changes nothing else: it replaces only the top-level stamp value inside
+  the original `CONTRACT.json` bytes (spacing, line endings and literal
+  non-ASCII kept), and touches no page, template or other file. It is an
+  idempotent no-op on a `0.13.0` store and refuses
+  (`restamp_not_eligible`) with zero writes on pre-beta, in-beta,
+  `SCHEMA.json`, symlinked or unknown-stamp stores, and
+  (`restamp_not_byte_safe`) with zero writes when that single-value
+  replacement cannot be verified, such as duplicate keys or a nested
+  `atlas_release` carrying the same old stamp. Assess and
   inventory now report `atlas_release` and `restamp_eligible`. Restamp
   only after every reader of that store runs Atlas 0.13.0, because
   `0.13.0-beta.13` and earlier packages fail closed on the new stamp.

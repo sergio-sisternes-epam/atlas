@@ -23,7 +23,7 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **mount** | Mount-if-missing and resolve `--root` |
 | **init** | New Atlas; shared (`atlas` branch) or dedicated existing remote; never creates the repo |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated |
-| **memory-migrate** | Assess or migrate a document-era store toward the memory layers: `memory`/`gist` plus `frame` (shipped-beta) or `schema` (current `CONTRACT.json`). Assess and inventory write nothing. |
+| **memory-migrate** | Assess or migrate a document-era or pre-beta store toward the memory layers: `memory`/`gist` plus `frame` (shipped-beta) or `schema` (current `CONTRACT.json`). Also offers an explicit opt-in restamp of a current 0.13.0-beta.3/beta.4/beta.7 store to 0.13.0 (`--batch restamp`). Assess and inventory write nothing. |
 | **recall** | Find / answer from an Atlas |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green |
 | **atlas-memorise** | Choose layers before a write, then follow remember |

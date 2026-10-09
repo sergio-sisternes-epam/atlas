@@ -13,15 +13,18 @@ with the blocks `atlas init` writes, and still does not rewrite content pages.
 `--batch contract-file` writes the CURRENT_RELEASE stamp ("0.13.0"). A store
 that is already current (CONTRACT.json stamped 0.13.0-beta.3, beta.4, beta.7
 or 0.13.0) is a no-op for that batch and for apply with no batch. The
-separate, operator-chosen `--batch restamp` rewrites only the
-``atlas_release`` value of a current CONTRACT.json that still carries an
-older accepted stamp; it touches no other key and no other file.
+separate, operator-chosen `--batch restamp` replaces only the top-level
+``atlas_release`` string value inside the original bytes of a current
+CONTRACT.json that still carries an older accepted stamp; every other byte
+and every other file stays unchanged, and it refuses with zero writes when
+that single-value replacement cannot be verified.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -1041,6 +1044,73 @@ def run(
     return 0
 
 
+class _DuplicateKeyError(ValueError):
+    pass
+
+
+def _strict_pairs(pairs: list[tuple[str, object]]) -> dict:
+    seen: set[str] = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise _DuplicateKeyError(key)
+        seen.add(key)
+    return dict(pairs)
+
+
+def _ordered(value: object) -> object:
+    """Normalise parsed JSON so equality also checks object key order."""
+    if isinstance(value, dict):
+        return [(key, _ordered(item)) for key, item in value.items()]
+    if isinstance(value, list):
+        return [_ordered(item) for item in value]
+    return value
+
+
+def _restamp_bytes(original: bytes, old_stamp: str) -> tuple[bytes | None, str]:
+    """Return ``original`` with only the top-level stamp value replaced.
+
+    The raw UTF-8 bytes must hold exactly one ``"atlas_release": "<old>"``
+    member (any spacing around the colon), and re-parsing the result must
+    equal the original object, key order included, with only the top-level
+    ``atlas_release`` changed to CURRENT_RELEASE. Duplicate keys at any depth,
+    a nested key carrying the same stamp, or an escaped key or value all
+    refuse. Returns ``(None, reason)`` on refusal.
+    """
+    try:
+        text = original.decode("utf-8")
+        before = json.loads(text, object_pairs_hook=_strict_pairs)
+    except _DuplicateKeyError as error:
+        return None, f"duplicate JSON key {error.args[0]!r}"
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return None, f"cannot re-read the contract as UTF-8 JSON ({error})"
+    if not isinstance(before, dict) or before.get("atlas_release") != old_stamp:
+        return None, "the contract changed while it was being read"
+    pattern = re.compile(
+        rb'"atlas_release"(\s*:\s*)"' + re.escape(old_stamp.encode("utf-8")) + rb'"'
+    )
+    matches = list(pattern.finditer(original))
+    if len(matches) != 1:
+        return None, (
+            f"expected exactly one \"atlas_release\": \"{old_stamp}\" member in the "
+            f"raw file, found {len(matches)}"
+        )
+    match = matches[0]
+    replacement = b'"atlas_release"' + match.group(1) + b'"' + CURRENT_RELEASE.encode("utf-8") + b'"'
+    new_bytes = original[: match.start()] + replacement + original[match.end():]
+    expected = dict(before)
+    expected["atlas_release"] = CURRENT_RELEASE
+    try:
+        after = json.loads(new_bytes.decode("utf-8"), object_pairs_hook=_strict_pairs)
+    except (ValueError, UnicodeDecodeError) as error:
+        return None, f"the restamped contract does not re-parse ({error})"
+    if _ordered(after) != _ordered(expected):
+        return None, (
+            "replacing the matched member would change more than the top-level "
+            "atlas_release value"
+        )
+    return new_bytes, ""
+
+
 def _apply_restamp(
     r: Path,
     contract_path: Path,
@@ -1051,9 +1121,11 @@ def _apply_restamp(
 ) -> int:
     """`apply --batch restamp`: move a current store's stamp to CURRENT_RELEASE.
 
-    Rewrites only the ``atlas_release`` value of CONTRACT.json, keeping every
-    other key, key order and value, in the same serialisation the
-    contract-file batch uses. No page, template or other file is touched.
+    Replaces only the top-level ``atlas_release`` string value inside the
+    original CONTRACT.json bytes; encoding, spacing, line endings, key order
+    and every other byte stay as they were. If that replacement cannot be
+    proven safe (see ``_restamp_bytes``) it refuses and writes nothing. No
+    page, template or other file is touched.
     """
     contract_name = contract_path.name
     atlas_release = schema.get("atlas_release")
@@ -1078,9 +1150,33 @@ def _apply_restamp(
         })
         return 2
 
-    schema["atlas_release"] = CURRENT_RELEASE
     try:
-        contract_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+        original = contract_path.read_bytes()
+    except OSError as error:
+        msg = f"cannot read {contract_name}: {error}"
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "contract_read", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    new_bytes, reason = _restamp_bytes(original, str(atlas_release))
+    if new_bytes is None:
+        msg = (
+            f"--batch {RESTAMP_BATCH} refused to rewrite {contract_name}: {reason}; "
+            f"no file was written. Set \"atlas_release\": \"{CURRENT_RELEASE}\" by hand "
+            "if this store should carry the current stamp"
+        )
+        _print(as_json, {
+            "ok": False,
+            **base,
+            "error": msg,
+            "findings": [{"id": "restamp_not_byte_safe", "path": contract_name, "msg": msg}],
+        })
+        return 2
+    try:
+        contract_path.write_bytes(new_bytes)
     except OSError as error:
         msg = f"cannot write {contract_name}: {error}"
         _print(as_json, {
