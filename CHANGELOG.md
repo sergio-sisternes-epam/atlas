@@ -39,9 +39,12 @@
   can no longer remove an overlay, such as `atlas-compat-v1`, after an
   upgrade's recheck. `schema new`, `schema memory-rung --set`,
   `init --force` on an existing store and `memory-migrate --operation apply`
-  (both the `contract-file` and `restamp` batches) also write `schema.d/` or
-  the contract file, so they now take the same lock and exit 2 with zero
-  writes while it is held. Previously `schema new atlas-compat-v1` could run
+  (both the `contract-file` and `restamp` batches), `recall activate` and
+  `recall disable` also write `schema.d/` or the contract file, so they now
+  take the same lock and exit 2 with zero writes while it is held. Recall
+  activate and disable read the contract file only after taking the lock, so
+  they can no longer lose a concurrent `schema memory-rung --set`,
+  `init --force` or `memory-migrate` write on a 2.0 store. Previously `schema new atlas-compat-v1` could run
   after an upgrade's recheck, and the upgrade then overwrote that overlay
   and its receipt and still reported success.
 - The lock now carries a unique token. A command that takes it only

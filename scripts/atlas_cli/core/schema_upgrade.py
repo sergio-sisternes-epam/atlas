@@ -61,6 +61,7 @@ NEW_LOCK_TAG = "schema-new"
 MEMORY_RUNG_LOCK_TAG = "schema-memory-rung"
 INIT_FORCE_LOCK_TAG = "init-force"
 MEMORY_MIGRATE_LOCK_TAG = "memory-migrate-apply"
+RECALL_LOCK_TAG = "recall-config"
 
 
 class UpgradeError(ValueError):
@@ -119,6 +120,8 @@ def lock_held_message(root: Path) -> str:
         what = "an init --force is running or was interrupted"
     elif holder == MEMORY_MIGRATE_LOCK_TAG:
         what = "a memory-migrate apply is running or was interrupted"
+    elif holder == RECALL_LOCK_TAG:
+        what = "a recall activate/disable is running or was interrupted"
     else:
         what = "an Atlas command that writes the contract file or schema.d/ is running or was interrupted"
     return (
@@ -230,7 +233,9 @@ def apply(root: Path) -> dict[str, Any]:
     except FileExistsError as e:
         raise UpgradeError(lock_held_message(root)) from e
     # Every other writer of schema.d/ or the contract file on an existing store takes the
-    # same lock, so the overlay set and contract are stable from here on.
+    # same lock (schema install/uninstall/new, schema memory-rung --set, init --force,
+    # memory-migrate --operation apply, recall activate/disable), so the overlay set and
+    # contract are stable from here on.
     # Recheck it before any write; nothing is written yet, so release on refusal.
     try:
         pre = preview(root)

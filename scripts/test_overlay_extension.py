@@ -7,7 +7,8 @@ ignored by core. Every other extra overlay root key is still rejected on
 SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, each
 against contribution-v1, and rechecks them under the lock that `schema
 install`, `schema uninstall`, `schema new`, `schema memory-rung`, `init
---force` and `memory-migrate --operation apply` share. Locks are never
+--force`, `memory-migrate --operation apply`, `recall activate` and `recall
+disable` share. Locks are never
 reclaimed and only their owner removes them.
 
 Released overlays under fixtures/contributions/ are installed verbatim.
@@ -531,11 +532,79 @@ def main() -> int:
             (schema_upgrade.MEMORY_RUNG_LOCK_TAG, "schema memory-rung is running"),
             (schema_upgrade.INIT_FORCE_LOCK_TAG, "init --force is running"),
             (schema_upgrade.MEMORY_MIGRATE_LOCK_TAG, "memory-migrate apply is running"),
+            (schema_upgrade.RECALL_LOCK_TAG, "recall activate/disable is running"),
         ):
             (s / lock_name).write_text(tag + "\n")
             r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
             check(f"w-upgrade-names-{tag}-holder", r.returncode == 2 and phrase in out(r), out(r)[:300])
             (s / lock_name).unlink()
+
+        # W4: recall activate and recall disable rewrite the 2.0 contract file,
+        # so they take the same lock; while it is held each exits 2 and the
+        # contract file is byte-identical.
+        recall_writers = {
+            "recall-activate": lambda s: ["recall", "activate", "--profile", "atlas:scan", "--root", str(s), "--json"],
+            "recall-disable": lambda s: ["recall", "disable", "--root", str(s), "--json"],
+        }
+        s = store("w-recall", "2.0")
+        contract = s / "CONTRACT.json"
+        for holder in (
+            schema_upgrade.UPGRADE_LOCK_TAG,
+            schema_upgrade.MEMORY_RUNG_LOCK_TAG,
+            schema_upgrade.RECALL_LOCK_TAG,
+        ):
+            (s / lock_name).write_text(holder + "\n")
+            before = contract.read_bytes()
+            before_all = snapshot(s)
+            for name, argv in recall_writers.items():
+                r = run(argv(s))
+                check(
+                    f"w-{name}-refused-while-{holder}-holds-lock",
+                    r.returncode == 2
+                    and as_json(r).get("ok") is False
+                    and "Remove the lock only if" in out(r)
+                    and contract.read_bytes() == before
+                    and snapshot(s) == before_all
+                    and (s / lock_name).read_text() == holder + "\n",
+                    out(r)[:300],
+                )
+            (s / lock_name).unlink()
+        r = run(recall_writers["recall-activate"](s))
+        recall = json.loads(contract.read_text()).get("recall") or {}
+        check(
+            "w-recall-activate-releases-on-success",
+            r.returncode == 0
+            and recall.get("enabled") is True
+            and recall.get("preset") == "atlas:scan"
+            and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        r = run(recall_writers["recall-disable"](s))
+        recall = json.loads(contract.read_text()).get("recall") or {}
+        check(
+            "w-recall-disable-releases-on-success",
+            r.returncode == 0 and recall.get("enabled") is False and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        before = contract.read_bytes()
+        r = run(["recall", "activate", "--profile", "atlas:no-such-profile", "--root", str(s), "--json"])
+        check(
+            "w-recall-activate-releases-on-refusal",
+            r.returncode == 2 and contract.read_bytes() == before and not (s / lock_name).exists(),
+            out(r)[:300],
+        )
+        s = store("w-recall-v1")
+        for name, argv in recall_writers.items():
+            before = (s / "CONTRACT.json").read_bytes()
+            r = run(argv(s))
+            check(
+                f"w-{name}-releases-on-1.0-refusal",
+                r.returncode == 2
+                and "SCHEMA 2.0 required" in out(r)
+                and (s / "CONTRACT.json").read_bytes() == before
+                and not (s / lock_name).exists(),
+                out(r)[:300],
+            )
 
         s = store("w-releases")
         r = run(writers["new"](s))
