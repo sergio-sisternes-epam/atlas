@@ -1,7 +1,7 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
-version: 0.13.0-beta.13
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, atlas restamp, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+version: 0.13.0
 activation_card: on
 ---
 
@@ -142,7 +142,7 @@ still copies into staging; do not use it for strategy moves.
 | **mount** | Mount-if-missing and resolve `--root` | `references/paths/mount.md` |
 | **init** | New Atlas; default shared (`atlas` branch) or dedicated existing remote; never creates the repo | `references/paths/init.md` |
 | **migrate** | Relocate `references/atlas`, or rehost shared ↔ dedicated | `references/paths/migrate.md` |
-| **memory-migrate** | Assess, inventory, or apply a named batch from a document-era store toward memory | `references/paths/memory-migrate.md` |
+| **memory-migrate** | Assess, inventory, or apply a named batch from a document-era or pre-beta store toward memory; also the explicit opt-in restamp of a current 0.13.0-beta.3/beta.4/beta.7 store to 0.13.0 | `references/paths/memory-migrate.md` |
 | **recall** | Find / answer from an Atlas | `references/paths/recall.md` |
 | **remember** | Write experiences, decisions, lessons, recipes; compile green | `references/paths/remember.md` |
 | **atlas-memorise** | Choose the four-layer write target, then load path remember | `references/paths/atlas-memorise.md` |
@@ -214,7 +214,7 @@ python3 <atlas-skill>/scripts/atlas.py ref prune --summary <path> --drop <path> 
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <atlas>
-python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch <token>]
+python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch contract-file|restamp]
 python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>] [--tidy-only] [--auto-verbatim] [--fill-sensible] [--cost-ceiling <pages>] [--pilot] [--out-dir <dir>] [--plan <plan.json>]
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
@@ -226,8 +226,8 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 | Topic | Rule |
 |-------|------|
 | Structure | Free layout; mandatory single root contract file (`CONTRACT.json` on new stores, `SCHEMA.json` on shipped 0.13.0-beta and 0.13.0-beta.2 stores — never both); short-lived `staging/`; `index.md` / `log.md` per OKF |
-| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on 0.13.0-beta.3 (`CONTRACT.json`, one gist still counts) — recommended, not closed |
-| Memory layers | Optional progressive disclosure. Index membership does not require a schema, and a page may skip the gist. A folder with one or more gists has exactly one same-folder frame (or, on the beta.3 write model, `schema`) listing those gists once each; zero gists means none. A gist may list N≥1 same-folder `derived_from` parents. Shipped 0.13.0-beta, 0.13.0-beta.2, and 0.13.0-beta.3 all treat a lone gist as enough for a frame/schema. |
+| Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on the current `CONTRACT.json` shape (written as `0.13.0`; first introduced in 0.13.0-beta.3; one gist still counts) — recommended, not closed |
+| Memory layers | Optional progressive disclosure. Index membership does not require a schema, and a page may skip the gist. A folder with one or more gists has exactly one same-folder frame (or, on the current `CONTRACT.json` write model, `schema`) listing those gists once each; zero gists means none. A gist may list N≥1 same-folder `derived_from` parents. Shipped 0.13.0-beta, 0.13.0-beta.2, and the current `CONTRACT.json` shape all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
 | Relations | `relates_to: [{path, kind, ref?}]` - kinds: follows, records, supersedes, implements, derived_from, related. Absent `ref` is tip. Present `ref` is a git rev and is not compiled. Not mount `ref`. |
 | Composition | Optional mesh; consolidated in compile |

@@ -40,7 +40,7 @@ def run_json(args: list[str]) -> tuple[int, dict]:
 
 # --- SCHEMA.json (0.13.0-beta.2) fixture writer -----------------------------
 #
-# `atlas init` always writes CONTRACT.json (0.13.0-beta.3) now, so the
+# `atlas init` always writes CONTRACT.json (stamped 0.13.0) now, so the
 # SCHEMA.json (memory.layers frame/gist/memory) fixtures this suite exercises
 # are written directly, mirroring the actual `atlas init` default shape
 # byte-for-byte (no atlas_release stamp, no memory key) so the

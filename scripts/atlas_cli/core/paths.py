@@ -4,9 +4,10 @@ from pathlib import Path
 
 RESERVED = frozenset({"index.md", "log.md"})
 SCHEMA_NAME = "SCHEMA.json"
-# 0.13.0-beta.7 WRITE model: a store's root type/key contract lives in
-# CONTRACT.json instead of SCHEMA.json (a 0.13.0-beta.3 or beta.4 stamp on
-# CONTRACT.json with the same layers shape is still accepted as current).
+# 0.13.0 WRITE model: a store's root type/key contract lives in
+# CONTRACT.json instead of SCHEMA.json (a 0.13.0-beta.3, beta.4 or beta.7
+# stamp on CONTRACT.json with the same layers shape is still accepted as
+# current on read).
 # Readers accept exactly one of the two filenames (see
 # core.schema.find_contract_path); callers that merely need to know "does
 # this directory already have a contract file" should use

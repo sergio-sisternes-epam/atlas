@@ -18,16 +18,18 @@ SHIPPED_BETA_LAYERS = ["frame", "gist", "page"]
 IN_BETA_LAYERS = ["frame", "gist", "memory"]
 BETA3_LAYERS = ["schema", "gist", "memory"]
 # BETA3_RELEASE ("0.13.0-beta.3") is the original stamp for this contract
-# shape; it is still accepted on read (compute_stamp_shape / classify_lineage
-# -> "current") but is no longer written. beta.4 is also accepted on read.
-# CURRENT_RELEASE ("0.13.0-beta.7") is the stamp that `atlas init` and
-# `memory-migrate apply --batch
-# contract-file` WRITE for this same shape. All three stamps, with layers
-# schema/gist/memory on CONTRACT.json, are "current" — never a rewrite
-# target and never unknown.
+# shape. It, "0.13.0-beta.4" and "0.13.0-beta.7" are still accepted on read
+# (compute_stamp_shape / classify_lineage -> "current") but are no longer
+# written. CURRENT_RELEASE ("0.13.0") is the stamp that `atlas init` and
+# `memory-migrate apply --batch contract-file` WRITE for this same shape.
+# All four stamps, with layers schema/gist/memory on CONTRACT.json, are
+# "current" and never unknown. Only the explicit, operator-chosen
+# `memory-migrate apply --batch restamp` moves an older accepted stamp to
+# CURRENT_RELEASE; no other path rewrites a current stamp.
 BETA3_RELEASE = "0.13.0-beta.3"
-CURRENT_RELEASE = "0.13.0-beta.7"
-CURRENT_STAMPS = (BETA3_RELEASE, "0.13.0-beta.4", CURRENT_RELEASE)
+CURRENT_RELEASE = "0.13.0"
+OLDER_CURRENT_STAMPS = (BETA3_RELEASE, "0.13.0-beta.4", "0.13.0-beta.7")
+CURRENT_STAMPS = (*OLDER_CURRENT_STAMPS, CURRENT_RELEASE)
 IN_BETA_RELEASES = ("0.13.0-beta.2",)
 
 
@@ -145,11 +147,13 @@ def compute_stamp_shape(contract_name: str, schema: dict) -> tuple[str | None, s
       layers shape), and so is an unstamped full beta.2 init document
       (templates plus types.recommended including "frame") with no memory
       key at all — align with classify_lineage.
-    - CONTRACT.json, atlas_release "0.13.0-beta.3", "0.13.0-beta.4", or
-      "0.13.0-beta.7", layers schema/gist/memory: current — the current
-      contract shape. beta.3 is the original stamp (beta.3 and beta.4 still
-      accepted on read); beta.7 is the stamp
-      `atlas init` and `memory-migrate apply` WRITE for this shape.
+    - CONTRACT.json, atlas_release "0.13.0-beta.3", "0.13.0-beta.4",
+      "0.13.0-beta.7" or "0.13.0", layers schema/gist/memory: current — the
+      current contract shape. beta.3 is the original stamp; beta.3, beta.4
+      and beta.7 are still accepted on read; "0.13.0" is the stamp
+      `atlas init` and `memory-migrate apply` WRITE for this shape. Any
+      other stamp (e.g. "0.13.0-beta.6", "0.13.1", "0.13.0-rc.1") fails
+      closed.
     - Anything else is a stamp_shape mismatch (shape is None).
     """
     memory = schema.get("memory") if isinstance(schema.get("memory"), dict) else None
@@ -344,7 +348,8 @@ def _release_older_than_beta_line(atlas_release: Any) -> bool:
     as older/pre-beta; it fails closed to "not older" so `apply` falls
     through to in-beta rather than migrating an unknown stamp. Unknown,
     non-numeric, or newer-looking values (including unknown beta stamps
-    such as "0.13.0-beta.5") are likewise never treated as older.
+    such as "0.13.0-beta.5") are likewise never treated as older, and
+    neither is the final "0.13.0" write stamp itself.
     """
     if atlas_release is None:
         return True
@@ -361,9 +366,10 @@ def classify_lineage(contract_name: str, schema: dict) -> str:
     """Classify a store for `memory-migrate` (path memory-migrate / pin 5).
 
     - current: the current contract shape (CONTRACT.json, atlas_release
-      0.13.0-beta.3, 0.13.0-beta.4, or 0.13.0-beta.7, memory.layers
-      schema/gist/memory). beta.3 and beta.4 remain current on read (apply
-      is a no-op); beta.7 is the stamp `apply`/`atlas init` WRITE.
+      0.13.0-beta.3, 0.13.0-beta.4, 0.13.0-beta.7, or 0.13.0, memory.layers
+      schema/gist/memory). beta.3, beta.4 and beta.7 remain current on read
+      (default apply is a no-op; only the explicit restamp batch rewrites
+      the stamp); 0.13.0 is the stamp `apply`/`atlas init` WRITE.
     - in-beta: atlas_release is exactly "0.13.0-beta" or "0.13.0-beta.2", OR
       SCHEMA.json already has memory.layers ["frame", "gist", "page"], OR
       SCHEMA.json is a full shipped-beta.2 init document (templates plus

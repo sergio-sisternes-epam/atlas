@@ -4,7 +4,7 @@ work_id: 2026-10-05-atlas-optimise-target-layers
 adversarial: true
 smokes:
   - id: shared-parent-no-early-stop
-    source: "observed beta.8 early stop on the Master of Packages atlas; operator pin 5"
+    source: "observed beta.8 early stop on an operator store; operator pin 5"
     check: "scripts/test_atlas_optimise.py OptimiseTests.test_shared_parent_does_not_stop_early"
     expect: "With pages already in one folder, dead frame.md cues and stale gist descriptions are still listed and repaired."
   - id: invent-gist-forbidden
@@ -42,4 +42,4 @@ smokes:
   - id: no-stamp-change
     source: "operator pin 7"
     check: "scripts/test_atlas_optimise.py OptimiseTests.test_no_contract_write_and_stamp; scripts/release_readiness.py"
-    expect: "No CONTRACT.json or SCHEMA.json write; CURRENT_RELEASE stays 0.13.0-beta.7; package surfaces read 0.13.0-beta.10."
+    expect: "No CONTRACT.json or SCHEMA.json write; optimise only reads the stamp and never changes CURRENT_RELEASE (0.13.0) or a store's atlas_release; beta.7 and 0.13.0 current stores are accepted alike; package surfaces read 0.13.0."
