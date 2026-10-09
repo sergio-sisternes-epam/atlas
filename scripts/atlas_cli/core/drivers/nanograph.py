@@ -36,7 +36,9 @@ VERSION_TIMEOUT = 10
 BUILD_TIMEOUT = 120
 RUN_TIMEOUT = 30
 KEEP_GENERATIONS = 2
-BM25_ROW_CAP = 500
+# Bumped when generated queries or edge type naming change, so older ready
+# generations (for example with a capped bm25_text) are rebuilt, not reused.
+INDEX_FORMAT = 2
 QUERIES_NAME = "atlas.gq"
 DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
@@ -50,12 +52,14 @@ def query_ident(edge_type: str) -> str:
 
 
 def generate_queries(page_edge_types: list[str]) -> str:
+    # bm25_text has no row limit: Atlas applies type:/path:/exit-state
+    # eligibility afterwards, so a cap here would drop eligible pages that rank
+    # below it. Omitting ``limit`` uses only syntax the neighbour queries use.
     blocks = [
         "query bm25_text($q: String) {\n"
         "    match { $p: Page }\n"
         "    return { $p.slug, bm25($p.text, $q) as score }\n"
         "    order { bm25($p.text, $q) desc, $p.slug asc }\n"
-        f"    limit {BM25_ROW_CAP}\n"
         "}\n"
     ]
     for name in sorted(page_edge_types):
@@ -227,6 +231,7 @@ class NanographDriver(BaseDriver):
             BUILD_TIMEOUT,
         )
         ready = {
+            "format": INDEX_FORMAT,
             "version": det.version,
             "corpus_digest": receipt.get("corpus_digest"),
             "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -267,6 +272,7 @@ class NanographDriver(BaseDriver):
             ready
             and ready.get("corpus_digest") == digest
             and ready.get("version") == version
+            and ready.get("format") == INDEX_FORMAT
             and (gen_dir / DB_NAME).exists()
             and (gen_dir / QUERIES_NAME).is_file()
         )
@@ -477,14 +483,17 @@ class NanographDriver(BaseDriver):
     ) -> dict[str, Any]:
         source = self._source(store, source)
         pages = source["pages"]
-        type_kinds: dict[str, set[str]] = {}
-        for edge in graph.all_edges(pages):
-            if edge["resolved"] and not edge.get("external"):
-                type_kinds.setdefault(graph.edge_type_name(edge["kind"]), set()).add(edge["kind"])
-        clashes = sorted(t for t, ks in type_kinds.items() if len(ks) > 1)
-        if clashes:
-            raise DriverError(f"relation kinds collide on edge type {clashes[0]}")
-        kind_of = {t: next(iter(ks)) for t, ks in type_kinds.items()}
+        edges = graph.all_edges(pages)
+        try:
+            type_map = graph.source_edge_type_map(source, edges)
+        except graph.GraphError as e:
+            raise DriverError(str(e)) from e
+        # edge type -> Atlas kind, for kinds with at least one resolved page edge.
+        kind_of = {
+            type_map[(e["kind"], False)]: e["kind"]
+            for e in edges
+            if e["resolved"] and not e.get("external")
+        }
         state: dict[str, Any] = {"gen_dir": None}
         cache: dict[tuple[str, str, str], list[str]] = {}
 

@@ -315,19 +315,11 @@ def _bm25_eligible(
 
 
 def _fts5_rank(
-    db_path: Path, text: str, eligible: set[str]
+    db_path: Path, text: str, eligible: set[str], limit: int = 0
 ) -> tuple[list[dict], str]:
     conn = recall_index.open_db(db_path)
     try:
-        hits = fts5_driver.search(conn, text, 0, dict(DEFAULT_WEIGHTS))
-        hits = [h for h in hits if h["path"] in eligible]
-        if hits or len(fts5_driver.query_tokens(text)) < 2:
-            return hits, "all"
-        hits = fts5_driver.search(conn, text, 0, dict(DEFAULT_WEIGHTS), operator="OR")
-        hits = [h for h in hits if h["path"] in eligible]
-        for h in hits:
-            h["match"] = "any"
-        return hits, "any"
+        return fts5_driver.search_eligible(conn, text, limit, dict(DEFAULT_WEIGHTS), eligible)
     finally:
         conn.close()
 
@@ -406,7 +398,7 @@ def _bm25_search(
     eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
     try:
         try:
-            ranked, match_mode = _fts5_rank(db_path, rest, eligible)
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible, limit)
         except sqlite3.Error:
             if ephemeral:
                 raise
@@ -415,7 +407,7 @@ def _bm25_search(
             )
             ephemeral = True
             legacy = False
-            ranked, match_mode = _fts5_rank(db_path, rest, eligible)
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible, limit)
     except sqlite3.Error as e:
         warnings.append(f"BM25 query failed ({e}); falling back to grep-mode search")
         return None, warnings, {}

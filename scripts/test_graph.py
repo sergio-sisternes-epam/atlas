@@ -6,6 +6,7 @@ Set ATLAS_UPDATE_GOLDEN=1 to rewrite fixtures/graph/ from the SCHEMA 1.0 store.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -75,6 +76,30 @@ SCHEMA_V1 = {
     "structure": {"staging_dir": "staging"},
     "relations": {"recommended_kinds": ["implements", "derived_from", "supersedes"]},
 }
+
+# Legal relation kinds whose PascalCase edge types collide (foo-bar/foo_bar,
+# and page kind foo-external against the external variant of foo).
+COLLIDING_PAGES: dict[str, str] = {
+    "a.md": (
+        "---\ntype: document\ntitle: A\ncreated: 2026-09-09\nrelates_to:\n"
+        "  - path: b.md\n    kind: foo-bar\n"
+        "  - path: b.md\n    kind: foo_bar\n"
+        "  - path: c.md\n    kind: foo-external\n"
+        "  - path: atlas://github.com/example/okf-atlas/x.md\n    kind: foo\n"
+        "---\n\nPage A.\n"
+    ),
+    "b.md": (
+        "---\ntype: document\ntitle: B\ncreated: 2026-09-09\nrelates_to:\n"
+        "  - path: c.md\n    kind: foo\n---\n\nPage B.\n"
+    ),
+    "c.md": "---\ntype: document\ntitle: C\ncreated: 2026-09-09\n---\n\nPage C.\n",
+}
+
+
+def colliding_suffix(kind: str, external: bool) -> str:
+    key = kind + ("\x00external" if external else "")
+    return "X" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
 
 VOLATILE = ("generation", "fast_path", "corpus_digest", "root", "index_dir", "index_location")
 
@@ -372,6 +397,82 @@ def main() -> int:
                 golden.is_file() and golden.read_bytes() == (outs[0] / name).read_bytes(),
                 f"diff against {golden}",
             )
+        # --- edge type collisions after PascalCase normalisation -----------------
+        clash = tmp / "clash"
+        clash.mkdir()
+        (clash / "SCHEMA.json").write_text(json.dumps(SCHEMA_V1, indent=2) + "\n", encoding="utf-8")
+        for rel, text in COLLIDING_PAGES.items():
+            (clash / rel).parent.mkdir(parents=True, exist_ok=True)
+            (clash / rel).write_text(text, encoding="utf-8")
+        clash_outs = [tmp / "clash-a", tmp / "clash-b"]
+        for out in clash_outs:
+            code, p = export("nanograph", out, root=str(clash))
+            check(f"clash-export-{out.name}", code == 0 and p.get("ok") is True, str(p))
+        for name in ("schema.pg", "seed.jsonl", "export-receipt.json"):
+            check(
+                f"clash-deterministic-{name}",
+                (clash_outs[0] / name).read_bytes() == (clash_outs[1] / name).read_bytes(),
+            )
+        want = {
+            ("foo-bar", False): "FooBar" + colliding_suffix("foo-bar", False),
+            ("foo_bar", False): "FooBar" + colliding_suffix("foo_bar", False),
+            ("foo-external", False): "FooExternal" + colliding_suffix("foo-external", False),
+            ("foo", True): "FooExternal" + colliding_suffix("foo", True),
+            ("foo", False): "Foo",
+        }
+        check("clash-names-distinct", len(set(want.values())) == len(want), str(want))
+        clash_schema = (clash_outs[0] / "schema.pg").read_text(encoding="utf-8")
+        for (kind, external), name in want.items():
+            target = "External" if external else "Page"
+            check(f"clash-schema-{kind}-{external}", f"edge {name}: Page -> {target}\n" in clash_schema, clash_schema)
+        check(
+            "clash-schema-no-bare-collided-name",
+            "edge FooBar:" not in clash_schema and "edge FooExternal:" not in clash_schema,
+            clash_schema,
+        )
+        seed_edges = {
+            (r["edge"], r["from"], r["to"])
+            for r in map(json.loads, (clash_outs[0] / "seed.jsonl").read_text(encoding="utf-8").splitlines())
+            if "edge" in r
+        }
+        authored = {
+            (want[("foo-bar", False)], "a.md", "b.md"),
+            (want[("foo_bar", False)], "a.md", "b.md"),
+            (want[("foo-external", False)], "a.md", "c.md"),
+            (want[("foo", True)], "a.md", "atlas://github.com/example/okf-atlas/x.md"),
+            (want[("foo", False)], "b.md", "c.md"),
+        }
+        check("clash-seed-every-edge", seed_edges == authored, f"{sorted(seed_edges)} != {sorted(authored)}")
+        clash_receipt = json.loads((clash_outs[0] / "export-receipt.json").read_text(encoding="utf-8"))
+        mapping = clash_receipt.get("edge_types") or []
+        check(
+            "clash-receipt-mapping",
+            {(m["kind"], m["external"]): m["edge_type"] for m in mapping if m["kind"].startswith("foo")} == want
+            and mapping == sorted(mapping, key=lambda m: (m["kind"], m["external"]))
+            and clash_receipt.get("edges") == len(authored),
+            str(mapping),
+        )
+        check(
+            "receipt-edge-types-mapping",
+            {"kind": "derived_from", "external": True, "edge_type": "DerivedFromExternal"} in receipt.get("edge_types", [])
+            and {"kind": "implements", "external": False, "edge_type": "Implements"} in receipt.get("edge_types", []),
+            str(receipt.get("edge_types")),
+        )
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from atlas_cli.core import graph as graph_core
+
+        try:
+            graph_core.edge_type_map(["a-b", "a_b"], [])
+            graph_core.edge_type_map(["9lives", "---"], ["related"])
+            ok = all(
+                graph_core._EDGE_TYPE_IDENT.fullmatch(n)
+                for n in graph_core.edge_type_map(["9lives", "---", "related"], ["related"]).values()
+            )
+        except graph_core.GraphError as e:
+            ok = False
+            print(e)
+        check("edge-type-map-valid-identifiers", ok)
+
         code, p = export("nanograph", v1 / "exports")
         check("export-inside-store-refused", code == 2 and not (v1 / "exports").exists(), str(p))
         check("store-untouched-after-export", snapshot(v1) == before)

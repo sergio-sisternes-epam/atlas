@@ -158,14 +158,30 @@ no timestamps.
 | relation kind | `edge <Name>: Page -> Page`, one per kind present plus the effective schema's `relations.recommended_kinds`; Name is PascalCase (`kva_terminate` → `KvaTerminate`, `derived_from` → `DerivedFrom`) |
 | kind with an `atlas://` target | additional `edge <Name>External: Page -> External` |
 
+Edge type names are deterministic and collision-free. Each (kind, external)
+pair first gets its base name: the PascalCase kind, plus `External` for an
+`atlas://` target. Different legal kinds can share a base name (`foo-bar`
+and `foo_bar` are both `FooBar`; a page kind `foo-external` and the external
+variant of `foo` are both `FooExternal`). Every member of such a group then
+gets the suffix `X` plus the first 8 hex characters of
+`sha256(kind)`, or of `sha256(kind + "\x00external")` for an external
+target (for example `foo-bar` becomes `FooBarX7d89c4f5`). Names claimed by one pair are left
+unchanged, so stores without collisions export exactly as before. Names
+start with an uppercase letter and contain only letters and digits; if a
+collision were still left after suffixing, export fails with a clear error
+rather than merging edges. The same map names the edges in `schema.pg`, in
+`seed.jsonl` and in the nanograph driver's generated queries.
+
 Edge types are sorted by name. There are no `Vector` fields and no `@embed`.
 `seed.jsonl` holds `{"type":"Page","data":{...}}` lines sorted by slug, then
 `External` lines sorted by slug, then `{"edge":Name,"from":slug,"to":slug}`
 lines sorted by (edge, from, to); each line is compact JSON with sorted keys,
 and unset optional properties are `null`. Unresolved non-external edges are
 not seeded; `export-receipt.json` lists them under `unresolved`, with
-per-kind edge counts, page count, `corpus_digest`, `format` and
-`nanograph_schema_grammar: "1.3.0"`.
+per-kind edge counts, page count, `corpus_digest`, `format`,
+`nanograph_schema_grammar: "1.3.0"` and the edge type map as
+`edge_types: [{"kind", "external", "edge_type"}]`, sorted by (kind,
+external).
 
 ## Determinism
 

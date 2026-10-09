@@ -240,17 +240,9 @@ def run_recall(
         allowed = {p.page_id for p in pages}
         try:
             weights = ((policy.get("rank") or {}).get("weights")) or None
-            fetch_limit = max_hits * 4 if max_hits else 0
-            text = rest or query
-            hits = fts5_driver.search(conn, text, fetch_limit, weights)
-            hits = [h for h in hits if h["path"] in allowed]
-            match_mode = "all"
-            if not hits and len(fts5_driver.query_tokens(text)) >= 2:
-                hits = fts5_driver.search(conn, text, fetch_limit, weights, operator="OR")
-                hits = [h for h in hits if h["path"] in allowed]
-                for h in hits:
-                    h["match"] = "any"
-                match_mode = "any"
+            hits, match_mode = fts5_driver.search_eligible(
+                conn, rest or query, max_hits, weights, allowed
+            )
         finally:
             conn.close()
             if ephemeral and db_path is not None:

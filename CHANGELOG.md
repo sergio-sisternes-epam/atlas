@@ -97,10 +97,15 @@
   `--engine` still conflicts with enabled recall.
 - Labelled any-word retry: in `--engine bm25` and in the SMR
   `sqlite-fts5` path, when an all-words query with two or more tokens
-  finds nothing, one any-word (OR) query runs. The payload carries
-  `match: "all"` or `match: "any"`, and each retried hit carries
-  `match: "any"`. The FTS5 driver gains an `operator` parameter (AND by
-  default).
+  has no eligible match, one any-word (OR) query runs. Eligibility
+  (field filters, `path:`, the exit-state rule) is pushed into the FTS5
+  query through a temporary table of allowed page ids, so both passes
+  collect eligible hits up to the limit and an eligible all-words match
+  ranked behind excluded pages is never dropped or relabelled `any`. The
+  payload carries `match: "all"` or `match: "any"`, and each retried hit
+  carries `match: "any"`. The FTS5 driver gains an `operator` parameter
+  (AND by default), an `allowed` parameter and the shared
+  `search_eligible` helper used by both paths.
 - Index ignore guards: `atlas compile` / `validate` (not `--dry-run`),
   `atlas index build` and every nanograph or tgrep build add
   `/.atlas/indexes/` (or `/<rel>/.atlas/indexes/` when the project root is
@@ -134,7 +139,11 @@
   - `atlas graph export --format json|nanograph --out DIR` writes a
     byte-stable `graph.json`, or a nanograph v1.3.0 `schema.pg`,
     `seed.jsonl` and `export-receipt.json` (unresolved edges listed in
-    the receipt). DIR inside the store is refused.
+    the receipt). DIR inside the store is refused. Edge type names are
+    collision-free: kinds whose PascalCase names clash (`foo-bar` and
+    `foo_bar`, or `foo-external` and the external variant of `foo`) each
+    get a stable `X<8 hex of sha256>` suffix, and the receipt records the
+    map as `edge_types: [{kind, external, edge_type}]`.
   - The recall exit-state rule (`terminated`/`deprecated`/`superseded`
     hidden unless `--include-exits` or explicitly asked for) applies to
     every verb except export.
@@ -161,8 +170,12 @@
   environment (see below), no `.env.nano`. Its index lives under
   `<project-root>/.atlas/indexes/nanograph/<atlas-id>/<generation>/`
   (export, generated `atlas.gq`,
-  `atlas.nano`, `ready.json`), is reused while the corpus digest matches,
-  and only the two newest generations are kept.
+  `atlas.nano`, `ready.json`), is reused while the corpus digest, version
+  and index format match, and only the two newest generations are kept.
+  Its `bm25_text` query has no row cap, so Atlas filters every
+  positive-scoring page before cutting to the limit. Neighbour queries use
+  the export's collision-free edge type map and report the original Atlas
+  kinds; colliding kinds no longer fall back to `native-graph`.
 - `atlas recall run --engine nanograph` (where `--engine bm25` is
   allowed) ranks with nanograph BM25 (`score_orientation:
   "higher_better"`, same field filters and exit-state rule). When

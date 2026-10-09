@@ -85,21 +85,31 @@ macOS arm64. Atlas does not install it.
   writes `export/` (the `atlas graph export --format nanograph` files),
   `atlas.gq` (generated queries), `atlas.nano` (`nanograph init` then
   `nanograph load --mode overwrite`) and finally `ready.json`
-  (`version`, `corpus_digest`, `built_at`). The build runs in a
+  (`format`, `version`, `corpus_digest`, `built_at`; `format` is the
+  index layout version, bumped when the generated queries or edge type
+  naming change, so an older generation is rebuilt rather than reused). The build runs in a
   `.tmp-<generation>` sibling under an owner-checked `.lock` (see path
   `recall`, Atomic publish and lock), is renamed into place
   atomically and then `current.json` (generation, digest, version) is
   replaced atomically; a rebuild for the same digest after a version change
   gets a `-<8 hex>` suffix. A generation is reused while the pointer (and
-  its `ready.json`) matches the digest and version; the pointer's generation
+  its `ready.json`) matches the digest, version and format; the pointer's generation
   plus the newest other one are kept and older ones deleted. Symlinked index paths are refused, and a
   build never writes outside `.atlas/indexes/nanograph/<atlas-id>/`.
 - **Queries:** `bm25_text($q)` ranks pages on `text`; rows with score 0 or
-  less are dropped and scores are higher-better. Graph traversal uses one
+  less are dropped and scores are higher-better. The query has no `limit`:
+  every positive-scoring page comes back, Atlas then applies the `type:`,
+  `path:` and exit-state filters, and only then cuts to the requested
+  limit, so eligible pages ranked behind many ineligible ones are never
+  lost. (Atlas does not rely on offset pagination, which is not part of the
+  query syntax it uses.) Graph traversal uses one
   generated query per edge type and direction
   (`neighbours_out_<edge>` / `neighbours_in_<edge>`, edge name with a
-  lowercase first letter) and Atlas merges the results in the same
-  breadth-first walk as `native-graph`, so the output matches it exactly.
+  lowercase first letter). Edge types come from the collision-free map in
+  `references/graph.md` (nanograph mapping), and each result is mapped back
+  to its original Atlas kind, so kinds such as `foo-bar` and `foo_bar` stay
+  distinct. Atlas merges the results in the same breadth-first walk as
+  `native-graph`, so the output matches it exactly.
 
 ## External driver environment
 

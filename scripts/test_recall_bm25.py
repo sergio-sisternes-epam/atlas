@@ -211,6 +211,59 @@ def main() -> int:
                 str({k: single.get(k) for k in ("match", "count")}),
             )
 
+            # 2b. The any-word retry is decided over eligible pages only: the one
+            # eligible all-word match ranks below 4 * --limit excluded matches.
+            buried_v1 = tmp / "buried-v1"
+            buried_v2 = tmp / "buried-v2"
+            for store, version in ((buried_v1, "1.0"), (buried_v2, "2.0")):
+                run(["init", "--root", str(store), "--schema-version", version, "--json"])
+                for i in range(12):
+                    write(
+                        store / "lessons" / f"loud-{i:02d}.md",
+                        f"---\ntype: lesson\ntitle: Ranking buried {i}\ncreated: 2026-09-09\n---\n\n"
+                        "## Claim\n\nRanking buried ranking buried ranking buried.\n",
+                    )
+                write(
+                    store / "decisions" / "quiet.md",
+                    "---\ntype: decision\ntitle: Quiet decision\ncreated: 2026-09-09\n---\n\n"
+                    "## Claim\n\n" + "Filler prose about unrelated matters. " * 40
+                    + "Ranking appears once and buried appears once.\n",
+                )
+                write(
+                    store / "decisions" / "other.md",
+                    "---\ntype: decision\ntitle: Other decision\ncreated: 2026-09-09\n---\n\n"
+                    "## Claim\n\nOnly ranking here.\n",
+                )
+            for label, args in (
+                ("bm25", ["--root", str(buried_v1), "--engine", "bm25"]),
+                ("smr", ["--root", str(buried_v2), "--profile", "atlas:ranked"]),
+            ):
+                p = as_json(run(["recall", "run", "ranking buried type:decision", *args, "--limit", "2", "--json"]))
+                hits = p.get("hits") or []
+                check(
+                    f"{label}-buried-eligible-all-word",
+                    p.get("match") == "all"
+                    and [h.get("path") for h in hits] == ["decisions/quiet.md"]
+                    and not any(h.get("match") for h in hits),
+                    str({"match": p.get("match"), "hits": [h.get("path") for h in hits]}),
+                )
+                p = as_json(run(["recall", "run", "ranking zebra type:decision", *args, "--limit", "2", "--json"]))
+                hits = p.get("hits") or []
+                check(
+                    f"{label}-buried-any-word-retry",
+                    p.get("match") == "any"
+                    and sorted(h.get("path") for h in hits) == ["decisions/other.md", "decisions/quiet.md"]
+                    and all(h.get("match") == "any" for h in hits),
+                    str({"match": p.get("match"), "hits": [h.get("path") for h in hits]}),
+                )
+                p = as_json(run(["recall", "run", "buried zebra type:decision", *args, "--limit", "2", "--json"]))
+                hits = p.get("hits") or []
+                check(
+                    f"{label}-buried-any-word-eligible",
+                    p.get("match") == "any" and [h.get("path") for h in hits] == ["decisions/quiet.md"],
+                    str({"match": p.get("match"), "hits": [h.get("path") for h in hits]}),
+                )
+
             # bm25 on 2.0 with recall disabled reuses a published generation.
             act = run(["recall", "activate", "--profile", "atlas:ranked", "--root", str(v2), "--json"])
             comp = run(["compile", "--root", str(v2), "--json"])

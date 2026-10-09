@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.core import driver_overlay, index_location  # noqa: E402
 from atlas_cli.core.drivers import nanograph as nano_mod  # noqa: E402
-from test_graph import PAGES, SCHEMA_V1  # noqa: E402
+from test_graph import COLLIDING_PAGES, PAGES, SCHEMA_V1  # noqa: E402
 
 FAKE = r'''#!__PYTHON__
 import json, os, re, sys
@@ -107,6 +107,10 @@ if cmd == "run":
             text = data["text"].lower()
             rows.append({"slug": slug, "score": float(sum(text.count(t) for t in terms))})
         rows.sort(key=lambda r: (-r["score"], r["slug"]))
+        block = re.search(r"^query bm25_text\(.*?^\}", queries, re.M | re.S)
+        cap = re.search(r"^\s*limit (\d+)\s*$", block.group(0), re.M) if block else None
+        if cap:
+            rows = rows[: int(cap.group(1))]
     else:
         m = re.fullmatch(r"neighbours_(out|in)_(\w+)", name)
         edge = m.group(2)[0].upper() + m.group(2)[1:]
@@ -131,10 +135,10 @@ def write_fake(path: Path) -> Path:
     return path
 
 
-def make_store(path: Path) -> Path:
+def make_store(path: Path, pages: dict[str, str] | None = None) -> Path:
     path.mkdir(parents=True)
     (path / "SCHEMA.json").write_text(json.dumps(SCHEMA_V1, indent=2) + "\n", encoding="utf-8")
-    for rel, text in PAGES.items():
+    for rel, text in (PAGES if pages is None else pages).items():
         target = path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
@@ -289,7 +293,8 @@ def main() -> int:
             "query bm25_text($q: String)" in gq
             and "query neighbours_out_derivedFrom($seed: String)" in gq
             and "$s derivedFrom $n" in gq
-            and "$n derivedFrom $s" in gq,
+            and "$n derivedFrom $s" in gq
+            and "limit" not in gq,
             gq,
         )
 
@@ -304,9 +309,9 @@ def main() -> int:
             "FAKE_NANOGRAPH_LOG": str(log),
         }
 
-        def cli(*args: str, **extra: str) -> tuple[int, dict, str]:
+        def cli(*args: str, root: Path | None = None, **extra: str) -> tuple[int, dict, str]:
             proc = subprocess.run(
-                [sys.executable, str(TEST_CLI), *args, "--root", str(store), "--json"],
+                [sys.executable, str(TEST_CLI), *args, "--root", str(root or store), "--json"],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
@@ -352,7 +357,7 @@ def main() -> int:
         if gen:
             ready = json.loads((base / gen / "ready.json").read_text(encoding="utf-8"))
         check("index-generation", len(gens) == 1 and len(gen) == 16 and ready.get("corpus_digest", "").startswith(gen), str(gens))
-        check("index-ready", ready.get("version") == "1.3.0" and bool(ready.get("built_at")), str(ready))
+        check("index-ready", ready.get("version") == "1.3.0" and ready.get("format") == nano_mod.INDEX_FORMAT and bool(ready.get("built_at")), str(ready))
         pointer = json.loads((base / "current.json").read_text(encoding="utf-8")) if (base / "current.json").is_file() else {}
         check("index-pointer", pointer.get("generation") == gen and pointer.get("version") == "1.3.0", str(pointer))
         check("index-no-temp-or-lock", not [d.name for d in base.iterdir() if d.name.startswith(".")])
@@ -443,6 +448,56 @@ def main() -> int:
         code2, p2, _ = cli("graph", "neighbours", "cycle/c1.md", "--driver", "nanograph")
         check("neighbours-deterministic", code == 0 and p == p2, out)
         check("index-still-reused", len([e for e in read_log(log) if e["argv"][:1] == ["init"]]) == 1)
+
+        # --- T5: colliding relation kinds get distinct, stable edge types ------
+        clash = make_store(tmp / "clash", COLLIDING_PAGES)
+        for q in (("a.md", "--direction", "out"), ("b.md",), ("c.md", "--direction", "in"), ("a.md", "--hops", "2")):
+            code_n, native, _ = cli("graph", "neighbours", *q, root=clash)
+            code_g, nano, out_g = cli("graph", "neighbours", *q, "--driver", "nanograph", root=clash)
+            label = " ".join(q)
+            check(
+                f"clash-neighbours-driver-{label}",
+                code_g == 0 and nano.get("driver_used") == "nanograph" and "driver_note" not in nano,
+                out_g,
+            )
+            strip = lambda d: {k: v for k, v in d.items() if k not in ("driver_used",)}  # noqa: E731
+            check(f"clash-neighbours-parity-{label}", code_n == code_g and strip(native) == strip(nano), f"{native} != {nano}")
+        code, p, out = cli("graph", "neighbours", "a.md", "--direction", "out", "--driver", "nanograph", root=clash)
+        check(
+            "clash-neighbours-kinds",
+            sorted((e["to"], e["kind"]) for e in p.get("edges", []))
+            == [("b.md", "foo-bar"), ("b.md", "foo_bar"), ("c.md", "foo-external")],
+            out,
+        )
+        code, p, out = cli("graph", "neighbours", "a.md", "--direction", "out", "--kind", "foo_bar", "--driver", "nanograph", root=clash)
+        check(
+            "clash-neighbours-kind-filter",
+            p.get("driver_used") == "nanograph" and [(e["to"], e["kind"]) for e in p.get("edges", [])] == [("b.md", "foo_bar")],
+            out,
+        )
+
+        # --- T7: more than 500 positive matches; eligible pages rank below 500 --
+        crowd_pages = {
+            f"lessons/loud-{i:03d}.md": f"---\ntype: lesson\ntitle: Zeta {i}\ncreated: 2026-09-09\n---\n\nzeta zeta zeta\n"
+            for i in range(510)
+        }
+        crowd_pages.update(
+            {
+                f"decisions/quiet-{i}.md": f"---\ntype: decision\ntitle: Decision {i}\ncreated: 2026-09-09\n---\n\nzeta once\n"
+                for i in range(2)
+            }
+        )
+        crowd = make_store(tmp / "crowd", crowd_pages)
+        code, p, out = cli("recall", "run", "zeta type:decision", "--engine", "nanograph", root=crowd)
+        check(
+            "nanograph-uncapped-eligible-below-500",
+            code == 0
+            and p.get("engine_used") == "nanograph"
+            and [h["path"] for h in p.get("hits", [])] == ["decisions/quiet-0.md", "decisions/quiet-1.md"],
+            out[:600],
+        )
+        code, p, out = cli("recall", "run", "zeta", "--engine", "nanograph", "--limit", "3", root=crowd)
+        check("nanograph-uncapped-limit", p.get("engine_used") == "nanograph" and p.get("count") == 3, out[:600])
 
         # --- fallback ---------------------------------------------------------
         code, p, out = cli("recall", "run", "hub", "--engine", "nanograph", FAKE_NANOGRAPH_FAIL="run")

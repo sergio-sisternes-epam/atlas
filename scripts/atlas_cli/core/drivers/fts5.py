@@ -28,21 +28,40 @@ def escape_query(text: str, operator: str = "AND") -> str:
     return f" {op} ".join(f'"{t}"' for t in tokens)
 
 
+_ALLOWED_TABLE = "atlas_allowed_ids"
+
+
 def search(
     conn: sqlite3.Connection,
     query: str,
     limit: int,
     weights: dict[str, float] | None = None,
     operator: str = "AND",
+    allowed: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Ranked hits; ``allowed`` (page ids) is applied in SQL before ``limit``.
+
+    Eligibility is joined through a TEMP table, so ``limit`` counts eligible
+    rows only and the connection may be read-only.
+    """
     w = weights or {"primary": 5.0, "secondary": 2.0, "body": 1.0}
     q = escape_query(query, operator)
-    sql = """
+    join = ""
+    if allowed is not None:
+        conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {_ALLOWED_TABLE} (id TEXT PRIMARY KEY)")
+        conn.execute(f"DELETE FROM temp.{_ALLOWED_TABLE}")
+        conn.executemany(
+            f"INSERT OR IGNORE INTO temp.{_ALLOWED_TABLE} (id) VALUES (?)",
+            ((str(i),) for i in sorted(allowed)),
+        )
+        join = f"JOIN temp.{_ALLOWED_TABLE} AS allowed ON allowed.id = pages.id"
+    sql = f"""
     SELECT pages.id, pages.path, pages.title, pages.body,
            json_extract(pages.meta_json, '$.type') AS type,
            bm25(pages_fts, 0, ?, ?, ?) AS rank
     FROM pages_fts
     JOIN pages ON pages.id = pages_fts.id
+    {join}
     WHERE pages_fts MATCH ?
     ORDER BY rank ASC, pages.id ASC
     """
@@ -55,9 +74,13 @@ def search(
     if limit and limit > 0:
         sql += " LIMIT ?"
         params.append(int(limit))
-    cur = conn.execute(sql, params)
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        if allowed is not None:
+            conn.execute(f"DROP TABLE IF EXISTS temp.{_ALLOWED_TABLE}")
     out: list[dict[str, Any]] = []
-    for row in cur:
+    for row in rows:
         out.append(
             {
                 "path": row[1],
@@ -70,3 +93,25 @@ def search(
             }
         )
     return out
+
+
+def search_eligible(
+    conn: sqlite3.Connection,
+    text: str,
+    limit: int,
+    weights: dict[str, float] | None,
+    allowed: set[str] | frozenset[str] | None,
+) -> tuple[list[dict[str, Any]], str]:
+    """All-word hits among ``allowed``; any-word only when no eligible all-word hit exists.
+
+    Returns ``(hits, match)`` with ``match`` ``"all"`` or ``"any"``. Both
+    passes filter in SQL before ``limit`` (0 = unlimited), so an eligible
+    all-word match is never lost behind higher-ranked ineligible pages.
+    """
+    hits = search(conn, text, limit, weights, "AND", allowed)
+    if hits or len(query_tokens(text)) < 2:
+        return hits, "all"
+    hits = search(conn, text, limit, weights, "OR", allowed)
+    for h in hits:
+        h["match"] = "any"
+    return hits, "any"

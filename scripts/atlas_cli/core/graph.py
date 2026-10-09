@@ -7,12 +7,13 @@ tree. Nothing is written to the store.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from . import recall_index
 from .overlay import merge_overlays
@@ -392,6 +393,55 @@ def edge_type_name(kind: str) -> str:
     return name
 
 
+_EDGE_TYPE_IDENT = re.compile(r"[A-Z][0-9A-Za-z]*")
+
+
+def _edge_type_suffix(kind: str, external: bool) -> str:
+    key = kind + ("\x00external" if external else "")
+    return "X" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def edge_type_map(page_kinds: Iterable[str], external_kinds: Iterable[str]) -> dict[tuple[str, bool], str]:
+    """Deterministic, collision-free nanograph edge type per ``(kind, is_external)``.
+
+    The base name is the PascalCase kind (plus ``External`` for external
+    targets). When several pairs share a base name, every member of that group
+    gets ``X`` + the first 8 hex characters of sha256(kind, plus
+    ``"\\x00external"`` for external targets); unique names are left unchanged.
+    """
+    pairs = sorted({(k, False) for k in page_kinds} | {(k, True) for k in external_kinds})
+    base = {pair: edge_type_name(pair[0]) + ("External" if pair[1] else "") for pair in pairs}
+    claims: dict[str, int] = {}
+    for name in base.values():
+        claims[name] = claims.get(name, 0) + 1
+    out = {
+        pair: name + _edge_type_suffix(*pair) if claims[name] > 1 else name
+        for pair, name in base.items()
+    }
+    owner: dict[str, tuple[str, bool]] = {}
+    for pair, name in out.items():
+        if not _EDGE_TYPE_IDENT.fullmatch(name):
+            raise GraphError(f"edge type {name!r} for relation kind {pair[0]!r} is not a valid identifier")
+        if name in owner:
+            raise GraphError(
+                f"relation kinds {owner[name][0]!r} and {pair[0]!r} still collide on edge type {name} "
+                "after disambiguation"
+            )
+        owner[name] = pair
+    return out
+
+
+def source_edge_type_map(
+    source: dict[str, Any], edges: list[dict[str, Any]] | None = None
+) -> dict[tuple[str, bool], str]:
+    """The edge type map ``export_nanograph`` uses for ``source``."""
+    if edges is None:
+        edges = all_edges(source["pages"])
+    page_kinds = set(relation_vocabulary(source.get("schema"))) | {e["kind"] for e in edges}
+    external_kinds = {e["kind"] for e in edges if e.get("external")}
+    return edge_type_map(page_kinds, external_kinds)
+
+
 def check_out_dir(root: Path, out: str) -> Path:
     out_dir = Path(out).expanduser().resolve()
     try:
@@ -456,14 +506,10 @@ def export_nanograph(source: dict[str, Any], out_dir: Path) -> tuple[list[str], 
     pages = source["pages"]
     edges = all_edges(pages)
     kinds_present = {e["kind"] for e in edges}
-    page_kinds = set(relation_vocabulary(source.get("schema"))) | kinds_present
-    external_kinds = {e["kind"] for e in edges if e.get("external")}
-    types: dict[str, str] = {}
-    for kind in page_kinds:
-        types[edge_type_name(kind)] = "Page"
-    for kind in external_kinds:
-        types[edge_type_name(kind) + "External"] = "External"
-    edge_types = sorted(types.items())
+    type_map = source_edge_type_map(source, edges)
+    edge_types = sorted(
+        (name, "External" if external else "Page") for (_, external), name in type_map.items()
+    )
 
     externals = sorted({e["to"] for e in edges if e.get("external")})
     edge_lines: set[tuple[str, str, str]] = set()
@@ -471,9 +517,9 @@ def export_nanograph(source: dict[str, Any], out_dir: Path) -> tuple[list[str], 
     per_kind: dict[str, int] = {}
     for e in edges:
         if e.get("external"):
-            name = edge_type_name(e["kind"]) + "External"
+            name = type_map[(e["kind"], True)]
         elif e["resolved"]:
-            name = edge_type_name(e["kind"])
+            name = type_map[(e["kind"], False)]
         else:
             unresolved.append(e)
             continue
@@ -496,7 +542,10 @@ def export_nanograph(source: dict[str, Any], out_dir: Path) -> tuple[list[str], 
         "edges": len(edge_lines),
         "edges_per_kind": dict(sorted(per_kind.items())),
         "kinds_present": sorted(kinds_present),
-        "edge_types": [name for name, _ in edge_types],
+        "edge_types": [
+            {"kind": kind, "external": external, "edge_type": name}
+            for (kind, external), name in sorted(type_map.items())
+        ],
         "unresolved": unresolved,
         "files": ["export-receipt.json", "schema.pg", "seed.jsonl"],
     }
