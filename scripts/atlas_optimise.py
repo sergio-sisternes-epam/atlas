@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atlas_cli import __version__ as PACKAGE_VERSION  # noqa: E402
 from atlas_cli.commands.validate import GIST_PARENT_TYPES, MISSING_GIST_TYPES  # noqa: E402
-from atlas_cli.core.frontmatter import FrontmatterError, read_page  # noqa: E402
+from atlas_cli.core.frontmatter import FrontmatterError, load_yaml_value, read_page  # noqa: E402
 from atlas_cli.core.paths import CONTRACT_FILENAMES, CONTRACT_NAME, RESERVED  # noqa: E402
 from atlas_cli.core.recall_config import schema_version  # noqa: E402
 from atlas_cli.core.schema import (  # noqa: E402
@@ -252,6 +252,11 @@ def _relates(meta: dict) -> list[dict]:
     return [r for r in rel if isinstance(r, dict)] if isinstance(rel, list) else []
 
 
+def _live_relates(meta: dict) -> list[dict]:
+    """Tip relations only. A ref-bearing item is history and satisfies no live contract."""
+    return [item for item in _relates(meta) if not str(item.get("ref") or "").strip()]
+
+
 def _kind(item: dict) -> str:
     return str(item.get("kind") or item.get("role") or "").strip().lower()
 
@@ -292,9 +297,15 @@ def _single_line_value(lines: list[str], key: str) -> tuple[int, str] | None:
     return None
 
 
+_RELATES_BLOCK = re.compile(
+    r"""^(?:relates_to|(['"])relates_to\1)\s*:\s*$"""
+)
+
+
 def _relates_block(lines: list[str]) -> tuple[int, int] | None:
+    """Return the block under relates_to, including a quoted SCHEMA 2.0 key."""
     for i, line in enumerate(lines):
-        if re.match(r"^relates_to:\s*$", line):
+        if _RELATES_BLOCK.match(line.rstrip("\r\n")):
             j = i + 1
             while j < len(lines) and (lines[j].startswith((" ", "\t", "-")) or not lines[j].strip()):
                 if lines[j].strip() == "---":
@@ -317,15 +328,98 @@ def _item_spans(lines: list[str], start: int, end: int) -> list[tuple[int, int]]
     return spans
 
 
+_BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
+_FIELD_LINE = re.compile(
+    r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
+)
+_PATH_LINE = re.compile(r"^\s*-?\s*path:\s*\S")
+
+
+def _parsed_span(lines: list[str], span: tuple[int, int]) -> dict | None:
+    chunk = [line.rstrip("\r\n") for line in lines[span[0] : span[1]]]
+    try:
+        value = load_yaml_value("\n".join(chunk))
+    except FrontmatterError:
+        return None
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return value if isinstance(value, dict) else None
+
+
+def _top_level_indexes(lines: list[str], span: tuple[int, int]) -> list[int]:
+    """Mapping keys of one relation item. Block-scalar prose is not a key."""
+    start, end = span
+    if start >= end:
+        return []
+    first = _FIELD_LINE.match(lines[start].rstrip("\r\n"))
+    if not first:
+        return []
+    base = len(first.group(1))
+    indexes: list[int] = []
+    index = start
+    while index < end:
+        raw = lines[index].rstrip("\r\n")
+        if not raw.strip():
+            index += 1
+            continue
+        field = _FIELD_LINE.match(raw)
+        indent = len(raw) - len(raw.lstrip(" \t"))
+        if field and (index == start or (len(field.group(1)) == base and indent == base)):
+            indexes.append(index)
+            if _BLOCK_SCALAR.match(field.group(5).strip()):
+                index += 1
+                while index < end:
+                    nxt = lines[index].rstrip("\r\n")
+                    if not nxt.strip():
+                        index += 1
+                        continue
+                    if len(nxt) - len(nxt.lstrip(" \t")) <= base:
+                        break
+                    index += 1
+                continue
+        index += 1
+    return indexes
+
+
 def _item_path(lines: list[str], span: tuple[int, int]) -> str | None:
-    for i in range(*span):
-        m = re.match(r"^\s*-?\s*path:\s*(.+?)\s*$", lines[i])
-        if m:
-            v = m.group(1)
-            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-                v = v[1:-1]
-            return v
-    return None
+    parsed = _parsed_span(lines, span)
+    if parsed is None:
+        return None
+    value = str(parsed.get("path") or "").strip()
+    return value or None
+
+
+def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
+    """True when the parsed item has a top-level ref, or the item cannot be parsed."""
+    parsed = _parsed_span(lines, span)
+    if parsed is None:
+        return True
+    return bool(str(parsed.get("ref") or "").strip())
+
+
+def _history_path_lines(text: str) -> set[int]:
+    """Path-looking lines that are not a live relation's top-level path."""
+    parsed = _fm_lines(text)
+    if parsed is None:
+        return set()
+    lines, _rest = parsed
+    block = _relates_block(lines)
+    if block is None:
+        return set()
+    found: set[int] = set()
+    for span in _item_spans(lines, *block):
+        history = _span_is_history(lines, span)
+        live_path = set()
+        if not history:
+            live_path = {
+                index
+                for index in _top_level_indexes(lines, span)
+                if _PATH_LINE.match(lines[index].rstrip("\r\n"))
+            }
+        for index in range(*span):
+            if _PATH_LINE.match(lines[index]) and index not in live_path:
+                found.add(index)
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +459,11 @@ def _atlas_mentions(store: Store, key: str) -> list[str]:
 
 
 def _referrers(store: Store, key: str) -> list[str]:
-    """Files whose relates_to path or relative link resolves to key."""
+    """Files whose live relates_to path or relative link resolves to key.
+
+    A ref-bearing relates_to item is history. It must not make a file a referrer
+    and must not be rewritten when a live page moves.
+    """
     target_file = (store.root / key).resolve()
     refs = []
     for path in store.md_files:
@@ -373,8 +471,11 @@ def _referrers(store: Store, key: str) -> list[str]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        history_lines = _history_path_lines(text)
         hit = False
         for m in re.finditer(r"^\s*-?\s*path:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", text, re.M):
+            if text.count("\n", 0, m.start()) in history_lines:
+                continue
             if store.canonical(m.group(1)) == key:
                 hit = True
                 break
@@ -606,7 +707,7 @@ def _gist_parent_keys(store: Store, gist_key: str) -> list[str] | None:
     """
     if gist_key not in store.pages or store.ptype(gist_key) != "gist":
         return None
-    parents = [item for item in _relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
+    parents = [item for item in _live_relates(store.pages[gist_key][1]) if _kind(item) == "derived_from"]
     if not parents:
         return None
     canons: list[str] = []
@@ -1125,7 +1226,7 @@ def _fill_clusters(store: Store, parents: list[str]) -> list[list[str]]:
                 link[root_right] = root_left
 
         for member in members:
-            for item in _relates(store.pages[member][1]):
+            for item in _live_relates(store.pages[member][1]):
                 target = store.canonical(str(item.get("path") or ""))
                 if target in member_set and target != member and store.folder(target) == folder:
                     union(member, target)
@@ -1648,7 +1749,7 @@ def plan_store(
                 "schema-index-cue", "auto", [k, _rel(root, idx) if idx.exists() else store.folder(k) + "/index.md"],
                 f"append a cue for {path.name} to {store.folder(k)}/index.md labelled with the schema title",
                 {"title": title}, store))
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             if _kind(item) != "related":
                 continue
             ck = store.canonical(str(item.get("path") or ""))
@@ -1663,7 +1764,7 @@ def plan_store(
     for k, (path, meta, _) in store.pages.items():
         if store.ptype(k) != "schema":
             continue
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             ck = store.canonical(str(item.get("path") or ""))
             if _kind(item) == "related" and ck in store.pages and store.folder(ck) == store.folder(k):
                 covered.add(ck)
@@ -1688,7 +1789,7 @@ def plan_store(
         if not isinstance(desc, str) or not desc:
             continue
         memory_parents = []
-        for item in _relates(meta):
+        for item in _live_relates(meta):
             if _kind(item) != "derived_from":
                 continue
             mk = store.canonical(str(item.get("path") or ""))
@@ -2006,7 +2107,7 @@ def _apply_relates_add(store: Store, schema_key: str, gist_key: str) -> None:
         lines.append(entry_style[1])
     _write(path, "".join(lines) + rest)
     meta, _ = read_page(path, store.version)
-    if not any(store.canonical(str(i.get("path") or "")) == gist_key and _kind(i) == "related" for i in _relates(meta)):
+    if not any(store.canonical(str(i.get("path") or "")) == gist_key and _kind(i) == "related" for i in _live_relates(meta)):
         _write(path, text)
         raise Refusal(f"{schema_key}: relates_to edit did not round-trip; reverted")
 
@@ -2042,8 +2143,11 @@ def _rewrite_refs(store: Store, old_key: str, new_key: str, referrers: list[str]
     for rkey in referrers:
         rpath = store.root / rkey
         text = rpath.read_text(encoding="utf-8")
+        history_lines = _history_path_lines(text)
 
         def fm_sub(m: re.Match) -> str:
+            if text.count("\n", 0, m.start()) in history_lines:
+                return m.group(0)
             val = m.group(3)
             if store.canonical(val) == old_key:
                 return m.group(1) + m.group(2) + new_key + m.group(4)
@@ -2302,7 +2406,7 @@ def _apply_schema_fill(store: Store, task: dict) -> None:
         raise Refusal(f"{schema_key}: schema did not round-trip") from e
     related = {
         store.canonical(str(item.get("path") or ""))
-        for item in _relates(meta)
+        for item in _live_relates(meta)
         if _kind(item) == "related"
     }
     if any(member["path"] not in related for member in members) or prose not in body:

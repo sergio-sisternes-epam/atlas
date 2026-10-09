@@ -1,6 +1,6 @@
 ---
 name: atlas
-description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, atlas restamp. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
+description: "Atlas is a distributed Semantic Knowledge Network built with technologies LLMs already know: git and markdown, with a SCHEMA and a CLI that keep agents inside pre-defined, extensible domains. Triggers on atlas, atlas recall, atlas compile, atlas CI, GitHub Actions compile gate, schema overlay, atlas init, schema install, skill memory, work hub, remember knowledge, query atlas, search atlas, knowledge substrate, refresh landscape, update competitors, symbiont, who should we partner with, atlas help, getting started with atlas, how does atlas work, list atlas paths, explain atlas mount, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, atlas restamp, git history, version hint, tip prune, relates_to ref. Load a path module (mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci, history, version-hint, prune, help, getting-started) before acting. Unqualified help outside Atlas context is not this skill. Format rules remain in the skill named okf."
 version: 0.13.1
 activation_card: on
 ---
@@ -58,7 +58,7 @@ skill: atlas
 skill_path: <resolved Atlas skill directory>
 mode: run | discussion
 subject: atlas | <project>
-path: recall | remember | work | landscape | schema | configure | ci | memory-migrate
+path: recall | remember | atlas-memorise | atlas-recall | atlas-forget | atlas-optimise | work | landscape | schema | configure | ci | memory-migrate | history | version-hint | prune
 path_module: references/paths/<path>.md
 intent: <one line>
 root: <atlas store root>
@@ -154,6 +154,9 @@ still copies into staging; do not use it for strategy moves.
 | **schema** | Init, overlay install/new/uninstall; compile merge; Atlas overlays from APM packages (step 3a) | `references/paths/schema.md` |
 | **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection | `references/paths/configure.md` |
 | **ci** | Assess, install, or repair CI for a mount with a contract file (`CONTRACT.json` or `SCHEMA.json`) | `references/paths/ci.md` |
+| **history** | Read one store path at a git rev; a `relates_to.ref` edge is not a tip hop | `references/paths/history.md` |
+| **version-hint** | Add one living-page `relates_to.ref` hint; grain stays deferred | `references/paths/version-hint.md` |
+| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary | `references/paths/prune.md` |
 | **help** | Explain installed modules without running them | `references/paths/help.md` |
 | **getting-started** | First-use purpose, prerequisites, first journey, storage choices | `references/paths/getting-started.md` |
 
@@ -177,6 +180,7 @@ modules; they are not CLI verbs.
 12. **SCHEMA mutations = path `schema` + CLI** - load `references/paths/schema.md`. Do not hand-edit the store's single contract file (`SCHEMA.json` or `CONTRACT.json`) or `schema.d/`.
 12a. **Recall policy = path `configure` + CLI** - load `references/paths/configure.md`. Installing a contribution is not activation.
 13. **CI layers stay distinct** - path `ci` configures the institutional merge gate on an Atlas mount (`SCHEMA.json` or `CONTRACT.json`); `atlas compile` is the CLI tool; path `compile` is separate agent-session discipline. Do not substitute Atlas skill tests for mount CI.
+13a. **Git time travel is a path** - reading a page at a rev is path `history`. Writing a living `relates_to.ref` hint is path `version-hint`. Dropping a failed frame from tip is path `prune`, only after discuss terminate and an explicit tip-exclusion ask. Do not hop a `ref` edge during recall. Do not invent Claim A grain. Relation `ref` is not mount `ref`.
 14. **Help explains; it does not execute** - paths `help` and `getting-started` are discussion modules. Reading help for mount/init/remember/recall must not run those operations. No-target help lists the installed registry without clarification. Unknown targets are explicit unknowns plus valid choices. Unqualified “help” outside Atlas context must not hijack unrelated tasks. CLI option lists come from installed non-mutating `--help`, not memory.
 
 ## CLI surface
@@ -204,6 +208,8 @@ python3 <atlas-skill>/scripts/atlas.py promote <staging-file> --to <path> [--typ
 python3 <atlas-skill>/scripts/atlas.py schema new <id> --root <atlas> [--claim <folder>]
 python3 <atlas-skill>/scripts/atlas.py schema install <source> --root <atlas> [--force]
 python3 <atlas-skill>/scripts/atlas.py schema uninstall <id> --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py ref show <path> --ref <rev> --root <atlas>
+python3 <atlas-skill>/scripts/atlas.py ref prune --summary <path> --drop <path> --ref <rev> --kind <kind> --root <atlas>
 # --set accepts exactly one of: info, warn, error
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set info --root <atlas>
 python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set warn --root <atlas>
@@ -223,7 +229,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 | Types | `experience`, `decision`, `work`, `lesson`, `recipe`, `document` (legacy), `protostar`, `gist`, plus the memory-layer pair: `page`/`frame` on shipped 0.13.0-beta (`SCHEMA.json`, one gist still counts), `memory`/`frame` on 0.13.0-beta.2 (`SCHEMA.json`, one gist still counts), `memory`/`schema` on the current `CONTRACT.json` shape (written as `0.13.0`; first introduced in 0.13.0-beta.3; one gist still counts) — recommended, not closed |
 | Memory layers | Optional progressive disclosure. Index membership does not require a schema, and a page may skip the gist. A folder with one or more gists has exactly one same-folder frame (or, on the current `CONTRACT.json` write model, `schema`) listing those gists once each; zero gists means none. A gist may list N≥1 same-folder `derived_from` parents. Shipped 0.13.0-beta, 0.13.0-beta.2, and the current `CONTRACT.json` shape all treat a lone gist as enough for a frame/schema. |
 | Origin / sensitivity | Recommended frontmatter: `origin` (internal \| third-party \| user \| derived), `sensitivity` (public \| internal \| restricted) |
-| Relations | `relates_to: [{path, kind}]` - kinds: follows, records, supersedes, implements, derived_from, related |
+| Relations | `relates_to: [{path, kind, ref?}]` - kinds: follows, records, supersedes, implements, derived_from, related. Absent `ref` is tip. Present `ref` is a git rev and is not compiled. Not mount `ref`. |
 | Composition | Optional mesh; consolidated in compile |
 | Provenance | Optional `sources` profile on extracted pages |
 
@@ -247,7 +253,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 ## Progressive disclosure
 
 Procedures live only under `references/paths/`. Load one path per intent
-(mount, init, migrate, memory-migrate, recall, remember, work, landscape, schema, configure, ci,
-help, getting-started). Packaged help baseline lives under `references/help/`.
+(mount, init, migrate, memory-migrate, recall, remember, atlas-memorise, atlas-recall, atlas-forget, atlas-optimise, work, landscape, schema, configure, ci,
+history, version-hint, prune, help, getting-started). Packaged help baseline lives under `references/help/`.
 SCHEMA and templates live under `references/`. Do not dump full help into this
 file.

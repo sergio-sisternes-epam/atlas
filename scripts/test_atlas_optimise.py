@@ -308,6 +308,293 @@ relates_to:
         self.assertNotIn("schema_folder", crit)
         self.assertNotIn("schema_missing_from_index", crit)
 
+    def test_history_edge_does_not_cover_gist(self) -> None:
+        root = shared_parent_store(self.base)
+        notes = root / "notes"
+        (notes / "index.md").write_text(
+            "# Notes\n\n- [Topic gist](topic.gist.md)\n- [Notes schema](./schema.schema.md)\n",
+            encoding="utf-8",
+        )
+        page(notes / "extra.gist.md", f"""
+type: gist
+title: Extra gist
+created: 2026-10-05
+description: {MEM_DESC}
+relates_to:
+  - path: notes/topic.md
+    kind: derived_from
+""", "## Content\n\nA second gist of the same memory, long enough for the body check.")
+        schema = notes / "schema.schema.md"
+        schema.write_text(
+            schema.read_text(encoding="utf-8").replace(
+                "    kind: related\n",
+                "    kind: related\n  - path: notes/extra.gist.md\n    kind: related\n    ref: abcdef1234567890\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _code, planned = plan(root, self.base / "out")
+        uncovered = [
+            task for task in tasks(planned)
+            if task["kind"] == "uncovered-gist" and "notes/extra.gist.md" in task["paths"]
+        ]
+        self.assertTrue(uncovered, planned)
+
+    def test_referrer_rewrite_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "history-only.md",
+            """
+type: document
+title: History only
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nHistory only page has enough prose and no live link.",
+        )
+        page(
+            root / "keeper.md",
+            """
+type: document
+title: Keeper
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+  - path: old.md
+    kind: related
+""",
+            "## Content\n\nSee [old](old.md). This keeper page has enough prose.",
+        )
+        store = opt.Store(root)
+        refs = opt._referrers(store, "old.md")
+        self.assertNotIn("history-only.md", refs)
+        self.assertIn("keeper.md", refs)
+        opt._rewrite_refs(store, "old.md", "new.md", refs)
+        history_only = (root / "history-only.md").read_text(encoding="utf-8")
+        keeper = (root / "keeper.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history_only)
+        self.assertIn("ref: abcdef1234567890", history_only)
+        self.assertNotIn("new.md", history_only)
+        history_item, live_item = keeper.split("ref: abcdef1234567890", 1)
+        self.assertIn("path: old.md", history_item)
+        self.assertNotIn("path: new.md", history_item)
+        self.assertIn("path: new.md", live_item)
+        self.assertNotIn("(old.md)", keeper)
+        self.assertIn("new.md", keeper.split("## Content", 1)[1])
+
+    def test_quoted_ref_key_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "history-only.md",
+            """
+type: document
+title: History only
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    'ref': abcdef1234567890
+""",
+            "## Content\n\nHistory only page has enough prose and no live link.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("history-only.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["history-only.md"])
+        history_only = (root / "history-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history_only)
+        self.assertIn("'ref': abcdef1234567890", history_only)
+        self.assertNotIn("new.md", history_only)
+
+    def test_quoted_relates_to_key_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "quoted-history.md",
+            """
+type: document
+title: Quoted history
+created: 2026-10-05
+'relates_to':
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nQuoted history page has enough prose and no live link.",
+        )
+        page(
+            root / "quoted-live.md",
+            '''
+type: document
+title: Quoted live
+created: 2026-10-05
+"relates_to":
+  - path: old.md
+    kind: related
+''',
+            "## Content\n\nSee [old](old.md). This quoted live page has enough prose.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("quoted-history.md", opt._referrers(store, "old.md"))
+        self.assertIn("quoted-live.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["quoted-history.md", "quoted-live.md"])
+        history = (root / "quoted-history.md").read_text(encoding="utf-8")
+        live = (root / "quoted-live.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history)
+        self.assertNotIn("new.md", history)
+        self.assertIn("path: new.md", live)
+        self.assertNotIn("path: old.md", live)
+
+    def test_nested_ref_text_does_not_freeze_live_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "keeper.md",
+            """
+type: document
+title: Keeper
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    note: |
+      see ref: not-a-history-edge
+  - path: old.md
+    kind: related
+    meta:
+      ref: nested-only
+""",
+            "## Content\n\nSee [old](old.md). This keeper page has enough prose.",
+        )
+        store = opt.Store(root)
+        self.assertIn("keeper.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["keeper.md"])
+        keeper = (root / "keeper.md").read_text(encoding="utf-8")
+        self.assertNotIn("path: old.md", keeper)
+        self.assertIn("path: new.md", keeper)
+        self.assertIn("see ref: not-a-history-edge", keeper)
+        self.assertIn("ref: nested-only", keeper)
+        self.assertNotIn("(old.md)", keeper)
+
+    def test_block_scalar_path_is_not_a_relation_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "keeper.md",
+            """
+type: document
+title: Keeper
+created: 2026-10-05
+relates_to:
+  - note: |
+      - path: old.md
+    path: old.md
+    kind: related
+""",
+            "## Content\n\nSee [old](old.md). This keeper page has enough prose.",
+        )
+        page(
+            root / "prose-only.md",
+            """
+type: document
+title: Prose only
+created: 2026-10-05
+relates_to:
+  - note: |
+      - path: old.md
+    path: other.md
+    kind: related
+""",
+            "## Content\n\nThis page has enough prose and no live link to the moved page.",
+        )
+        store = opt.Store(root)
+        self.assertIn("keeper.md", opt._referrers(store, "old.md"))
+        self.assertNotIn("prose-only.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["keeper.md", "prose-only.md"])
+        keeper = (root / "keeper.md").read_text(encoding="utf-8")
+        prose_only = (root / "prose-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", keeper.split("path: new.md", 1)[0])
+        self.assertIn("path: new.md", keeper)
+        self.assertEqual(prose_only.count("path: old.md"), 1)
+        self.assertIn("path: other.md", prose_only)
+        self.assertNotIn("path: new.md", prose_only)
+
+    def test_unparsed_relation_is_not_rewritten(self) -> None:
+        import atlas_optimise as opt
+        from atlas_cli.core.frontmatter import FrontmatterError
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "history-only.md",
+            """
+type: document
+title: History only
+created: 2026-10-05
+relates_to:
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nHistory only page has enough prose and no live link.",
+        )
+        store = opt.Store(root)
+
+        def fail_load(_text: str):
+            raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter")
+
+        original = opt.load_yaml_value
+        opt.load_yaml_value = fail_load
+        try:
+            self.assertNotIn("history-only.md", opt._referrers(store, "old.md"))
+            opt._rewrite_refs(store, "old.md", "new.md", ["history-only.md"])
+        finally:
+            opt.load_yaml_value = original
+        history_only = (root / "history-only.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history_only)
+        self.assertIn("ref: abcdef1234567890", history_only)
+        self.assertNotIn("new.md", history_only)
+
     def test_no_contract_write_and_stamp(self) -> None:
         self.assertEqual(CURRENT_RELEASE, "0.13.0")
         root = shared_parent_store(self.base)

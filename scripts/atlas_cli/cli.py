@@ -277,6 +277,49 @@ def promote_cmd(
     )
 
 
+def _refcmd():
+    """Load ref commands only when a ref operation runs."""
+    try:
+        from .commands import refcmd
+    except ImportError as exc:
+        raise SystemExit(f"refusing ref operation: {exc}") from exc
+    return refcmd
+
+
+@main.group("ref")
+def ref_group() -> None:
+    """History pointers. This ref is a per-edge git rev, not mount ref."""
+
+
+@ref_group.command("show")
+@click.argument("path")
+@click.option("--ref", "rev", required=True, help="git rev inside the store repo")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def ref_show_cmd(path: str, rev: str, root: str | None, as_json: bool) -> None:
+    """Print path at a git rev. Does not write the blob back to tip."""
+    raise SystemExit(_refcmd().run_show(root, path, rev, as_json))
+
+
+@ref_group.command("prune")
+@click.option("--summary", required=True, help="tip stand-in that remains")
+@click.option("--drop", "drops", multiple=True, required=True, help="exclusive-to-frame page to remove from tip")
+@click.option("--ref", "rev", required=True, help="pre-prune git rev that still contains --drop and is an ancestor of HEAD")
+@click.option("--kind", required=True, help="kind for the summary history edges; not invented")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def ref_prune_cmd(
+    summary: str,
+    drops: tuple[str, ...],
+    rev: str,
+    kind: str,
+    root: str | None,
+    as_json: bool,
+) -> None:
+    """Drop named tip pages, retarget inbound tip links to the summary, keep history on its ref edges."""
+    raise SystemExit(_refcmd().run_prune(root, summary, drops, rev, kind, as_json))
+
+
 @main.group("schema")
 def schema_group() -> None:
     """Create, install, or uninstall SCHEMA overlays (CLI is the only writer)."""

@@ -59,7 +59,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
 6. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
 7. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
 8. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
-9. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror.
+9. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror. If an item has `ref`, it is not a tip hop, including when a published recall generation still lists that target. Do not read that path on HEAD. When the ask is historical, leave this path and enter path **history** (`references/paths/history.md`) with `page` and `rev`. Relation `ref` is not mount `ref`. Do not run `atlas ref show` from this path.
 10. **Never** treat `staging/` as an answer source.
 11. **Answer** from claims on those pages, citing paths. If nothing relevant → honest **gap**. After the one rewrite search, stop. A grep spiral is not allowed.
 

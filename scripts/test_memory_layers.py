@@ -190,7 +190,9 @@ def write_page(
     rel_lines = ""
     if relates_to:
         rel_lines = "relates_to:\n" + "".join(
-            f"  - path: {item['path']}\n    kind: {item['kind']}\n" for item in relates_to
+            f"  - path: {item['path']}\n    kind: {item['kind']}\n"
+            + (f"    ref: {item['ref']}\n" if item.get("ref") else "")
+            for item in relates_to
         )
     else:
         rel_lines = "relates_to: []\n"
@@ -559,6 +561,64 @@ def main() -> int:
         check(
             "frame listing a memory episode as a member is flagged frame_members",
             ("frame_members", "concepts/mixed_frame.md") in info_paths4,
+            str(info_paths4),
+        )
+        write_page(
+            store4 / "concepts" / "history_parent.md",
+            "decision",
+            "History-only parent",
+            "2026-10-01",
+        )
+        write_page(
+            store4 / "concepts" / "history_gist.md",
+            "gist",
+            "History-only gist",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/history_parent.md", "kind": "derived_from", "ref": "abc333"},
+            ],
+        )
+        write_page(
+            store4 / "concepts" / "history_frame.md",
+            "frame",
+            "History-only frame",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related", "ref": "abc111"},
+                {"path": "concepts/g2.md", "kind": "related", "ref": "abc222"},
+            ],
+        )
+        write_page(
+            store4 / "concepts" / "history_mixed_frame.md",
+            "frame",
+            "One live gist and one history gist",
+            "2026-10-01",
+            relates_to=[
+                {"path": "concepts/g1.md", "kind": "related"},
+                {"path": "concepts/g2.md", "kind": "related", "ref": "abc222"},
+            ],
+        )
+        code, payload = run_json(["compile", "--root", str(store4), "--json"])
+        check("history-edge fixture still exits 0 at default info rung", code == 0, f"exit={code}")
+        info_paths4 = {(i.get("id"), i.get("path")) for i in payload.get("info", [])}
+        check(
+            "history-only gist does not satisfy gist_parent",
+            ("gist_parent", "concepts/history_gist.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "parent covered only by a history gist still reports missing_gist",
+            ("missing_gist", "concepts/history_parent.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "history-only frame does not satisfy frame_members",
+            ("frame_members", "concepts/history_frame.md") in info_paths4,
+            str(info_paths4),
+        )
+        check(
+            "one live gist plus a history gist does not satisfy frame_members",
+            ("frame_members", "concepts/history_mixed_frame.md") in info_paths4,
             str(info_paths4),
         )
         check(

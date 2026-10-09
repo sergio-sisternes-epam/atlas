@@ -118,22 +118,10 @@ def _jsonish(value: Any, depth: int = 0) -> Any:
     raise FrontmatterError(f"unsupported frontmatter value type {type(value).__name__}")
 
 
-def split_fm_v2(text: str) -> tuple[dict, str]:
-    """Safe YAML frontmatter for SCHEMA 2.0 stores."""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, text
-    block = text[3:end].strip("\n")
-    body = text[end + 4 :]
-    if len(block.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
-        raise FrontmatterError("frontmatter exceeds size limit")
-    try:
-        import yaml
-        from yaml.nodes import MappingNode
-    except ImportError as e:
-        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+def schema_v2_loader():
+    """Safe YAML loader that keeps YAML 1.1 booleans and timestamps as strings."""
+    import yaml
+    from yaml.nodes import MappingNode
 
     class UniqueSafeLoader(yaml.SafeLoader):
         pass
@@ -171,9 +159,20 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     UniqueSafeLoader.add_constructor(
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
     )
+    return UniqueSafeLoader
+
+
+def _bounded_yaml_events(text: str) -> None:
+    """Reject oversized, alias-heavy, or tagged YAML before a loader expands it."""
+    if len(text.encode("utf-8")) > MAX_FRONTMATTER_BYTES:
+        raise FrontmatterError("frontmatter exceeds size limit")
     try:
-        count = 0
-        for event in yaml.parse(block, Loader=yaml.SafeLoader):
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    count = 0
+    try:
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
             count += 1
             if count > MAX_YAML_EVENTS:
                 raise FrontmatterError("frontmatter exceeds event limit")
@@ -184,6 +183,39 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
                 raise FrontmatterError(f"unsupported YAML tag {tag}")
     except yaml.YAMLError as e:
         raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
+
+
+def load_yaml_value(text: str) -> Any:
+    """Parse one YAML value with the SCHEMA 2.0 scalar rules."""
+    _bounded_yaml_events(text)
+    try:
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    try:
+        data = yaml.load(text, Loader=schema_v2_loader())
+    except yaml.YAMLError as e:
+        raise FrontmatterError(f"invalid YAML: {e}") from e
+    if data is None:
+        return None
+    return _jsonish(data)
+
+
+def split_fm_v2(text: str) -> tuple[dict, str]:
+    """Safe YAML frontmatter for SCHEMA 2.0 stores."""
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}, text
+    block = text[3:end].strip("\n")
+    body = text[end + 4 :]
+    _bounded_yaml_events(block)
+    try:
+        import yaml
+    except ImportError as e:
+        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
+    UniqueSafeLoader = schema_v2_loader()
     try:
         data = yaml.load(block, Loader=UniqueSafeLoader)
     except yaml.YAMLError as e:
@@ -197,11 +229,14 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     return _jsonish(data), body
 
 
-def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def parse_page(text: str, schema_version: str = "1.0") -> tuple[dict, str]:
     if str(schema_version).strip() == "2.0":
         return split_fm_v2(text)
     return split_fm(text)
+
+
+def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
+    return parse_page(path.read_text(encoding="utf-8", errors="replace"), schema_version)
 
 
 def leftover_prose(body: str) -> str:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from atlas_cli.core.frontmatter import FrontmatterError, split_fm, split_fm_v2
+from atlas_cli.core.frontmatter import FrontmatterError, load_yaml_value, split_fm, split_fm_v2
 
 
 class FrontmatterV2Tests(unittest.TestCase):
@@ -39,6 +39,15 @@ class FrontmatterV2Tests(unittest.TestCase):
         text = "---\n? [a, b]\n: x\n---\n\nbody\n"
         with self.assertRaises(FrontmatterError):
             split_fm_v2(text)
+
+    def test_relation_loader_rejects_alias_and_depth(self) -> None:
+        with self.assertRaises(FrontmatterError):
+            load_yaml_value("a: &id x\nb: *id\n")
+        nested = "1"
+        for _ in range(40):
+            nested = f"[{nested}]"
+        with self.assertRaises(FrontmatterError):
+            load_yaml_value(nested)
 
     def test_v1_parser_unchanged_for_yes(self) -> None:
         text = "---\ntitle: yes\n---\n\nbody\n"

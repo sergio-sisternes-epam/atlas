@@ -95,6 +95,9 @@ how to get started. Starting is asking Atlas how to do it.
 | Schema | Create, install, or uninstall SCHEMA overlays. Combine with the transient `discuss` skill for best results. |
 | Memory migrate | Assess or migrate a document-era or pre-beta store toward memory, gist, and frame or schema; or explicitly restamp a current 0.13.0-beta.3/beta.4/beta.7 store to 0.13.0 (opt-in). Assess and inventory write nothing. |
 | Configure | Inspect and select Semantic Memory Recall. |
+| History | Read one store path at a git rev. A `ref` edge is not a tip hop. |
+| Version hint | Point a living page at a prior git rev without copying the old body. |
+| Prune | After terminate, drop named failed-path pages from tip onto one summary. |
 
 ## Related
 

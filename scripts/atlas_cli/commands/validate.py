@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from ..core.frontmatter import FrontmatterError, is_just_links, read_page
+from ..core.frontmatter import FrontmatterError, is_just_links, parse_page, read_page
 from ..core.paths import RESERVED, iter_concept_md, rel, staging_files, store_root
 from ..core.mesh import consolidate as mesh_consolidate
 from ..core.identity import IdentityError, parse_pointer
@@ -103,10 +103,17 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
             continue
         # strip optional title
         target = target.split()[0].strip("\"'")
-        cand = (parent / target).resolve()
+        path_part = target
+        for sep in ("#", "?"):
+            idx = path_part.find(sep)
+            if idx != -1:
+                path_part = path_part[:idx]
+        if not path_part:
+            continue
+        cand = (parent / path_part).resolve()
         if not cand.exists():
             # try as root-relative
-            cand2 = (root / target.lstrip("/")).resolve()
+            cand2 = (root / path_part.lstrip("/")).resolve()
             if not cand2.exists():
                 issues.append(
                     {
@@ -144,6 +151,33 @@ def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:
 
 
 
+def _bad_relation_ref(value: object) -> str | None:
+    """Relation ref is a per-edge git rev, not mount ref. Compile does not resolve it."""
+    if not isinstance(value, str):
+        return "ref must be a git rev string"
+    if (
+        not value
+        or value.strip() != value
+        or any(ch.isspace() for ch in value)
+        or value.startswith("-")
+        or ".." in value
+    ):
+        return "ref must be a non-empty git rev without whitespace"
+    return None
+
+
+def _relation_path_escapes(root: Path, target: str) -> bool:
+    text = target.replace("\\", "/").strip()
+    if not text or text.startswith(("/", "-")) or "\0" in text:
+        return True
+    try:
+        cand = (root / text).resolve(strict=False)
+        rel_path = cand.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return True
+    return not rel_path.parts or any(part == ".." for part in rel_path.parts)
+
+
 def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
     issues: list[dict] = []
     rels = meta.get("relates_to")
@@ -172,9 +206,56 @@ def _check_relates_to(root: Path, path: Path, meta: dict) -> list[dict]:
                 }
             )
             continue
+        if "ref" in item:
+            ref_problem = _bad_relation_ref(item.get("ref"))
+            if ref_problem:
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] {ref_problem}",
+                    }
+                )
+            if target.startswith(("http://", "https://", "atlas://")):
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] ref path must be store-relative: {target}",
+                    }
+                )
+            elif _relation_path_escapes(root, target):
+                issues.append(
+                    {
+                        "id": "relates_to",
+                        "path": rel(root, path),
+                        "msg": f"relates_to[{i}] path escapes store root: {target}",
+                    }
+                )
+            # History edge. Containment is checked. Do not resolve the blob or require HEAD.
+            continue
         if target.startswith(("http://", "https://", "atlas://")):
             continue
-        cand = (root / target).resolve()
+        if _relation_path_escapes(root, target):
+            issues.append(
+                {
+                    "id": "relates_to",
+                    "path": rel(root, path),
+                    "msg": f"relates_to[{i}] path escapes store root: {target}",
+                }
+            )
+            continue
+        try:
+            cand = (root / target).resolve()
+        except (OSError, ValueError):
+            issues.append(
+                {
+                    "id": "relates_to",
+                    "path": rel(root, path),
+                    "msg": f"relates_to[{i}] path escapes store root: {target}",
+                }
+            )
+            continue
         if not cand.exists():
             issues.append(
                 {
@@ -195,9 +276,87 @@ def _has_kind(meta: dict, kind: str) -> bool:
         if not isinstance(item, dict):
             continue
         k = str(item.get("kind") or item.get("role") or "").strip().lower()
+        if str(item.get("ref") or "").strip():
+            continue
         if k == want and str(item.get("path") or "").strip():
             return True
     return False
+
+
+def schema_compile_issues(root: Path) -> tuple[dict | None, list[dict], list[dict]]:
+    """Schema-level compile issues. Schema is None when page checks must not use it."""
+    critical: list[dict] = []
+    warnings: list[dict] = []
+    schema, schema_err = load_schema(root)
+    contract_name = contract_filename(root) or "SCHEMA.json"
+    if schema_err:
+        critical.append({"id": "schema_present", "path": contract_name, "msg": schema_err})
+        return None, critical, warnings
+    _stamp_shape, stamp_err = compute_stamp_shape(contract_name, schema)
+    if stamp_err:
+        critical.append({"id": "stamp_shape", "path": contract_name, "msg": stamp_err})
+    tmpl = schema.get("templates")
+    if tmpl is not None and not isinstance(tmpl, dict):
+        critical.append(
+            {
+                "id": "schema_shape",
+                "path": contract_name,
+                "msg": "SCHEMA.templates must be an object",
+            }
+        )
+    elif isinstance(tmpl, dict):
+        by = tmpl.get("by_type")
+        if by is not None and not isinstance(by, dict):
+            critical.append(
+                {
+                    "id": "schema_shape",
+                    "path": contract_name,
+                    "msg": "SCHEMA.templates.by_type must be an object",
+                }
+            )
+    merged, overlay_critical, overlay_warnings = merge_overlays(schema, root)
+    critical.extend(overlay_critical)
+    warnings.extend(overlay_warnings)
+    critical.extend(receipt_issues(root))
+    shape_msgs = validate_schema_shape(merged)
+    for msg in shape_msgs:
+        critical.append({"id": "schema_shape", "path": contract_name, "msg": msg})
+    if shape_msgs:
+        return None, critical, warnings
+    for msg in validate_against_contract(merged, load_contract()):
+        critical.append({"id": "schema_contract", "path": contract_name, "msg": msg})
+    if schema_version(merged) == "2.0":
+        for msg in validate_store_v2(merged):
+            critical.append({"id": "schema_v2", "path": contract_name, "msg": msg})
+    return merged, critical, warnings
+
+
+def concept_page_errors(root: Path, path: Path, text: str | None = None) -> list[str]:
+    """Compile-blocking messages for one concept page. Empty means this page would not fail compile."""
+    schema, schema_issues, _schema_warnings = schema_compile_issues(root)
+    msgs = [issue["msg"] for issue in schema_issues if issue.get("msg")]
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    ignores = _ignores_in(text)
+    try:
+        meta, body = parse_page(text, schema_version(schema) if schema else "1.0")
+    except FrontmatterError as e:
+        return msgs + [str(e)]
+    if not meta:
+        if "frontmatter" not in ignores:
+            msgs.append("missing frontmatter")
+        return msgs
+    if not str(meta.get("type") or "").strip() and "frontmatter" not in ignores and "okf_compliance" not in ignores:
+        msgs.append("missing type")
+    if is_just_links(body, min_body_chars(schema)) and "not_just_links" not in ignores:
+        msgs.append(f"body has < {min_body_chars(schema)} non-link prose chars (thin / link-list page)")
+    if "internal_links" not in ignores:
+        msgs.extend(issue["msg"] for issue in _check_internal_links(root, path, body))
+    if "relates_to" not in ignores:
+        msgs.extend(issue["msg"] for issue in _check_relates_to(root, path, meta))
+    if schema and "page_contract" not in ignores:
+        msgs.extend(issue["msg"] for issue in _page_contract_issues(root, path, meta, schema))
+    return msgs
 
 
 def _page_contract_issues(root: Path, path: Path, meta: dict, schema: dict) -> list[dict]:
@@ -401,6 +560,8 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
         ids = set()
     seen: set[str] = set()
     for path in root.rglob("*.md"):
+        if not path.is_file():
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -582,6 +743,8 @@ def _memory_findings(
         for item in rels:
             if not isinstance(item, dict):
                 continue
+            if str(item.get("ref") or "").strip():
+                continue
             if str(item.get("kind") or item.get("role") or "").strip().lower() == kind:
                 out.append(item)
         return out
@@ -714,6 +877,8 @@ def _memory_findings(
             if invalid:
                 related = []
             for item in related:
+                if isinstance(item, dict) and str(item.get("ref") or "").strip():
+                    continue
                 resolved = _resolve_related_gist(item, root, by_rel_path)
                 if resolved is None:
                     invalid = True
@@ -772,6 +937,8 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         related = schema_meta.get("relates_to")
         if isinstance(related, list):
             for item in related:
+                if isinstance(item, dict) and str(item.get("ref") or "").strip():
+                    continue
                 resolved = _resolve_related_gist(item, root, by_rel_path)
                 if resolved is None:
                     continue
@@ -834,6 +1001,8 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         memory_parents: list[tuple] = []
         for item in relates:
             if not isinstance(item, dict):
+                continue
+            if str(item.get("ref") or "").strip():
                 continue
             if str(item.get("kind") or item.get("role") or "").strip().lower() != "derived_from":
                 continue

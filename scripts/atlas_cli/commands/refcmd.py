@@ -1,0 +1,2043 @@
+"""Relation ref: deliberate git recall and tip prune. Not mount ref."""
+
+from __future__ import annotations
+
+import contextlib
+import ctypes
+import errno
+import io
+import json
+import os
+import platform
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from ..core.frontmatter import FrontmatterError, load_yaml_value, parse_page
+from ..core.gitops import git_root, run_git
+from ..core.overlay import merge_overlays
+from ..core.recall_config import schema_version
+from .validate import concept_page_errors
+from ..core.paths import RESERVED, store_root
+from ..core.schema import load_schema, staging_dir_name
+
+SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
+_REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
+MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+TOP_KEY = re.compile(
+    r"""^(?:[A-Za-z_][\w-]*|(['"])[A-Za-z_][\w-]*\1)\s*:"""
+)
+ITEM_START = re.compile(r"^(\s*)-\s+")
+_RELATES_LINE = re.compile(
+    r"""^(?:relates_to|(?P<q>['"])relates_to(?P=q))\s*:(?P<value>.*)$"""
+)
+_EMPTY_RELATES_VALUE = re.compile(r"^\s*(?:\[\]|~|null|Null|NULL)?\s*(?:#.*)?$")
+_BLOCK_RELATES_VALUE = re.compile(r"^\s*(?:#.*)?$")
+FIELD = re.compile(
+    r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
+)
+
+
+class RefError(ValueError):
+    pass
+
+
+class RewriteInstalled(RefError):
+    """Replacement is installed and this function could not undo the exchange."""
+
+    def __init__(self, message: str, *, dev: int, ino: int):
+        super().__init__(message)
+        self.dev = dev
+        self.ino = ino
+
+
+def _reject_rev(rev: str) -> None:
+    if (
+        not rev
+        or rev.strip() != rev
+        or any(ch.isspace() for ch in rev)
+        or rev.startswith("-")
+        or ".." in rev
+    ):
+        raise RefError("ref must be a git rev without whitespace")
+
+
+def _store_rel(root: Path, raw: str) -> str:
+    text = raw.strip().replace("\\", "/")
+    if not text or text.startswith(("/", "-")) or text.startswith(("http://", "https://", "atlas://")):
+        raise RefError(f"path escapes store root: {raw}")
+    parts: list[str] = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise RefError(f"path escapes store root: {raw}")
+        parts.append(part)
+    if not parts:
+        raise RefError(f"path escapes store root: {raw}")
+    cursor = root
+    for part in parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise RefError(f"refusing to follow symlink {raw}")
+    lexical = "/".join(parts)
+    cand = (root / lexical).resolve(strict=False)
+    try:
+        rel = cand.relative_to(root.resolve())
+    except ValueError as e:
+        raise RefError(f"path escapes store root: {raw}") from e
+    if not rel.parts or rel.as_posix() != lexical:
+        raise RefError(f"refusing to follow symlink {raw}")
+    return lexical
+
+
+def _repo(root: Path) -> Path:
+    repo = git_root(root)
+    if repo is None:
+        raise RefError("no git repository contains the store root")
+    try:
+        root.resolve().relative_to(repo.resolve())
+    except ValueError as e:
+        raise RefError("store root is not inside its git repository") from e
+    return repo
+
+
+def _git_path(root: Path, repo: Path, store_rel: str) -> str:
+    prefix = root.resolve().relative_to(repo.resolve())
+    return (prefix / store_rel).as_posix()
+
+
+def _resolve_commit(repo: Path, rev: str) -> str:
+    _reject_rev(rev)
+    code, out, err = run_git(
+        ["rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}"],
+        cwd=repo,
+    )
+    if code != 0 or not out:
+        raise RefError(err or f"rev does not resolve in the store repo: {rev}")
+    return out
+
+
+def _require_tip_ancestor(repo: Path, sha: str) -> None:
+    """A prune rev is the pre-prune snapshot, not a later or unrelated commit."""
+    code, _out, err = run_git(["merge-base", "--is-ancestor", sha, "HEAD"], cwd=repo)
+    if code != 0:
+        detail = f": {err}" if err else ""
+        raise RefError(f"refusing rev {sha}; it is not an ancestor of HEAD{detail}")
+
+
+def _historical_mode(repo: Path, sha: str, gitpath: str) -> str | None:
+    """Return the tree mode for one path. Symlinks are blobs, so type is not enough."""
+    code, out, err = run_git(
+        ["ls-tree", "--end-of-options", sha, "--", gitpath],
+        cwd=repo,
+    )
+    if code != 0:
+        raise RefError(err or f"cannot read tree entry {gitpath} at {sha}")
+    lines = [line for line in out.splitlines() if line]
+    if len(lines) != 1 or " blob " not in lines[0]:
+        return None
+    return lines[0].split(" ", 1)[0]
+
+
+def _blob_exists(repo: Path, sha: str, gitpath: str) -> bool:
+    return _historical_mode(repo, sha, gitpath) in _REGULAR_BLOB_MODES
+
+
+def _require_regular_blob(repo: Path, sha: str, gitpath: str, label: str, missing: str) -> None:
+    mode = _historical_mode(repo, sha, gitpath)
+    if mode is None:
+        raise RefError(missing)
+    if mode not in _REGULAR_BLOB_MODES:
+        raise RefError(f"refusing non-regular historical blob {label} at {sha}")
+
+
+def _show_bytes(repo: Path, sha: str, gitpath: str) -> bytes:
+    _require_regular_blob(
+        repo,
+        sha,
+        gitpath,
+        gitpath,
+        missing=f"missing blob {gitpath} at {sha}",
+    )
+    proc = subprocess.run(
+        ["git", "show", "--end-of-options", f"{sha}:{gitpath}"],
+        cwd=repo,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise RefError(err or f"missing blob {gitpath} at {sha}")
+    return proc.stdout
+
+
+def _fail(as_json: bool, message: str) -> int:
+    if as_json:
+        print(json.dumps({"ok": False, "error": message}))
+    else:
+        print(f"atlas ref: {message}", file=sys.stderr)
+    return 2
+
+
+def _newline(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _yaml_scalar_text(raw: str) -> str:
+    text = raw.strip()
+    if not text:
+        return ""
+    if text[0] in ("'", '"'):
+        quote = text[0]
+        out: list[str] = []
+        escaped = False
+        for ch in text[1:]:
+            if escaped:
+                out.append(ch)
+                escaped = False
+                continue
+            if ch == "\\" and quote == '"':
+                escaped = True
+                continue
+            if ch == quote:
+                return "".join(out)
+        return text
+    comment = re.search(r"\s+#", text)
+    if comment:
+        text = text[: comment.start()]
+    return text.strip()
+
+
+def _unquote(value: str) -> str:
+    return _yaml_scalar_text(value)
+
+
+def _norm_path(value: str) -> str:
+    text = _unquote(value).replace("\\", "/")
+    parts: list[str] = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                return text
+            parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _field_parts(line: str) -> tuple[str, str, str] | None:
+    """Return indent, key, and value. A quoted SCHEMA 2.0 key is still that key."""
+    match = FIELD.match(line)
+    if not match:
+        return None
+    return match.group(1), match.group(3) or match.group(4), match.group(5)
+
+
+_BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
+
+
+def _top_level_field_indexes(lines: list[str]) -> list[int]:
+    """Mapping keys of one relation item. Block-scalar prose is not a key."""
+    if not lines:
+        return []
+    first = _field_parts(lines[0])
+    if first is None:
+        return []
+    base = len(first[0])
+    indexes: list[int] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
+        field = _field_parts(line)
+        indent = len(line) - len(line.lstrip(" \t"))
+        if field and (index == 0 or (len(field[0]) == base and indent == base)):
+            indexes.append(index)
+            if _BLOCK_SCALAR.match(field[2].strip()):
+                index += 1
+                while index < len(lines):
+                    nxt = lines[index]
+                    if not nxt.strip():
+                        index += 1
+                        continue
+                    if len(nxt) - len(nxt.lstrip(" \t")) <= base:
+                        break
+                    index += 1
+                continue
+        index += 1
+    return indexes
+
+
+def _parsed_item(lines: list[str]) -> dict | None:
+    try:
+        value = load_yaml_value("\n".join(lines))
+    except FrontmatterError:
+        return None
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return value if isinstance(value, dict) else None
+
+
+def _item_has_ref(lines: list[str]) -> bool:
+    """History is a parsed top-level ref. A nested mapping or block scalar is not."""
+    parsed = _parsed_item(lines)
+    return parsed is not None and bool(str(parsed.get("ref") or "").strip())
+
+
+def _needs_yaml_item(lines: list[str]) -> bool:
+    for line in lines:
+        if re.search(r":\s*[|>][+-]?\d*\s*(?:#.*)?$", line):
+            return True
+        if re.match(r"^.*:\s*(?:#.*)?$", line):
+            return True
+    return False
+
+
+def _path_is_plain_scalar(lines: list[str]) -> bool:
+    """True when the item's top-level path can be retargeted without re-emitting."""
+    for index in _top_level_field_indexes(lines):
+        field = _field_parts(lines[index])
+        if field and field[1] == "path":
+            value = field[2].strip()
+            return bool(value) and not _BLOCK_SCALAR.match(value)
+    return False
+
+
+def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
+    """Turn a block-scalar path that names a drop into the plain form the rewriter edits."""
+    if not lines or _path_is_plain_scalar(lines) or not _needs_yaml_item(lines):
+        return lines
+    try:
+        value = load_yaml_value("\n".join(lines))
+    except FrontmatterError as e:
+        raise RefError(f"cannot parse relates_to item: {e}") from e
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    if not isinstance(value, dict):
+        raise RefError("relates_to item must be a mapping")
+    path = _norm_path(str(value.get("path") or "").strip())
+    if path not in drop or str(value.get("ref") or "").strip():
+        return lines
+    clean: dict[str, str] = {}
+    for key, field in value.items():
+        if not isinstance(key, str) or not isinstance(field, str):
+            raise RefError("relates_to fields must be strings")
+        clean[key] = field.strip()
+    indent = re.match(r"^(\s*)", lines[0]).group(1) if lines else "  "
+    return _emit_relation_item(clean, indent or "  ")
+
+
+def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str] | None, bool]:
+    lines = _coerce_block_item(lines, drop)
+    parsed = _parsed_item(lines)
+    if parsed is None:
+        return lines, False
+    path = _norm_path(str(parsed.get("path") or "").strip())
+    if not path or path not in drop or str(parsed.get("ref") or "").strip():
+        return lines, False
+    if on_summary:
+        return None, True
+    top = set(_top_level_field_indexes(lines))
+    rewritten: list[str] = []
+    rewritten_path = False
+    for index, line in enumerate(lines):
+        field = _field_parts(line) if index in top else None
+        if field and field[1] == "path":
+            rewritten.append(f"{field[0]}path: {_yaml_scalar(summary)}")
+            rewritten_path = True
+            continue
+        if field and field[1] == "ref":
+            continue
+        rewritten.append(line)
+    if not rewritten_path:
+        raise RefError("cannot retarget relates_to path")
+    return rewritten, True
+
+
+def _relates_value(line: str) -> str | None:
+    match = _RELATES_LINE.match(line)
+    if not match:
+        return None
+    return match.group("value")
+
+
+def _is_relates_block(line: str) -> bool:
+    value = _relates_value(line)
+    return value is not None and bool(_BLOCK_RELATES_VALUE.match(value))
+
+
+def _item_marker_indent(line: str) -> str | None:
+    match = ITEM_START.match(line)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _rewrite_section(lines: list[str], drop: set[str], summary: str, on_summary: bool) -> tuple[list[str], int]:
+    preamble: list[str] = []
+    items: list[list[str]] = []
+    current: list[str] | None = None
+    base: str | None = None
+    for line in lines:
+        indent = _item_marker_indent(line)
+        # A deeper bullet, including one inside a block scalar, is not a new item.
+        if indent is not None and (base is None or indent == base):
+            base = indent
+            if current is not None:
+                items.append(current)
+            current = [line]
+            continue
+        if current is not None:
+            current.append(line)
+        else:
+            preamble.append(line)
+    if current is not None:
+        items.append(current)
+    out = list(preamble)
+    changed = 0
+    for item in items:
+        rewritten, did = _rewrite_item(item, drop, summary, on_summary)
+        changed += int(did)
+        if rewritten:
+            out.extend(rewritten)
+    return out, changed
+
+
+def _balanced_flow(text: str) -> bool:
+    square = curly = 0
+    quote = None
+    escaped = False
+    for ch in text:
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch == "[":
+            square += 1
+        elif ch == "]":
+            square -= 1
+        elif ch == "{":
+            curly += 1
+        elif ch == "}":
+            curly -= 1
+        if square < 0 or curly < 0:
+            return False
+    return square == 0 and curly == 0 and quote is None
+
+
+def _yaml_scalar(value: str) -> str:
+    if not value or value.strip() != value or any(ch in value for ch in ":#{}[]&*!|>%@`,\"'"):
+        return json.dumps(value)
+    return value
+
+
+def _parse_relation_value(blob: str) -> list[dict[str, str]]:
+    try:
+        value = load_yaml_value(blob)
+    except FrontmatterError as e:
+        raise RefError(f"cannot parse relates_to: {e}") from e
+    if value is None:
+        value = []
+    if not isinstance(value, list):
+        raise RefError("relates_to must be a list")
+    parsed: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RefError("relates_to item must be a mapping")
+        clean: dict[str, str] = {}
+        for key, field in item.items():
+            if not isinstance(key, str) or not isinstance(field, str):
+                raise RefError("relates_to fields must be strings")
+            clean[key] = field
+        parsed.append(clean)
+    return parsed
+
+
+def _emit_relates_block(items: list[dict[str, str]]) -> list[str]:
+    if not items:
+        return ["relates_to: []"]
+    lines = ["relates_to:"]
+    for item in items:
+        first = True
+        for key, value in item.items():
+            scalar = _yaml_scalar(value)
+            lines.append(f"  - {key}: {scalar}" if first else f"    {key}: {scalar}")
+            first = False
+    return lines
+
+
+def _expand_flow_relates(text: str, drop: set[str] | None = None, *, force: bool = False) -> tuple[str, bool]:
+    """Turn a flow-style relates_to list into the block form the rewriter edits."""
+    if not text.startswith("---"):
+        return text, False
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, False
+    nl = _newline(text)
+    lines = text[3:end].strip("\n").splitlines()
+    out: list[str] = []
+    index = 0
+    changed = False
+    while index < len(lines):
+        line = lines[index]
+        value = _relates_value(line)
+        if value is None or not value.strip() or value.strip().startswith("#"):
+            out.append(line)
+            index += 1
+            continue
+        raw_lines = [line]
+        value_lines = [value.lstrip()]
+        index += 1
+        while not _balanced_flow("\n".join(value_lines)) and index < len(lines) and not TOP_KEY.match(lines[index]):
+            raw_lines.append(lines[index])
+            value_lines.append(lines[index])
+            index += 1
+        blob = "\n".join(value_lines).strip()
+        if not _balanced_flow(blob):
+            raise RefError("unclosed relates_to value")
+        try:
+            value = load_yaml_value(blob)
+        except FrontmatterError as e:
+            raise RefError(f"cannot parse relates_to: {e}") from e
+        if not isinstance(value, list):
+            named = _scalar_drop_path(value, drop or set())
+            if named:
+                raise RefError(f"unsupported relates_to scalar still names {named}")
+            out.extend(raw_lines)
+            continue
+        for item in value:
+            named = _scalar_drop_path(item, drop or set())
+            if named and not isinstance(item, dict):
+                raise RefError(f"unsupported relates_to scalar still names {named}")
+        try:
+            parsed = _parse_relation_value(blob)
+        except RefError:
+            out.extend(raw_lines)
+            continue
+        names_drop = drop is not None and any(_norm_path(item.get("path", "")) in drop for item in parsed)
+        if not force and not names_drop:
+            out.extend(raw_lines)
+            continue
+        out.extend(_emit_relates_block(parsed))
+        changed = True
+    if not changed:
+        return text, False
+    return f"---{nl}{nl.join(out)}{text[end:]}", True
+
+
+def _parse_relation_item(blob: str) -> dict[str, str]:
+    wrapped = blob.strip()
+    if not wrapped.startswith("["):
+        wrapped = f"[{wrapped}]"
+    items = _parse_relation_value(wrapped)
+    if len(items) != 1:
+        raise RefError("relates_to item must be one mapping")
+    return items[0]
+
+
+def _emit_relation_item(item: dict[str, str], indent: str = "  ") -> list[str]:
+    lines: list[str] = []
+    first = True
+    for key, value in item.items():
+        scalar = _yaml_scalar(value)
+        lines.append(f"{indent}- {key}: {scalar}" if first else f"{indent}  {key}: {scalar}")
+        first = False
+    return lines
+
+
+def _expand_flow_map_items(text: str, drop: set[str] | None = None, *, force: bool = False) -> tuple[str, bool]:
+    """Turn ` - {path, kind}` items inside a block relates_to into field lines."""
+    if not text.startswith("---"):
+        return text, False
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, False
+    nl = _newline(text)
+    lines = text[3:end].strip("\n").splitlines()
+    out: list[str] = []
+    index = 0
+    in_relates = False
+    changed = False
+    while index < len(lines):
+        line = lines[index]
+        if TOP_KEY.match(line):
+            in_relates = _is_relates_block(line)
+            out.append(line)
+            index += 1
+            continue
+        if not in_relates or not re.match(r"^\s*-\s*\{", line):
+            out.append(line)
+            index += 1
+            continue
+        indent = re.match(r"^(\s*)", line).group(1)
+        raw_lines = [line]
+        blob = line.split("-", 1)[1]
+        index += 1
+        while not _balanced_flow(blob) and index < len(lines) and not TOP_KEY.match(lines[index]):
+            raw_lines.append(lines[index])
+            blob += "\n" + lines[index]
+            index += 1
+        if not _balanced_flow(blob):
+            raise RefError("unclosed relates_to item")
+        parsed = _parse_relation_item(blob)
+        names_drop = drop is not None and _norm_path(parsed.get("path", "")) in drop
+        if not force and not names_drop:
+            out.extend(raw_lines)
+            continue
+        out.extend(_emit_relation_item(parsed, indent or "  "))
+        changed = True
+    if not changed:
+        return text, False
+    return f"---{nl}{nl.join(out)}{text[end:]}", True
+
+
+def rewrite_relates_to(text: str, drop: set[str], summary: str, on_summary: bool) -> tuple[str, int]:
+    text, expanded = _expand_flow_relates(text, drop, force=on_summary)
+    text, map_expanded = _expand_flow_map_items(text, drop, force=on_summary)
+    if not text.startswith("---"):
+        return text, int(expanded) + int(map_expanded)
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, int(expanded) + int(map_expanded)
+    nl = _newline(text)
+    block = text[3:end].strip("\n")
+    lines = block.splitlines()
+    out: list[str] = []
+    changed = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _empty_relates(line) or _is_relates_block(line):
+            out.append(line)
+            index += 1
+            section: list[str] = []
+            while index < len(lines) and not TOP_KEY.match(lines[index]):
+                section.append(lines[index])
+                index += 1
+            rewritten, count = _rewrite_section(section, drop, summary, on_summary)
+            changed += count
+            out.extend(rewritten)
+            continue
+        out.append(line)
+        index += 1
+    body = text[end:]
+    joined = nl.join(out)
+    return f"---{nl}{joined}{body}", changed + int(expanded) + int(map_expanded)
+
+
+def _existing_ref_edges(text: str) -> set[tuple[str, str, str]]:
+    """History edges already recorded under relates_to, not other frontmatter lists."""
+    if not text.startswith("---"):
+        return set()
+    end = text.find("\n---", 3)
+    if end == -1:
+        return set()
+    found: set[tuple[str, str, str]] = set()
+    in_relates = False
+    current: list[str] | None = None
+    items: list[list[str]] = []
+    item_indent: str | None = None
+    for line in text[3:end].splitlines():
+        if TOP_KEY.match(line):
+            if current is not None and in_relates:
+                items.append(current)
+            current = None
+            item_indent = None
+            value = _relates_value(line)
+            in_relates = bool(_empty_relates(line) or _is_relates_block(line))
+            if value is not None and value.strip() and not value.strip().startswith("#"):
+                blob = value.strip()
+                if blob.startswith(("[", "{")):
+                    try:
+                        parsed = _parse_relation_value(blob if blob.startswith("[") else f"[{blob}]")
+                    except RefError:
+                        parsed = []
+                    for item in parsed:
+                        path = _norm_path(str(item.get("path") or ""))
+                        ref = _norm_path(str(item.get("ref") or ""))
+                        if path and ref:
+                            found.add((path, _norm_path(str(item.get("kind") or "")), ref))
+                else:
+                    in_relates = True
+            continue
+        if not in_relates:
+            continue
+        indent = _item_marker_indent(line)
+        if indent is not None and (item_indent is None or indent == item_indent):
+            item_indent = indent
+            if current is not None:
+                items.append(current)
+            current = [line]
+        elif current is not None and line.startswith((" ", "\t")):
+            current.append(line)
+    if current is not None and in_relates:
+        items.append(current)
+    for item in items:
+        parsed = _parsed_item(item)
+        if parsed is None or not str(parsed.get("ref") or "").strip():
+            continue
+        path = _norm_path(str(parsed.get("path") or "").strip())
+        ref = _norm_path(str(parsed.get("ref") or "").strip())
+        kind = str(parsed.get("kind") or "").strip()
+        if path and ref:
+            found.add((path, _norm_path(kind) if kind else None, ref))
+    return found
+
+
+def _empty_relates(line: str) -> bool:
+    value = _relates_value(line)
+    return value is not None and bool(_EMPTY_RELATES_VALUE.match(value))
+
+
+def append_ref_edges(text: str, edges: list[tuple[str, str, str]]) -> str:
+    text, _expanded = _expand_flow_relates(text, force=True)
+    text, _map_expanded = _expand_flow_map_items(text, force=True)
+    if not edges:
+        return text
+    if not text.startswith("---"):
+        raise RefError("summary page has no frontmatter")
+    end = text.find("\n---", 3)
+    if end == -1:
+        raise RefError("summary page has no closing frontmatter")
+    nl = _newline(text)
+    block = text[3:end].strip("\n")
+    lines = block.splitlines()
+    addition = []
+    for path, kind, ref in edges:
+        addition.extend(
+            [
+                f"  - path: {_yaml_scalar(path)}",
+                f"    kind: {_yaml_scalar(kind)}",
+                f"    ref: {_yaml_scalar(ref)}",
+            ]
+        )
+    inserted = False
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _empty_relates(line):
+            out.append("relates_to:")
+            out.extend(addition)
+            inserted = True
+            index += 1
+            continue
+        if _is_relates_block(line):
+            out.append(line)
+            index += 1
+            while index < len(lines) and not TOP_KEY.match(lines[index]):
+                out.append(lines[index])
+                index += 1
+            out.extend(addition)
+            inserted = True
+            continue
+        out.append(line)
+        index += 1
+    if not inserted:
+        if out and out[-1].strip():
+            out.append("relates_to:")
+        else:
+            out.append("relates_to:")
+        out.extend(addition)
+    body = text[end:]
+    return f"---{nl}{nl.join(out)}{body}"
+
+
+def _url_path(token: str) -> tuple[str, str]:
+    cut = len(token)
+    for sep in ("#", "?"):
+        idx = token.find(sep)
+        if idx != -1:
+            cut = min(cut, idx)
+    return token[:cut], token[cut:]
+
+
+def _link_hits_drop(root: Path, page: Path, token: str, drop: set[str]) -> bool:
+    token, _suffix = _url_path(token)
+    if not token or token.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
+        return False
+    # A single leading slash is store-root relative. Joining it onto the page
+    # directory would discard that directory and consult the filesystem root.
+    if token.startswith("/") and not token.startswith("//"):
+        root_path = root / token.lstrip("/")
+        try:
+            root_rel = root_path.resolve(strict=False).relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return False
+        return root_rel in drop
+    parent_path = page.parent / token
+    try:
+        parent_rel = parent_path.resolve(strict=False).relative_to(root.resolve()).as_posix()
+    except ValueError:
+        parent_rel = ""
+    if parent_path.exists():
+        return parent_rel in drop
+    root_path = root / token.lstrip("/")
+    try:
+        root_rel = root_path.resolve(strict=False).relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return False
+    return root_rel in drop
+
+
+def rewrite_markdown_links(text: str, root: Path, page: Path, drop: set[str], summary_abs: Path) -> tuple[str, int]:
+    changed = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal changed
+        raw = match.group(2)
+        token = raw.split()[0].strip("\"'") if raw.strip() else ""
+        if not _link_hits_drop(root, page, token, drop):
+            return match.group(0)
+        _path_token, suffix = _url_path(token)
+        href = Path(os.path.relpath(summary_abs, page.parent)).as_posix() + suffix
+        changed += 1
+        return f"[{match.group(1)}]({raw.replace(token, href, 1)})"
+
+    return MD_LINK.sub(repl, text), changed
+
+
+def _open_store_parent(root: Path, rel: str) -> tuple[int, str]:
+    """Open the parent of a store-relative path without following any component."""
+    parts = [part for part in rel.split("/") if part]
+    if not parts or any(part in (".", "..") for part in parts):
+        raise RefError(f"path escapes store root: {rel}")
+    try:
+        dirfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise RefError(f"refusing to follow symlink {root}") from e
+    try:
+        for part in parts[:-1]:
+            try:
+                nextfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            except OSError as e:
+                raise RefError(f"refusing to follow symlink {rel}") from e
+            os.close(dirfd)
+            dirfd = nextfd
+        return dirfd, parts[-1]
+    except Exception:
+        os.close(dirfd)
+        raise
+
+
+def _read_dir_file(dirfd: int, name: str, label: str) -> bytes:
+    try:
+        info = os.lstat(name, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to read missing page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise RefError(f"refusing to read non-regular page {label}")
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise RefError(f"refusing to read non-regular page {label}")
+        os.set_blocking(fd, True)
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _mode_store(root: Path, rel: str) -> int:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        return stat.S_IMODE(os.lstat(name, dir_fd=dirfd).st_mode)
+    finally:
+        os.close(dirfd)
+
+
+def _read_store(root: Path, rel: str) -> bytes:
+    data, _mode, _dev, _ino = _read_identity(root, rel)
+    return data
+
+
+def _read_identity(root: Path, rel: str) -> tuple[bytes, int, int, int]:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except OSError as e:
+            raise RefError(f"refusing to read missing page {rel}") from e
+        data = _read_dir_file(dirfd, name, rel)
+        again = os.lstat(name, dir_fd=dirfd)
+        if info.st_dev != again.st_dev or info.st_ino != again.st_ino:
+            raise RefError(f"refusing to read changed page {rel}")
+        return data, stat.S_IMODE(info.st_mode), info.st_dev, info.st_ino
+    finally:
+        os.close(dirfd)
+
+
+def _scalar_drop_path(value: object, drop: set[str]) -> str | None:
+    """Return a drop path named by a value the list rewriter cannot edit."""
+    if isinstance(value, str):
+        path = _norm_path(value.strip())
+        return path if path in drop else None
+    if isinstance(value, dict):
+        if str(value.get("ref") or "").strip():
+            return None
+        path = _norm_path(str(value.get("path") or "").strip())
+        return path if path in drop else None
+    return None
+
+
+def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
+    try:
+        meta, _body = parse_page(text, version)
+    except FrontmatterError as e:
+        raise RefError(f"cannot parse page frontmatter: {e}") from e
+    rels = meta.get("relates_to")
+    if not isinstance(rels, list):
+        return _scalar_drop_path(rels, drop)
+    for item in rels:
+        if not isinstance(item, dict):
+            named = _scalar_drop_path(item, drop)
+            if named:
+                return named
+            continue
+        if str(item.get("ref") or "").strip():
+            continue
+        path = _norm_path(str(item.get("path") or "").strip())
+        if path in drop:
+            return path
+    return None
+
+
+def _matching_restore(dirfd: int, name: str, data: bytes, label: str, mode: int) -> tuple[int, int]:
+    """Accept an existing entry only when it is already the removed page."""
+    try:
+        info = os.lstat(name, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to restore over changed page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != mode:
+        raise RefError(f"refusing to restore over existing page {label}")
+    try:
+        current = _read_dir_file(dirfd, name, label)
+    except RefError as e:
+        raise RefError(f"refusing to restore over existing page {label}") from e
+    again = os.lstat(name, dir_fd=dirfd)
+    if info.st_dev != again.st_dev or info.st_ino != again.st_ino or current != data:
+        raise RefError(f"refusing to restore over existing page {label}")
+    return again.st_dev, again.st_ino
+
+
+def _fcntl():
+    """Unix file locking. Imported lazily so other commands load on Windows."""
+    try:
+        import fcntl
+    except ImportError as e:
+        raise RefError("refusing to prune without file locking on this platform") from e
+    return fcntl
+
+
+def _open_prune_lock(store: Path) -> int:
+    """Open the stable prune lock without following a symlink at that name."""
+    try:
+        dirfd = os.open(store, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise RefError(f"refusing to follow symlink {store}") from e
+    try:
+        return os.open(
+            ".atlas-ref-prune.lock",
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=dirfd,
+        )
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise RefError("refusing to follow symlink .atlas-ref-prune.lock") from e
+        raise RefError(f"refusing to open prune lock: {e.strerror or e}") from e
+    finally:
+        os.close(dirfd)
+
+
+def _lock_fd(fd: int, label: str) -> None:
+    """Serialize cooperating writers across the check and the directory update."""
+    locking = _fcntl()
+    try:
+        locking.flock(fd, locking.LOCK_EX | locking.LOCK_NB)
+    except OSError as e:
+        raise RefError(f"refusing to update locked page {label}") from e
+
+
+def _lock_dir(dirfd: int, label: str) -> None:
+    """Hold the parent directory across a rename and the following delete or exchange."""
+    locking = _fcntl()
+    try:
+        locking.flock(dirfd, locking.LOCK_EX | locking.LOCK_NB)
+    except OSError as e:
+        raise RefError(f"refusing to update locked page {label}") from e
+
+
+def _compile_payload(store: Path) -> dict:
+    """Dry-run compile payload. Mesh and recall are not published."""
+    from .validate import run as validate_run
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        validate_run(str(store), True, None, None, True)
+    try:
+        payload = json.loads(buffer.getvalue() or "{}")
+    except json.JSONDecodeError as e:
+        raise RefError("refusing to prune without a compile result") from e
+    return payload if isinstance(payload, dict) else {}
+
+
+def _finding_set(items: object) -> set[tuple[str, str, str]]:
+    found: set[tuple[str, str, str]] = set()
+    if not isinstance(items, list):
+        return found
+    for item in items:
+        if isinstance(item, dict):
+            found.add(
+                (
+                    str(item.get("id") or ""),
+                    str(item.get("path") or ""),
+                    str(item.get("msg") or ""),
+                )
+            )
+    return found
+
+
+def _compile_critical(store: Path) -> set[tuple[str, str, str]]:
+    """Critical compile findings for the tip."""
+    return _finding_set(_compile_payload(store).get("critical"))
+
+
+def _blocking_warnings(store: Path) -> set[tuple[str, str, str]]:
+    """Warnings that make atlas compile exit non-zero. Unmounted atlas URIs do not."""
+    from .validate import NON_BLOCKING_WARNING_IDS
+
+    found: set[tuple[str, str, str]] = set()
+    for item in _compile_payload(store).get("warnings") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") not in NON_BLOCKING_WARNING_IDS:
+            found.add(
+                (
+                    str(item.get("id") or ""),
+                    str(item.get("path") or ""),
+                    str(item.get("msg") or ""),
+                )
+            )
+    return found
+
+
+def _renameat_flag(dirfd: int, src: str, dst: str, flag: int) -> None:
+    """Rename within one directory using a kernel flag. Never falls back to replace."""
+    src_b = os.fsencode(src)
+    dst_b = os.fsencode(dst)
+    system = platform.system()
+    libc = ctypes.CDLL(None, use_errno=True)
+    if system == "Linux":
+        rename_fn = libc.renameat2
+    elif system == "Darwin":
+        rename_fn = libc.renameatx_np
+    else:
+        raise RefError("refusing to rewrite without an atomic rename")
+    rename_fn.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    rename_fn.restype = ctypes.c_int
+    rc = rename_fn(dirfd, src_b, dirfd, dst_b, flag)
+    if rc != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), src)
+
+
+def _exchange_names(dirfd: int, src: str, dst: str) -> None:
+    """Atomically swap two names in one directory. The destination is not overwritten."""
+    if platform.system() not in ("Linux", "Darwin"):
+        raise RefError("refusing to rewrite without an atomic exchange")
+    _renameat_flag(dirfd, src, dst, 2)
+
+
+def _rename_noreplace(dirfd: int, src: str, dst: str) -> None:
+    """Move src onto dst only when dst is absent. A concurrent create is left intact."""
+    system = platform.system()
+    if system == "Linux":
+        flag = 1  # RENAME_NOREPLACE
+    elif system == "Darwin":
+        flag = 4  # RENAME_EXCL
+    else:
+        raise RefError("refusing to restore without an atomic no-replace rename")
+    _renameat_flag(dirfd, src, dst, flag)
+
+
+def _rollback_exchange(
+    dirfd: int,
+    tmp: str,
+    name: str,
+    written_dev: int,
+    written_ino: int,
+    displaced_dev: int,
+    displaced_ino: int,
+    displaced_bytes: bytes,
+    label: str,
+) -> None:
+    """Put the checked page back. Do not swap a temp name this operation no longer owns."""
+    if not _dir_inode_is(dirfd, name, written_dev, written_ino) or not _dir_inode_is(
+        dirfd, tmp, displaced_dev, displaced_ino
+    ):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+    try:
+        current = _read_dir_file(dirfd, tmp, label)
+    except RefError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    if current != displaced_bytes:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+    try:
+        _exchange_names(dirfd, tmp, name)
+    except OSError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    try:
+        back = os.lstat(tmp, dir_fd=dirfd)
+        restored = os.lstat(name, dir_fd=dirfd)
+    except OSError as e:
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}") from e
+    if (
+        back.st_dev != written_dev
+        or back.st_ino != written_ino
+        or restored.st_dev != displaced_dev
+        or restored.st_ino != displaced_ino
+    ):
+        raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+
+
+def _abort_replaced_destination(
+    dirfd: int,
+    tmp: str,
+    name: str,
+    original_dev: int,
+    original_ino: int,
+    label: str,
+) -> None:
+    """Leave a destination we no longer own, and keep the displaced page.
+
+    Do not exchange the name back. Linux can reuse the unlinked inode number for
+    a new file, so an inode match is not proof the destination is still our write.
+    Exchanging that file onto the temp name would delete the other writer's data.
+    """
+    if _dir_inode_is(dirfd, name, original_dev, original_ino):
+        return
+    raise RefError(f"refusing to rewrite changed page {label}; displaced file left at {tmp}")
+
+
+def _installed_write_matches(dirfd: int, name: str, dev: int, ino: int, data: bytes, label: str) -> bool:
+    """True when the destination is still the inode and bytes we installed.
+
+    An unlinked inode number can be reused for a different file, so identity alone is not enough.
+    """
+    if not _dir_inode_is(dirfd, name, dev, ino):
+        return False
+    try:
+        return _read_dir_file(dirfd, name, label) == data
+    except RefError:
+        return False
+
+
+def _name_is_absent(dirfd: int, name: str) -> bool:
+    try:
+        os.lstat(name, dir_fd=dirfd)
+    except FileNotFoundError:
+        return True
+    return False
+
+
+def _dir_inode_is(dirfd: int, name: str, dev: int, ino: int) -> bool:
+    """True when the directory entry is still the regular file we installed."""
+    try:
+        installed = os.lstat(name, dir_fd=dirfd)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(installed.st_mode)
+        and not stat.S_ISLNK(installed.st_mode)
+        and installed.st_dev == dev
+        and installed.st_ino == ino
+    )
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while len(view):
+        written = os.write(fd, view)
+        if written <= 0:
+            raise RefError("failed to write replacement page")
+        view = view[written:]
+
+
+def _rewrite_dir_file(
+    dirfd: int,
+    name: str,
+    data: bytes,
+    label: str,
+    *,
+    must_exist: bool,
+    mode: int | None = None,
+    expected: bytes | None = None,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+) -> tuple[int, int]:
+    if must_exist:
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except OSError as e:
+            raise RefError(f"refusing to rewrite missing page {label}") from e
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise RefError(f"refusing to rewrite non-regular page {label}")
+        if info.st_nlink > 1:
+            raise RefError(f"refusing to rewrite hard-linked page {label}")
+        mode = stat.S_IMODE(info.st_mode)
+    _lock_dir(dirfd, label)
+    tmp = f".atlas-prune-{os.getpid()}-{abs(hash(label)) & 0xFFFFFFF:x}-{os.urandom(4).hex()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dirfd)
+    try:
+        if mode is not None:
+            os.fchmod(fd, mode)
+        _write_all(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        if must_exist:
+            info = os.lstat(name, dir_fd=dirfd)
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise RefError(f"refusing to rewrite non-regular page {label}")
+            if info.st_nlink > 1:
+                raise RefError(f"refusing to rewrite hard-linked page {label}")
+            snapshot = _read_dir_file(dirfd, name, label)
+            if expected is not None and snapshot != expected:
+                raise RefError(f"refusing to rewrite changed page {label}")
+            if expected_dev is not None and (info.st_dev != expected_dev or info.st_ino != expected_ino):
+                raise RefError(f"refusing to rewrite changed page {label}")
+            written = os.lstat(tmp, dir_fd=dirfd)
+            lockfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+            try:
+                os.set_blocking(lockfd, True)
+                _lock_fd(lockfd, label)
+                locked = os.fstat(lockfd)
+                if locked.st_dev != info.st_dev or locked.st_ino != info.st_ino:
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                os.lseek(lockfd, 0, os.SEEK_SET)
+                if _read_fd(lockfd) != snapshot:
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                try:
+                    _exchange_names(dirfd, tmp, name)
+                except OSError as e:
+                    raise RefError(f"refusing to rewrite {label}") from e
+                try:
+                    displaced = os.lstat(tmp, dir_fd=dirfd)
+                    displaced_bytes = _read_dir_file(dirfd, tmp, label)
+                except (OSError, RefError) as e:
+                    try:
+                        _rollback_exchange(dirfd, tmp, name, written.st_dev, written.st_ino, info.st_dev, info.st_ino, snapshot, label)
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}") from e
+                if (
+                    displaced.st_dev != info.st_dev
+                    or displaced.st_ino != info.st_ino
+                    or displaced_bytes != snapshot
+                ):
+                    try:
+                        _rollback_exchange(
+                            dirfd,
+                            tmp,
+                            name,
+                            written.st_dev,
+                            written.st_ino,
+                            displaced.st_dev,
+                            displaced.st_ino,
+                            displaced_bytes,
+                            label,
+                        )
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                if not _installed_write_matches(
+                    dirfd, name, written.st_dev, written.st_ino, data, label
+                ):
+                    try:
+                        _abort_replaced_destination(
+                            dirfd,
+                            tmp,
+                            name,
+                            info.st_dev,
+                            info.st_ino,
+                            label,
+                        )
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                held = tmp
+                try:
+                    current = os.lstat(tmp, dir_fd=dirfd)
+                except OSError as e:
+                    tmp = ""
+                    raise RefError(f"refusing to rewrite {label}; displaced file left at {held}") from e
+                if (
+                    stat.S_ISREG(current.st_mode)
+                    and not stat.S_ISLNK(current.st_mode)
+                    and current.st_dev == info.st_dev
+                    and current.st_ino == info.st_ino
+                    and not _installed_write_matches(
+                        dirfd, name, written.st_dev, written.st_ino, data, label
+                    )
+                ):
+                    try:
+                        _abort_replaced_destination(
+                            dirfd,
+                            tmp,
+                            name,
+                            info.st_dev,
+                            info.st_ino,
+                            label,
+                        )
+                    except RefError:
+                        tmp = ""
+                        raise
+                    raise RefError(f"refusing to rewrite changed page {label}")
+                if (
+                    stat.S_ISREG(current.st_mode)
+                    and not stat.S_ISLNK(current.st_mode)
+                    and current.st_dev == info.st_dev
+                    and current.st_ino == info.st_ino
+                ):
+                    try:
+                        os.unlink(tmp, dir_fd=dirfd)
+                    except OSError as unlink_error:
+                        try:
+                            _rollback_exchange(
+                                dirfd,
+                                tmp,
+                                name,
+                                written.st_dev,
+                                written.st_ino,
+                                info.st_dev,
+                                info.st_ino,
+                                snapshot,
+                                label,
+                            )
+                        except RefError as rollback_error:
+                            tmp = ""
+                            try:
+                                installed = os.lstat(name, dir_fd=dirfd)
+                            except OSError:
+                                raise rollback_error
+                            if (
+                                stat.S_ISREG(installed.st_mode)
+                                and not stat.S_ISLNK(installed.st_mode)
+                                and installed.st_dev == written.st_dev
+                                and installed.st_ino == written.st_ino
+                            ):
+                                raise RewriteInstalled(
+                                    f"refusing to rewrite {label}",
+                                    dev=installed.st_dev,
+                                    ino=installed.st_ino,
+                                ) from rollback_error
+                            raise
+                        raise RefError(f"refusing to rewrite {label}") from unlink_error
+                tmp = ""
+            finally:
+                os.close(lockfd)
+        else:
+            if mode is None:
+                raise RefError(f"refusing to restore {label} without a mode")
+            try:
+                os.link(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd, follow_symlinks=False)
+            except FileExistsError:
+                replaced = _matching_restore(dirfd, name, data, label, mode)
+                return replaced
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise RefError(f"refusing to restore {label}") from e
+                replaced = _matching_restore(dirfd, name, data, label, mode)
+                return replaced
+            written = os.lstat(tmp, dir_fd=dirfd)
+            try:
+                replaced_info = os.lstat(name, dir_fd=dirfd)
+            except OSError as e:
+                held = tmp
+                tmp = ""
+                raise RefError(f"refusing to restore {label}; checked page left at {held}") from e
+            if (
+                stat.S_ISLNK(replaced_info.st_mode)
+                or not stat.S_ISREG(replaced_info.st_mode)
+                or replaced_info.st_dev != written.st_dev
+                or replaced_info.st_ino != written.st_ino
+            ):
+                held = tmp
+                tmp = ""
+                raise RefError(
+                    f"refusing to restore replaced page {label}; checked page left at {held}"
+                )
+            return replaced_info.st_dev, replaced_info.st_ino
+        tmp = ""
+        replaced = os.lstat(name, dir_fd=dirfd)
+        return replaced.st_dev, replaced.st_ino
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp, dir_fd=dirfd)
+            except OSError:
+                pass
+
+
+def _rewrite_store(
+    root: Path,
+    rel: str,
+    data: bytes,
+    *,
+    must_exist: bool = True,
+    mode: int | None = None,
+    expected: bytes | None = None,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+) -> tuple[int, int]:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        return _rewrite_dir_file(
+            dirfd,
+            name,
+            data,
+            rel,
+            must_exist=must_exist,
+            mode=mode,
+            expected=expected,
+            expected_dev=expected_dev,
+            expected_ino=expected_ino,
+        )
+    finally:
+        os.close(dirfd)
+
+
+def _hash_bytes(repo: Path, data: bytes) -> str:
+    hashed = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        cwd=repo,
+        input=data,
+        capture_output=True,
+        check=False,
+    )
+    out = hashed.stdout.decode("utf-8", errors="replace").strip() if hashed.returncode == 0 else ""
+    if hashed.returncode != 0 or not out:
+        raise RefError("cannot hash worktree page")
+    return out
+
+
+def _read_fd(fd: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _preserve_checked_page(dirfd: int, data: bytes, mode: int) -> str:
+    """Write the checked page to a new name before the last directory link can disappear."""
+    recovery = f".atlas-prune-recover-{os.getpid()}-{os.urandom(4).hex()}.tmp"
+    fd = os.open(
+        recovery,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=dirfd,
+    )
+    try:
+        _write_all(fd, data)
+        os.fchmod(fd, mode)
+        os.fsync(fd)
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(recovery, dir_fd=dirfd)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    return recovery
+
+
+def _restore_wrong_rename(
+    dirfd: int,
+    name: str,
+    tmp: str,
+    data: bytes,
+    mode: int,
+    label: str,
+) -> None:
+    """Keep the checked bytes, then put back the file the rename actually moved."""
+    try:
+        recovery = _preserve_checked_page(dirfd, data, mode)
+    except OSError as e:
+        raise RefError(
+            f"refusing to drop replaced page {label}; displaced file left at {tmp}"
+        ) from e
+    try:
+        _restore_displaced(dirfd, name, tmp, label)
+    except RefError as e:
+        raise RefError(
+            f"refusing to drop replaced page {label}; original preserved at {recovery}; displaced file left at {tmp}"
+        ) from e
+    raise RefError(f"refusing to drop replaced page {label}; original preserved at {recovery}")
+
+
+def _restore_displaced(dirfd: int, name: str, tmp: str, label: str) -> None:
+    """Put a renamed replacement back only when the live name is still absent."""
+    try:
+        _rename_noreplace(dirfd, tmp, name)
+    except OSError as e:
+        raise RefError(f"refusing to drop replaced page {label}; displaced file left at {tmp}") from e
+
+
+def _restore_failed_unlink(dirfd: int, name: str, tmp: str, label: str, exc: OSError) -> None:
+    """Put the checked page back when delete fails, so it is not stranded under a temp name."""
+    try:
+        _rename_noreplace(dirfd, tmp, name)
+    except OSError as restore_exc:
+        raise RefError(
+            f"refusing to drop {label}; deletion failed and the page remains at {tmp}"
+        ) from restore_exc
+    raise RefError(f"refusing to drop {label}; deletion failed") from exc
+
+
+def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[bytes, int]:
+    dirfd, name = _open_store_parent(root, rel)
+    try:
+        _lock_dir(dirfd, rel)
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+        except FileNotFoundError as e:
+            raise RefError(f"refusing to drop absent tip page {rel}") from e
+        except OSError as e:
+            raise RefError(f"refusing to delete non-file {rel}") from e
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise RefError(f"refusing to delete non-file {rel}")
+            os.set_blocking(fd, True)
+            _lock_fd(fd, rel)
+            data = _read_fd(fd)
+            again = os.fstat(fd)
+            if again.st_dev != info.st_dev or again.st_ino != info.st_ino:
+                raise RefError(f"refusing to drop replaced page {rel}")
+            if _hash_bytes(repo, data) != expected:
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
+            named = os.lstat(name, dir_fd=dirfd)
+            if (
+                stat.S_ISLNK(named.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or named.st_dev != info.st_dev
+                or named.st_ino != info.st_ino
+            ):
+                raise RefError(f"refusing to drop replaced page {rel}")
+            mode = stat.S_IMODE(info.st_mode)
+            tmp = f".atlas-prune-drop-{os.getpid()}-{os.urandom(4).hex()}.tmp"
+            os.rename(name, tmp, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            moved = os.lstat(tmp, dir_fd=dirfd)
+            if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
+                _restore_wrong_rename(dirfd, name, tmp, data, mode, rel)
+            if not _name_is_absent(dirfd, name):
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            os.lseek(fd, 0, os.SEEK_SET)
+            claimed = _read_fd(fd)
+            claimed_info = os.fstat(fd)
+            if claimed_info.st_dev != info.st_dev or claimed_info.st_ino != info.st_ino:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            if _hash_bytes(repo, claimed) != expected or claimed_info.st_size != len(claimed):
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
+            os.lseek(fd, 0, os.SEEK_SET)
+            if _read_fd(fd) != claimed:
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(
+                    f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree"
+                )
+            if not _name_is_absent(dirfd, name):
+                _restore_displaced(dirfd, name, tmp, rel)
+                raise RefError(f"refusing to drop replaced page {rel}")
+            try:
+                os.unlink(tmp, dir_fd=dirfd)
+            except OSError as exc:
+                _restore_failed_unlink(dirfd, name, tmp, rel, exc)
+            return claimed, stat.S_IMODE(claimed_info.st_mode)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(dirfd)
+
+
+def _iter_pages(root: Path) -> list[Path]:
+    schema, _ = load_schema(root)
+    skip = set(SKIP_TOP) | {staging_dir_name(schema)}
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        current = Path(dirpath)
+        try:
+            parts = current.resolve().relative_to(root.resolve()).parts
+        except ValueError:
+            dirnames[:] = []
+            continue
+        if parts and parts[0] in skip:
+            dirnames[:] = []
+            continue
+        dirnames[:] = [name for name in dirnames if name not in skip]
+        for name in filenames:
+            if not name.endswith(".md"):
+                continue
+            page = current / name
+            try:
+                info = page.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            rel = page.relative_to(root).as_posix()
+            try:
+                dirfd, _name = _open_store_parent(root, rel)
+            except (RefError, OSError):
+                continue
+            os.close(dirfd)
+            found.append(page)
+    return sorted(found)
+
+
+def _managed_top(store: Path, rel: str) -> str | None:
+    schema, _ = load_schema(store)
+    top = rel.split("/", 1)[0]
+    if top in SKIP_TOP or top == staging_dir_name(schema):
+        return top
+    return None
+
+
+def _ancestor_managed(store: Path) -> str | None:
+    """Return the managed directory name when root sits inside another store."""
+    resolved = store.resolve()
+    for parent in resolved.parents:
+        if not (parent / "SCHEMA.json").is_file() and not (parent / "CONTRACT.json").is_file():
+            continue
+        schema, _err = load_schema(parent)
+        try:
+            rel = resolved.relative_to(parent.resolve()).as_posix()
+        except ValueError:
+            return None
+        top = rel.split("/", 1)[0]
+        if top in SKIP_TOP or top == staging_dir_name(schema) or top == "staging":
+            return top
+        return None
+    return None
+
+
+def _require_history_root(store: Path) -> None:
+    """History and prune answer only from a store, never from a managed directory."""
+    schema, err = load_schema(store)
+    if err or not schema:
+        raise RefError("refusing root that is not an Atlas store")
+    managed = _ancestor_managed(store)
+    if managed:
+        raise RefError(f"refusing Atlas-managed root {managed}")
+
+
+def _require_summary_page(store: Path, rel: str, path: Path) -> None:
+    if _managed_top(store, rel):
+        raise RefError(f"refusing Atlas-managed path {rel}")
+    if Path(rel).name in RESERVED:
+        raise RefError(f"summary is not an eligible tip page: {rel}")
+    walked = {page.relative_to(store).as_posix() for page in _iter_pages(store)}
+    if rel not in walked:
+        raise RefError(f"summary is not an eligible tip page: {rel}")
+    try:
+        raw = _read_store(store, rel)
+    except RefError as e:
+        raise RefError(f"summary is not an eligible tip page: {rel}") from e
+    problems = concept_page_errors(store, path, text=raw.decode("utf-8", errors="replace"))
+    if problems:
+        raise RefError(f"summary would fail compile: {problems[0]}")
+    _require_summary_index(store, rel)
+
+
+def _require_summary_index(store: Path, rel: str) -> None:
+    schema, err = load_schema(store)
+    if err or not schema:
+        return
+    merged, _, _ = merge_overlays(schema, store)
+    structure = merged.get("structure") or {}
+    if not bool(structure.get("require_index_in_folders", True)):
+        return
+    parent = Path(rel).parent.as_posix()
+    index_rel = "index.md" if parent == "." else f"{parent}/index.md"
+    try:
+        _read_store(store, index_rel)
+    except RefError as e:
+        raise RefError(f"summary folder has no index.md: {rel}") from e
+
+
+def _require_drop_page(rel: str) -> None:
+    if not rel.endswith(".md") or Path(rel).name in RESERVED:
+        raise RefError(f"drop is not an eligible markdown page: {rel}")
+
+
+def _replace_nofollow(path: Path, data: bytes) -> None:
+    """Replace a directory entry. rename does not follow a final symlink."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".atlas-prune-", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        _write_all(fd, data)
+        os.fsync(fd)
+        try:
+            os.fchmod(fd, stat.S_IMODE(path.lstat().st_mode))
+        except OSError:
+            pass
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def _rewrite_regular(path: Path, data: bytes, label: str) -> None:
+    try:
+        info = path.lstat()
+    except OSError as e:
+        raise RefError(f"refusing to rewrite missing page {label}") from e
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
+        raise RefError(f"refusing to rewrite non-regular page {label}")
+    _replace_nofollow(path, data)
+
+
+def _hard_linked(path: Path) -> bool:
+    try:
+        return path.stat().st_nlink > 1
+    except OSError as e:
+        raise RefError(f"cannot stat {path}") from e
+
+
+def _drop_not_file(store: Path, rel: str) -> str | None:
+    target = store / rel
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        return f"refusing to delete non-file {rel}"
+    return None
+
+
+def _worktree_warning(repo: Path, root: Path, store_rel: str, sha: str, gitpath: str) -> str | None:
+    try:
+        data = _read_store(root, store_rel)
+    except RefError as e:
+        if "missing page" in str(e):
+            raise RefError(f"refusing to drop absent tip page {store_rel}") from e
+        raise
+    head = _resolve_commit(repo, "HEAD")
+    if not _blob_exists(repo, head, gitpath):
+        raise RefError(f"refusing to delete untracked {store_rel}")
+    hashed = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        cwd=repo,
+        input=data,
+        capture_output=True,
+        check=False,
+    )
+    out = hashed.stdout.decode("utf-8", errors="replace").strip() if hashed.returncode == 0 else ""
+    blob_code, blob, _ = run_git(["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"], cwd=repo)
+    head_code, head_blob, _ = run_git(
+        ["rev-parse", "--verify", "--end-of-options", f"{head}:{gitpath}"],
+        cwd=repo,
+    )
+    if (
+        hashed.returncode != 0
+        or blob_code != 0
+        or head_code != 0
+        or not blob
+        or not head_blob
+        or out != blob
+        or out != head_blob
+    ):
+        raise RefError(
+            f"refusing to drop dirty {store_rel}; commit it before prune or choose a rev that matches the worktree and HEAD"
+        )
+    return None
+
+
+def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
+    try:
+        store = store_root(root)
+        _require_history_root(store)
+        rel = _store_rel(store, path)
+        if _managed_top(store, rel):
+            raise RefError(f"refusing Atlas-managed path {rel}")
+        repo = _repo(store)
+        sha = _resolve_commit(repo, rev)
+        gitpath = _git_path(store, repo, rel)
+        _require_regular_blob(
+            repo,
+            sha,
+            gitpath,
+            rel,
+            missing=f"missing blob {rel} at {sha}",
+        )
+        payload = _show_bytes(repo, sha, gitpath)
+    except RefError as e:
+        return _fail(as_json, str(e))
+    except OSError as e:
+        return _fail(as_json, f"refusing to read history: {e.strerror or e}")
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "path": rel,
+                    "ref": sha,
+                    "content": payload.decode("utf-8", errors="replace"),
+                }
+            )
+        )
+        return 0
+    sys.stdout.buffer.write(payload)
+    return 0
+
+
+def run_prune(
+    root: str | None,
+    summary: str,
+    drops: tuple[str, ...],
+    rev: str,
+    kind: str,
+    as_json: bool,
+) -> int:
+    try:
+        if not kind or kind.strip() != kind or any(ch.isspace() for ch in kind) or kind.startswith("-"):
+            raise RefError("kind is required and must not contain whitespace")
+        if not drops:
+            raise RefError("at least one --drop path is required")
+        store = store_root(root)
+        _require_history_root(store)
+        summary_rel = _store_rel(store, summary)
+        summary_path = store / summary_rel
+        _require_summary_page(store, summary_rel, summary_path)
+        drop_rels = [_store_rel(store, item) for item in drops]
+        for rel in drop_rels:
+            managed = _managed_top(store, rel)
+            if managed:
+                raise RefError(f"refusing Atlas-managed path {rel}")
+            _require_drop_page(rel)
+        if summary_rel in drop_rels:
+            raise RefError("refusing to drop the summary")
+        if len(set(drop_rels)) != len(drop_rels):
+            raise RefError("duplicate --drop path")
+        repo = _repo(store)
+        sha = _resolve_commit(repo, rev)
+        _require_tip_ancestor(repo, sha)
+        warnings: list[str] = []
+        for rel in drop_rels:
+            gitpath = _git_path(store, repo, rel)
+            _require_regular_blob(
+                repo,
+                sha,
+                gitpath,
+                rel,
+                missing=f"ref {sha} does not contain {rel}",
+            )
+            warning = _worktree_warning(repo, store, rel, sha, gitpath)
+            if warning:
+                warnings.append(warning)
+        for rel in drop_rels:
+            problem = _drop_not_file(store, rel)
+            if problem:
+                raise RefError(problem)
+        drop_set = set(drop_rels)
+        rewritten: list[str] = []
+        pending: list[tuple[str, str, bytes, int, int, int]] = []
+        summary_final: str | None = None
+        _schema, _schema_err = load_schema(store)
+        version = schema_version(_schema)
+        for page in _iter_pages(store):
+            rel = _store_rel(store, page.relative_to(store).as_posix())
+            if rel in drop_set:
+                continue
+            original_bytes, mode, dev, ino = _read_identity(store, rel)
+            try:
+                original = original_bytes.decode("utf-8")
+            except UnicodeDecodeError as e:
+                raise RefError(f"refusing non-utf-8 page {rel}") from e
+            updated, fm_changes = rewrite_relates_to(
+                original,
+                drop_set,
+                summary_rel,
+                on_summary=rel == summary_rel,
+            )
+            updated, link_changes = rewrite_markdown_links(
+                updated,
+                store,
+                page,
+                drop_set,
+                summary_path,
+            )
+            if fm_changes or link_changes:
+                rewritten.append(rel)
+            if rel == summary_rel:
+                have = _existing_ref_edges(updated)
+                edges = [
+                    (item, kind, sha)
+                    for item in drop_rels
+                    if (item, kind, sha) not in have
+                ]
+                before_edges = updated
+                updated = append_ref_edges(updated, edges)
+                if updated != before_edges and rel not in rewritten:
+                    rewritten.append(rel)
+                summary_final = updated
+            leftover = _remaining_drop_edge(updated, drop_set, version)
+            if leftover:
+                raise RefError(f"unsupported relates_to scalar on {rel} still names {leftover}")
+            if updated != original:
+                before = set(concept_page_errors(store, page, text=original))
+                introduced = [
+                    item for item in concept_page_errors(store, page, text=updated) if item not in before
+                ]
+                if introduced:
+                    raise RefError(f"{rel} would fail compile: {introduced[0]}")
+                pending.append((rel, updated, original_bytes, mode, dev, ino))
+        if summary_final is None:
+            raise RefError(f"summary is not an eligible tip page: {summary_rel}")
+        transformed = concept_page_errors(store, summary_path, text=summary_final)
+        if transformed:
+            raise RefError(f"summary would fail compile: {transformed[0]}")
+        removed: list[tuple[str, bytes, int]] = []
+        written: list[tuple[str, bytes, int, int, int, bytes]] = []
+        root_fd = _open_prune_lock(store)
+        try:
+            _lock_fd(root_fd, summary_rel)
+            try:
+                before_warnings = _blocking_warnings(store)
+                for rel, updated, original_bytes, _mode, dev, ino in pending:
+                    new_bytes = updated.encode("utf-8")
+                    try:
+                        new_dev, new_ino = _rewrite_store(
+                            store,
+                            rel,
+                            new_bytes,
+                            expected=original_bytes,
+                            expected_dev=dev,
+                            expected_ino=ino,
+                        )
+                    except RewriteInstalled as installed:
+                        written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
+                        raise
+                    written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
+                for rel in drop_rels:
+                    gitpath = _git_path(store, repo, rel)
+                    _code, expected, _err = run_git(
+                        ["rev-parse", "--verify", "--end-of-options", f"{sha}:{gitpath}"],
+                        cwd=repo,
+                    )
+                    if _code != 0 or not expected:
+                        raise RefError(f"ref {sha} does not contain {rel}")
+                    head_code, head_blob, _head_err = run_git(
+                        ["rev-parse", "--verify", "--end-of-options", f"HEAD:{gitpath}"],
+                        cwd=repo,
+                    )
+                    if head_code != 0 or head_blob != expected:
+                        raise RefError(
+                            f"refusing to drop dirty {rel}; commit it before prune or choose a rev that matches the worktree and HEAD"
+                        )
+                    data, mode = _unlink_store(store, rel, repo, expected)
+                    removed.append((rel, data, mode))
+                for rel, _new_bytes, _mode, new_dev, new_ino, _original_bytes in written:
+                    dirfd, name = _open_store_parent(store, rel)
+                    try:
+                        if not _installed_write_matches(dirfd, name, new_dev, new_ino, _new_bytes, rel):
+                            raise RefError(f"refusing to rewrite changed page {rel}")
+                    finally:
+                        os.close(dirfd)
+                remaining = sorted(_compile_critical(store))
+                new_warnings = sorted(_blocking_warnings(store) - before_warnings)
+                if remaining or new_warnings:
+                    ident, path, msg = (remaining or new_warnings)[0]
+                    raise RefError(f"prune would fail compile: [{ident}] {path}: {msg}")
+            except Exception as exc:
+                restore_errors: list[str] = []
+                for rel, new_bytes, mode, new_dev, new_ino, original_bytes in reversed(written):
+                    try:
+                        _rewrite_store(
+                            store,
+                            rel,
+                            original_bytes,
+                            must_exist=True,
+                            mode=mode,
+                            expected=new_bytes,
+                            expected_dev=new_dev,
+                            expected_ino=new_ino,
+                        )
+                    except Exception as restore_exc:
+                        restore_errors.append(f"{rel}: {restore_exc}")
+                for rel, data, mode in removed:
+                    try:
+                        _rewrite_store(store, rel, data, must_exist=False, mode=mode)
+                    except Exception as restore_exc:
+                        restore_errors.append(f"{rel}: {restore_exc}")
+                if restore_errors:
+                    raise RefError(
+                        "refusing to roll back prune; " + "; ".join(restore_errors)
+                    ) from exc
+                raise
+        finally:
+            os.close(root_fd)
+    except RefError as e:
+        return _fail(as_json, str(e))
+    except OSError as e:
+        return _fail(as_json, f"refusing to update page: {e.strerror or e}")
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "summary": summary_rel,
+                    "ref": sha,
+                    "kind": kind,
+                    "dropped": drop_rels,
+                    "rewritten": rewritten,
+                    "warnings": warnings,
+                }
+            )
+        )
+    else:
+        for warning in warnings:
+            print(f"atlas ref prune: warning: {warning}", file=sys.stderr)
+        print(f"pruned {len(drop_rels)} page(s) onto {summary_rel} at {sha}")
+    return 0
