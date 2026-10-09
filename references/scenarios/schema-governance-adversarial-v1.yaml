@@ -44,3 +44,6 @@ smokes:
   - id: install-upgrade-share-lock
     source: schema upgrade 1.0 → 2.0 concurrent with schema install
     expect: install refuses while .atlas-upgrade.lock is held; apply rechecks installed overlays under the lock before any write
+  - id: lock-never-reclaimed
+    source: concurrent schema upgrade --apply
+    expect: second upgrade meeting a live lock on a 2.0 contract refuses; only the token owner removes the lock

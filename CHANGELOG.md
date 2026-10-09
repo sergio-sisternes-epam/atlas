@@ -31,6 +31,12 @@
   install that races the upgrade can no longer leave a 2.0 store that fails
   compile. When the lock is already held, apply refuses with a clear message
   instead of a traceback.
+- The lock now carries a unique token. An install or upgrade only removes a
+  lock whose token matches the one it wrote. Apply no longer reclaims an
+  existing lock when the contract already reads 2.0: since v0.10.0 that let
+  a second, concurrent upgrade delete the first upgrade's live lock. Every
+  existing lock is treated as held. A lock left by an interrupted run must
+  be removed by an operator; the error message says when that is safe.
 
 ### Docs
 

@@ -32,11 +32,12 @@ from ..core.schema import (
 )
 from ..core.schema_upgrade import (
     INSTALL_LOCK_TAG,
-    LOCK_NAME,
     UpgradeError,
     acquire_store_lock,
     apply as upgrade_apply,
+    lock_held_message,
     preview as upgrade_preview,
+    release_store_lock,
 )
 
 
@@ -133,19 +134,7 @@ def run_install(
     try:
         lock = acquire_store_lock(r, INSTALL_LOCK_TAG)
     except FileExistsError:
-        _print(
-            as_json,
-            {
-                "ok": False,
-                "error": (
-                    f"{LOCK_NAME} present: a schema upgrade or install is running or was "
-                    "interrupted; retry when it finishes (remove the lock only if no Atlas "
-                    "command is running)"
-                ),
-                "root": str(r),
-                "id": cid,
-            },
-        )
+        _print(as_json, {"ok": False, "error": lock_held_message(r), "root": str(r), "id": cid})
         return 2
     except OSError as e:
         _print(as_json, {"ok": False, "error": f"cannot lock store: {e}", "root": str(r), "id": cid})
@@ -153,7 +142,7 @@ def run_install(
     try:
         return _install_locked(r, ov, src_dir, cid, force, as_json)
     finally:
-        lock.unlink(missing_ok=True)
+        release_store_lock(lock)
 
 
 def _install_locked(

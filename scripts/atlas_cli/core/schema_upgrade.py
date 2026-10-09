@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -52,22 +54,54 @@ class UpgradeError(ValueError):
     pass
 
 
-def acquire_store_lock(root: Path, tag: str) -> Path:
-    """Create the store's upgrade/install lock exclusively; FileExistsError if held."""
-    lock = root / LOCK_NAME
-    fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+@dataclass(frozen=True)
+class StoreLock:
+    path: Path
+    content: str
+
+
+def acquire_store_lock(root: Path, tag: str) -> StoreLock:
+    """Create the store's upgrade/install lock exclusively; FileExistsError if held.
+
+    The lock carries a unique token so that only its owner ever removes it.
+    """
+    path = root / LOCK_NAME
+    content = f"{tag} {uuid.uuid4().hex}\n"
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
-        os.write(fd, f"{tag}\n".encode())
+        os.write(fd, content.encode())
     finally:
         os.close(fd)
-    return lock
+    return StoreLock(path, content)
 
 
-def _lock_holder(lock: Path) -> str:
+def release_store_lock(lock: StoreLock) -> bool:
+    """Remove the lock only if it is still the one this process created."""
     try:
-        return lock.read_text(encoding="utf-8").strip()
+        if lock.path.read_text(encoding="utf-8") != lock.content:
+            return False
     except OSError:
-        return ""
+        return False
+    lock.path.unlink(missing_ok=True)
+    return True
+
+
+def lock_held_message(root: Path) -> str:
+    """Explain an existing lock. Locks are never reclaimed automatically."""
+    try:
+        holder = (root / LOCK_NAME).read_text(encoding="utf-8").split()[0]
+    except (OSError, IndexError):
+        holder = ""
+    if holder == INSTALL_LOCK_TAG:
+        what = "a schema install is running or was interrupted"
+    elif holder == UPGRADE_LOCK_TAG:
+        what = "a schema upgrade is running or was interrupted"
+    else:
+        what = "a schema upgrade or install is running or was interrupted"
+    return (
+        f"{LOCK_NAME} present: {what}; retry when it finishes. Remove the lock only if "
+        "no Atlas command is running and the contract file and schema.d/ have been checked"
+    )
 
 
 def preview(root: Path) -> dict[str, Any]:
@@ -147,28 +181,20 @@ def apply(root: Path) -> dict[str, Any]:
         raise UpgradeError(
             "; ".join(pre["notes"] or pre.get("target_errors") or ["upgrade blocked"])
         )
-    lock = root / LOCK_NAME
-    if lock.is_file():
-        if _lock_holder(lock) == INSTALL_LOCK_TAG:
-            raise UpgradeError(f"schema install in progress ({LOCK_NAME}); retry when it finishes")
-        schema, _ = load_schema(root)
-        if schema and schema_version(schema) == "2.0":
-            lock.unlink(missing_ok=True)
-        else:
-            raise UpgradeError("interrupted upgrade lock present; refusing to continue blindly")
+    # Any existing lock is held; it is never reclaimed from contract state.
     try:
         lock = acquire_store_lock(root, UPGRADE_LOCK_TAG)
     except FileExistsError as e:
-        raise UpgradeError(f"another schema install or upgrade holds {LOCK_NAME}; retry") from e
+        raise UpgradeError(lock_held_message(root)) from e
     # Installs take the same lock, so the overlay set is stable from here on.
     # Recheck it before any write; nothing is written yet, so release on refusal.
     try:
         pre = preview(root)
     except Exception:
-        lock.unlink(missing_ok=True)
+        release_store_lock(lock)
         raise
     if not pre["ok"]:
-        lock.unlink(missing_ok=True)
+        release_store_lock(lock)
         raise UpgradeError(
             "; ".join(pre["notes"] or pre.get("target_errors") or ["upgrade blocked"])
         )
@@ -200,12 +226,10 @@ def apply(root: Path) -> dict[str, Any]:
         tmp.write_text(json.dumps(target, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, contract_path)
     except Exception:
-        if lock.exists():
-            # leave lock for fail-closed detection
-            pass
+        # Leave the lock: a partial upgrade needs an operator to check the store.
         raise
     else:
-        lock.unlink(missing_ok=True)
+        release_store_lock(lock)
     return {
         "ok": True,
         "from": pre["from"],

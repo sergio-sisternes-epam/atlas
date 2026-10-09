@@ -5,7 +5,8 @@ The slot is the root key equal to contribution_id with '-' replaced by '_'.
 It must be an object, is never merged into the effective schema, and is
 ignored by core. Every other extra overlay root key is still rejected on
 SCHEMA 2.0. `schema upgrade --to 2.0` checks installed overlays too, and
-rechecks them under the lock that `schema install` shares.
+rechecks them under the lock that `schema install` shares. Locks are never
+reclaimed and only their owner removes them.
 
 Released overlays under fixtures/contributions/ are installed verbatim.
 """
@@ -217,7 +218,8 @@ def main() -> int:
         check(
             "l-upgrade-refused-while-install-holds-lock",
             r.returncode == 2
-            and "schema install in progress" in out(r)
+            and "schema install is running or was interrupted" in out(r)
+            and (s / lock_name).read_text() == schema_upgrade.INSTALL_LOCK_TAG + "\n"
             and schema.get("schema_version") == "1.0"
             and not overlay_path(s, schema_upgrade.COMPAT_ID).exists(),
             out(r)[:300],
@@ -264,6 +266,70 @@ def main() -> int:
             check("r-upgrade-ok-after-late-valid-install", r.returncode == 0, out(r)[-300:])
         except schema_upgrade.UpgradeError as e:
             check("r-upgrade-ok-after-late-valid-install", False, str(e)[:300])
+
+        # D: locks are never reclaimed from contract state, and only their owner removes them.
+        s = store("d-token")
+        lk = schema_upgrade.acquire_store_lock(s, schema_upgrade.INSTALL_LOCK_TAG)
+        parts = (s / lock_name).read_text().split()
+        check("d-lock-has-token", parts[0] == schema_upgrade.INSTALL_LOCK_TAG and len(parts) == 2 and len(parts[1]) == 32)
+        (s / lock_name).unlink()
+        other = schema_upgrade.acquire_store_lock(s, schema_upgrade.UPGRADE_LOCK_TAG)
+        check(
+            "d-release-keeps-other-holder",
+            schema_upgrade.release_store_lock(lk) is False and (s / lock_name).read_text() == other.content,
+        )
+        check("d-release-own-lock", schema_upgrade.release_store_lock(other) and not (s / lock_name).exists())
+
+        # D2: a second upgrade that previewed 1.0 meets the first upgrade's live
+        # lock after the contract is already 2.0. It must refuse, not reclaim.
+        s = store("d-double-upgrade")
+        original_preview = schema_upgrade.preview
+        first: dict = {}
+
+        def preview_then_first_upgrade_lands(root: Path) -> dict:
+            res = original_preview(root)
+            if not first:
+                first["lock"] = schema_upgrade.acquire_store_lock(root, schema_upgrade.UPGRADE_LOCK_TAG)
+                contract = root / "CONTRACT.json"
+                body = json.loads(contract.read_text())
+                contract.write_text(json.dumps(schema_upgrade._target_schema(body), indent=2) + "\n")
+            return res
+
+        schema_upgrade.preview = preview_then_first_upgrade_lands
+        try:
+            schema_upgrade.apply(s)
+            check("d-second-upgrade-refused", False, "second apply succeeded")
+        except schema_upgrade.UpgradeError as e:
+            check(
+                "d-second-upgrade-refused",
+                "schema upgrade is running or was interrupted" in str(e)
+                and (s / lock_name).read_text() == first["lock"].content,
+                str(e)[:300],
+            )
+        finally:
+            schema_upgrade.preview = original_preview
+        r = install(v06, s)
+        check("d-install-refused-while-first-upgrade-holds", r.returncode == 2 and lock_name in out(r), out(r)[:200])
+        check("d-first-upgrade-releases", schema_upgrade.release_store_lock(first["lock"]) and not (s / lock_name).exists())
+
+        # D3: a stale lock is never reclaimed, on 1.0 or 2.0 stores.
+        for version in ("1.0", "2.0"):
+            s = store(f"d-stale-{version}", version)
+            (s / lock_name).write_text(schema_upgrade.UPGRADE_LOCK_TAG + "\n")
+            r = install(v06, s)
+            check(
+                f"d-stale-{version}-install-refused",
+                r.returncode == 2 and "Remove the lock only if" in out(r) and (s / lock_name).is_file(),
+                out(r)[:200],
+            )
+        s = stores / "d-stale-1.0"
+        r = run(["schema", "upgrade", "--to", "2.0", "--apply", "--root", str(s), "--json"])
+        schema = json.loads((s / "CONTRACT.json").read_text())
+        check(
+            "d-stale-1.0-upgrade-refused",
+            r.returncode == 2 and schema.get("schema_version") == "1.0" and (s / lock_name).is_file(),
+            out(r)[:200],
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
