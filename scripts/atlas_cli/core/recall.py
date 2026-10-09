@@ -106,6 +106,7 @@ def run_recall(
     coarse = str((policy.get("coarse") or {}).get("driver") or "scan")
     rank = str((policy.get("rank") or {}).get("driver") or coarse)
     retrieve_drv = str((policy.get("retrieve") or {}).get("driver") or "pages-graph")
+    match_mode: str | None = None
 
     db_path = None
     ephemeral = False
@@ -225,16 +226,24 @@ def run_recall(
             cur = recall_index.load_current(root) or {}
             generation_id = cur.get("generation") or generation_id
         conn = recall_index.open_db(db_path)
+        allowed = {p.page_id for p in pages}
         try:
             weights = ((policy.get("rank") or {}).get("weights")) or None
             fetch_limit = max_hits * 4 if max_hits else 0
-            hits = fts5_driver.search(conn, rest or query, fetch_limit, weights)
+            text = rest or query
+            hits = fts5_driver.search(conn, text, fetch_limit, weights)
+            hits = [h for h in hits if h["path"] in allowed]
+            match_mode = "all"
+            if not hits and len(fts5_driver.query_tokens(text)) >= 2:
+                hits = fts5_driver.search(conn, text, fetch_limit, weights, operator="OR")
+                hits = [h for h in hits if h["path"] in allowed]
+                for h in hits:
+                    h["match"] = "any"
+                match_mode = "any"
         finally:
             conn.close()
             if ephemeral and db_path is not None:
                 db_path.unlink(missing_ok=True)
-        allowed = {p.page_id for p in pages}
-        hits = [h for h in hits if h["path"] in allowed]
         if max_hits:
             hits = hits[:max_hits]
         engine_used = "sqlite-fts5"
@@ -290,6 +299,8 @@ def run_recall(
             "limits": policy["limits"],
         },
     }
+    if match_mode is not None:
+        payload["match"] = match_mode
     if not complete:
         return payload, 1
     return payload, 0

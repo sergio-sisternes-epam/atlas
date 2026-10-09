@@ -213,7 +213,7 @@ python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --targ
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
 ```
 
-Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
+Search engine: grep until recall is enabled, and grep stays the default when no flag is passed. Without recall, `--engine bm25` ranks with SQLite FTS5 (a published generation when it matches, otherwise a temporary index deleted after the query); it falls back to grep with a warning only when FTS5 is unavailable or projection fails. When an all-words FTS5 query finds nothing, one any-word retry runs and is labelled `match: "any"`. Opt-in default is `atlas:ranked` (published FTS5; query skips YAML projection when the cheap fingerprint matches; product bench beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See path `recall` and path `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
 
 ## Core contract (summary)
 
@@ -242,7 +242,7 @@ Search engine: grep until recall is enabled. Opt-in default is `atlas:ranked` (p
 - Replacing `okf`
 - Phone-home telemetry
 - Auto-authoring claims without an agent
-- BM25 / live okf-wiki migration (separate work `atlas-bm25-and-live-migration-v1`)
+- Live okf-wiki migration (separate work `atlas-bm25-and-live-migration-v1`; BM25 ranking itself ships as `--engine bm25`)
 
 ## Progressive disclosure
 

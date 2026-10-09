@@ -11,6 +11,7 @@ from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
 from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
+from ..core.ignore_guard import ensure_index_ignored
 from ..core.recall_index import IndexError_, publish_generation
 from ..core.schema import (
     by_type_map,
@@ -1131,6 +1132,11 @@ def run(
                         "msg": f"failed to publish recall generation: {e}",
                     }
                 )
+
+    if not dry_run:
+        ignored = ensure_index_ignored(r)
+        if ignored:
+            info.append(ignored)
 
     result = {
         "root": str(r),

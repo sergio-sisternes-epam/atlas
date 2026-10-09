@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
 from ..core.frontmatter import FrontmatterError, read_page
 from ..core.overlay import merge_overlays
+from ..core import recall_index
+from ..core.drivers import fts5 as fts5_driver
 from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.projection import ProjectedPage, ProjectionError, project_store
 from ..core.recall import run_recall
-from ..core.recall_config import recall_enabled, schema_version
+from ..core.recall_config import DEFAULT_WEIGHTS, fts5_available, recall_enabled, schema_version
 from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
@@ -286,11 +290,127 @@ def _grep_search(
     return results[:limit], warnings
 
 
-def _bm25_search(root: Path, query: str, staging_dir: str, limit: int) -> tuple[list[dict], str | None]:
-    index_dir = root / ".atlas-index"
-    if not index_dir.is_dir():
-        return [], "BM25 index not present (.atlas-index/); falling back to grep-mode search"
-    return [], "BM25 engine not yet implemented in this CLI build; falling back to grep-mode search"
+def _bm25_eligible(
+    root: Path,
+    page: ProjectedPage,
+    filters: dict[str, str],
+    prefix: Path | None,
+    include_exits: bool,
+) -> bool:
+    if page.role == "log":
+        return False
+    meta = page.meta
+    for key in ("type", "kva", "status", "work_id"):
+        if filters.get(key) and str(meta.get(key) or "").strip() != filters[key]:
+            return False
+    asked_exit = (
+        str(filters.get("kva") or "").lower() in EXIT_STATES
+        or str(filters.get("status") or "").lower() in EXIT_STATES
+    )
+    if not include_exits and not asked_exit and _is_exit(meta):
+        return False
+    if prefix is not None and not _under_prefix(root / page.path, prefix):
+        return False
+    return True
+
+
+def _fts5_rank(
+    db_path: Path, text: str, eligible: set[str]
+) -> tuple[list[dict], str]:
+    conn = recall_index.open_db(db_path)
+    try:
+        hits = fts5_driver.search(conn, text, 0, dict(DEFAULT_WEIGHTS))
+        hits = [h for h in hits if h["path"] in eligible]
+        if hits or len(fts5_driver.query_tokens(text)) < 2:
+            return hits, "all"
+        hits = fts5_driver.search(conn, text, 0, dict(DEFAULT_WEIGHTS), operator="OR")
+        hits = [h for h in hits if h["path"] in eligible]
+        for h in hits:
+            h["match"] = "any"
+        return hits, "any"
+    finally:
+        conn.close()
+
+
+def _bm25_search(
+    root: Path,
+    schema: dict | None,
+    query: str,
+    limit: int,
+    include_exits: bool,
+) -> tuple[list[dict] | None, list[str], dict]:
+    """Rank with SQLite FTS5. Returns (None, warnings, {}) when grep must take over."""
+    warnings: list[str] = []
+    if not fts5_available():
+        warnings.append(
+            "BM25 needs SQLite FTS5, which this Python's sqlite3 lacks; falling back to grep-mode search"
+        )
+        return None, warnings, {}
+    filters, rest = _split_filters(query)
+    prefix, path_warn = _path_constraint(root, filters.get("path"))
+    if path_warn:
+        warnings.append(path_warn)
+    meta_out = {"ephemeral": False, "fast_path": False, "match": "all"}
+    if prefix is not None and not prefix.exists():
+        return [], warnings, meta_out
+
+    pages: list[ProjectedPage] | None = None
+    db_path: Path | None = None
+    ephemeral = False
+    fast_db = recall_index.matching_fast_path(root, schema)
+    if fast_db is not None:
+        try:
+            pages = recall_index.pages_from_db(fast_db)
+            db_path = fast_db
+        except sqlite3.Error:
+            pages = None
+    if pages is None:
+        try:
+            projection = project_store(root, schema, allow_partial=False)
+        except ProjectionError as e:
+            warnings.append(f"BM25 projection failed ({e}); falling back to grep-mode search")
+            return None, warnings, {}
+        pages = projection["pages"]
+        db_path = recall_index.build_ephemeral(projection)
+        ephemeral = True
+
+    eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+    try:
+        try:
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible)
+        except sqlite3.Error:
+            if ephemeral:
+                raise
+            db_path = recall_index.build_ephemeral(
+                {"pages": pages, "corpus_digest": ""}
+            )
+            ephemeral = True
+            ranked, match_mode = _fts5_rank(db_path, rest, eligible)
+    except sqlite3.Error as e:
+        warnings.append(f"BM25 query failed ({e}); falling back to grep-mode search")
+        return None, warnings, {}
+    finally:
+        if ephemeral and db_path is not None:
+            db_path.unlink(missing_ok=True)
+
+    tokens = _tokenise(rest)
+    by_id = {p.page_id: p for p in pages}
+    hits: list[dict] = []
+    for h in ranked[:limit] if limit else ranked:
+        page = by_id.get(h["path"])
+        if page is not None:
+            h["title"] = page.title or Path(page.path).stem
+            h["snippet"] = _snippet(page.body, tokens)
+            h["relates_to"] = _relates_preview(page.meta)
+            for key in ("kva", "status", "work_id", "growth"):
+                val = _present(page.meta, key)
+                if val is not None:
+                    h[key] = val
+        else:
+            h["relates_to"] = []
+        hits.append(h)
+    meta_out = {"ephemeral": ephemeral, "fast_path": not ephemeral, "match": match_mode}
+    return hits, warnings, meta_out
 
 
 def run(
@@ -393,13 +513,27 @@ def run(
     mode_used = engine
     page_ver = schema_version(effective) if effective else "1.0"
 
-    if engine == "bm25":
-        hits, warning = _bm25_search(r, query, staging_name, limit)
-        if warning:
+    bm25_meta: dict = {}
+    _, free_text = _split_filters(query)
+    if engine == "bm25" and fts5_driver.query_tokens(free_text):
+        bm25_hits, bm25_warnings, bm25_meta = _bm25_search(r, schema, query, limit, include_exits)
+        if bm25_hits is None:
+            warning = bm25_warnings[-1] if bm25_warnings else None
+            extra_warnings = [w for w in bm25_warnings if w != warning]
             mode_used = "grep"
-            hits, extra_warnings = _grep_search(
+            hits, grep_warnings = _grep_search(
                 r, query, staging_name, limit, include_exits, page_ver
             )
+            extra_warnings += [w for w in grep_warnings if w not in extra_warnings]
+        else:
+            hits = bm25_hits
+            extra_warnings = bm25_warnings
+            mode_used = "sqlite-fts5"
+    elif engine == "bm25":
+        mode_used = "grep"
+        hits, extra_warnings = _grep_search(
+            r, query, staging_name, limit, include_exits, page_ver
+        )
     else:
         hits, extra_warnings = _grep_search(
             r, query, staging_name, limit, include_exits, page_ver
@@ -420,6 +554,11 @@ def run(
         "agentic_guidance": AGENTIC_GUIDANCE if mode_used == "grep" else None,
         "discipline": DISCIPLINE if mode_used == "grep" else None,
     }
+    if mode_used == "sqlite-fts5":
+        payload["score_orientation"] = "lower_better"
+        payload["ephemeral"] = bool(bm25_meta.get("ephemeral"))
+        payload["fast_path"] = bool(bm25_meta.get("fast_path"))
+        payload["match"] = bm25_meta.get("match") or "all"
 
     if as_json:
         print(json.dumps(payload, indent=2))
@@ -427,6 +566,9 @@ def run(
         print(f"atlas recall run — root={r}")
         print(f"query: {query}")
         print(f"engine: configured={engine} used={mode_used}")
+        if mode_used == "sqlite-fts5":
+            index_kind = "temporary" if payload.get("ephemeral") else "published"
+            print(f"index: {index_kind}  match: {payload.get('match')}")
         if include_exits:
             print("include_exits: yes")
         for w in all_warnings:

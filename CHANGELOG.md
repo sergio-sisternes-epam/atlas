@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased (targets 0.14.0)
+
+- `atlas recall run --engine bm25` now ranks with SQLite FTS5 on stores
+  where recall is not enabled (SCHEMA 1.0, or 2.0 with recall disabled).
+  It reuses a published generation when the cheap fingerprint matches,
+  otherwise it projects the current tree into a temporary index that is
+  deleted after the query. Field filters and exit-state exclusion match
+  grep mode, filter-only queries keep grep behaviour, and the payload
+  reports `engine_used: "sqlite-fts5"`, `score_orientation`, `ephemeral`
+  and `fast_path`. It falls back to grep with a warning only when FTS5 is
+  unavailable or projection fails. The "BM25 engine not yet implemented"
+  stub is gone. Grep stays the default when no flag is passed, and
+  `--engine` still conflicts with enabled recall.
+- Labelled any-word retry: in `--engine bm25` and in the SMR
+  `sqlite-fts5` path, when an all-words query with two or more tokens
+  finds nothing, one any-word (OR) query runs. The payload carries
+  `match: "all"` or `match: "any"`, and each retried hit carries
+  `match: "any"`. The FTS5 driver gains an `operator` parameter (AND by
+  default).
+- `.atlas-index/` ignore guard: `atlas compile` / `validate` (not
+  `--dry-run`) and `atlas recall index build` add `/.atlas-index/` (or
+  `/<store>/.atlas-index/` for a store below the work-tree top level) to
+  the repository's `info/exclude` when no existing line covers it. A
+  committed `.gitignore` is never edited, non-git stores are left alone,
+  and compile reports an `atlas_index_ignored` info item only when it
+  added the line. Exit codes are unchanged.
+- Docs: `SKILL.md` and path `recall` describe the FTS5-backed
+  `--engine bm25` and the any-word retry; BM25 is no longer listed as a
+  non-goal.
+
 ## 0.13.0 - 2026-10-09
 
 Final 0.13.0 release. Over v0.12.0 the beta series ships:

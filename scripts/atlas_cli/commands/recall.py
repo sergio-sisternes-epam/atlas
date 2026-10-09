@@ -22,6 +22,7 @@ from ..core.recall_config import (
     validate_against,
     validate_store_v2,
 )
+from ..core.ignore_guard import ensure_index_ignored
 from ..core.recall_index import IndexError_, load_current, publish_generation
 from ..core.schema import find_contract_path, load_schema
 from ..core.drivers import tgrep as tgrep_driver
@@ -262,6 +263,9 @@ def run_index_build(root: str | None, as_json: bool = False) -> int:
         _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
         return 2
     payload = {"ok": True, "root": str(r), **result}
+    ignored = ensure_index_ignored(r)
+    if ignored:
+        payload["info"] = [ignored]
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
