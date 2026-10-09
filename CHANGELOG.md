@@ -11,8 +11,14 @@
   This covers the fts5 fast path (recall, `--engine bm25`, `atlas graph`),
   the preferred-engine refresh, nanograph reuse, legacy `.atlas-index/`
   reuse and `atlas index show` / `status`. The digest is hashed from raw
-  bytes once per command; nanograph's index `format` is now 3, and
-  generations recorded with the old digest rebuild once.
+  bytes once per command. It also covers the projection inputs: the bytes
+  of `SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and a
+  `PROJECTION_VERSION`, so a schema-only change (for example SCHEMA 1.0 to
+  2.0, a new relation vocabulary or recall field config) makes the index
+  stale and recall, graph and nanograph rebuild with the new parse, while
+  files outside the projection inputs do not. The fts5 pointer now records
+  `format` 2 and nanograph's index `format` is now 4, so generations
+  recorded with an older digest rebuild once.
 - `atlas graph neighbours PAGE`, `graph edges --from PAGE` and `graph edges
   --to PAGE` refuse an exit-state page (`terminated`, `deprecated`,
   `superseded`) with exit 2 unless `--include-exits` is passed, for example
@@ -81,7 +87,16 @@
   owner's lock aside briefly, so that owner saw it as lost and aborted a
   legitimate build. A failed `still_owned()` read is confirmed once under
   the guard before `lost` is set. This applies to index builders and
-  `atlas-mesh.json.lock`.
+  `atlas-mesh.json.lock`. Publishing now also runs under that guard: the
+  final ownership check, the `current.json` replace and pruning (fts5,
+  including profile stores and `atlas index build`, and nanograph), and the
+  `atlas-mesh.json` replace, happen in one short critical section, so a
+  writer whose stale lock was taken over can no longer overwrite the new
+  owner's pointer, prune its generation or replace its mesh change. It
+  reports `lock_lost` instead (exit 2 for mesh writes). Pruning keeps the
+  previous pointer's generation, and a cheap-fingerprint refresh of the
+  fts5 pointer is written only under the free lock, never over a newer
+  pointer.
 - `atlas graph neighbours --driver nanograph` budgets its work:
   `--max-nodes` / `--max-edges` now bound the nanograph `run` calls, not
   just the output. Only relation kinds present in the projection (or

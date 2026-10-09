@@ -111,14 +111,19 @@ macOS arm64. Atlas does not install it.
   (`format`, `version`, `corpus_digest`, `built_at`; `format` is the
   index layout version, bumped when the generated queries, edge type
   naming or the corpus digest change, so an older generation is rebuilt
-  rather than reused; format 3 is the content digest below). The build runs in a
+  rather than reused; format 3 is the content digest below, format 4 adds
+  the projection inputs to it). The build runs in a
   `.tmp-<generation>` sibling under an owner-checked `.lock` (see path
   `recall`, Atomic publish and lock), is renamed into place
   atomically and then `current.json` (generation, digest, version) is
   replaced atomically; a rebuild for the same digest after a version change
   gets a `-<8 hex>` suffix. A generation is reused while the pointer (and
-  its `ready.json`) matches the digest, version and format; the pointer's generation
-  plus the newest other one are kept and older ones deleted. Symlinked index paths are refused, and a
+  its `ready.json`) matches the digest, version and format. The final
+  ownership check, the `current.json` replace and pruning run in one
+  critical section under the lock's takeover guard (see path `recall`,
+  Atomic publish and lock); the pointer's generation plus one other (the
+  previous pointer's generation, else the newest) are kept and older ones
+  renamed to `.tmp-*` there and deleted afterwards. Symlinked index paths are refused, and a
   build never writes outside `.atlas/indexes/nanograph/<atlas-id>/`.
 - **Queries:** `bm25_text($q)` ranks pages on `text`; rows with score 0 or
   less are dropped and scores are higher-better. The query has no `limit`:
@@ -194,20 +199,29 @@ or, for nanograph, the binary version changes.
 
 **Freshness is decided by content.** The corpus digest is sha256 over the
 sorted lines `<relative path> NUL <sha256 of the file bytes>` of every
-eligible page, so an edit, rename, addition or removal changes it, even an
-edit that keeps the byte length and restores the old mtime. An index or
+eligible page plus the **projection inputs**: the bytes of `SCHEMA.json` /
+`CONTRACT.json` and every `schema.d/*.json` overlay (receipts excluded),
+which decide how pages are parsed (schema version, relation vocabulary,
+recall field config), and the projector's `PROJECTION_VERSION`. So an edit,
+rename, addition or removal changes it, even an edit that keeps the byte
+length and restores the old mtime, and so does a schema-only change such as
+SCHEMA 1.0 to 2.0 with no page touched. Other files (templates, non-page
+files) do not. An index or
 generation counts as current (fts5 fast path for recall, `--engine bm25`
 and `atlas graph`; preferred-engine refresh; nanograph `ready.json` reuse;
 legacy `.atlas-index/` reuse; `atlas index show` / `status`) only when its
 recorded corpus digest equals the current one. The cheap
-path/size/mtime fingerprint stored in the pointer is only a fast pre-check:
+path/size/mtime fingerprint stored in the pointer (pages and projection
+inputs, plus the projection version) is only a fast pre-check:
 when it differs the index is stale without hashing, but a match never
 makes it fresh. The content digest hashes raw bytes without parsing
 YAML and is computed at most once per command; a projection, when one is
 needed, carries the same digest. Generations recorded before this rule
-(different digest formula) rebuild once. Builds go to a `.tmp-*`
+(different digest formula) rebuild once; fts5 pointers record `format` 2
+and nanograph generations `format` 4 for this digest. Builds go to a `.tmp-*`
 sibling under a `.lock` and are published with an atomic rename plus an
-atomic `current.json` pointer replace. On stores with an enabled recall
+atomic `current.json` pointer replace, made under the lock's takeover
+guard after a final ownership check. On stores with an enabled recall
 profile the profile wins; see path `recall`.
 
 - `atlas recall run "<q>" --engine nanograph` (allowed wherever
@@ -252,7 +266,7 @@ history. Every driver keeps its index under
 
 with driver type first: `fts5` (the published recall index:
 `current.json` plus `generations/<gen_id>/`, the pointer's generation and
-the newest other one kept), `nanograph` (`current.json` plus
+one other kept: the previous pointer's generation, else the newest), `nanograph` (`current.json` plus
 `<generation>/` as above) and `tgrep` (its index files).
 `.atlas/` already holds mounted stores as `.atlas/<host>/<owner>/<repo>`, so
 one project gets one index per store across the mesh. `--engine bm25` and a

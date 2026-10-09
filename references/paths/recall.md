@@ -100,8 +100,11 @@ directory and its freshness, without building anything.
 the `nanograph` index under `.atlas/indexes/<driver-type>/<atlas-id>/`;
 `grep` has no index. Whenever the engine comes from `cli`, `env`, `store` or
 `project`, recall checks the content-based corpus digest (sorted relative
-paths plus the sha256 of each file; the path/size/mtime fingerprint is only
-a pre-check that can rule an index stale, never fresh) and, for nanograph,
+paths plus the sha256 of each page, plus the projection inputs: the bytes of
+`SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and the
+projection version, so a schema-only change such as SCHEMA 1.0 to 2.0 or a
+new relation vocabulary also makes the index stale; the path/size/mtime
+fingerprint is only a pre-check that can rule an index stale, never fresh) and, for nanograph,
 the binary version. If the index is missing or stale it
 builds a new generation and publishes it before answering. Unchanged content
 means no rebuild. `atlas compile` / `validate` (not `--dry-run`) and
@@ -124,17 +127,24 @@ releases a lock. Takeover (re-check, rename aside, create) and release
 (`O_EXCL`, with its own owner token, removed only by its creator; a guard
 older than 30 s is abandoned and broken safely). A takeover therefore cannot
 land between a release's ownership check and its removal, and a legitimate
-owner's lock is never moved aside, even briefly. Before it publishes the pointer and
-prunes, a builder checks it still owns the lock; if it lost the lock it
-publishes nothing, deletes its new generation and reports `lock_lost`, and
-readers keep the old pointer. A builder that finds its lock taken over at
+owner's lock is never moved aside, even briefly. The final ownership
+check, the pointer replace and pruning run in one short critical section
+under that same guard (`OwnedLock.owned_critical_section`), so no takeover
+or release can land between the check and the write; the build itself
+stays outside it, and pruned generations are only renamed to `.tmp-*`
+inside it and deleted afterwards. A builder that lost the lock publishes
+nothing, deletes its new generation and reports `lock_lost`, and readers
+keep the new owner's pointer. `atlas-mesh.json` writers re-check ownership
+and replace the file under the guard of `atlas-mesh.json.lock` the same
+way; one that lost the lock exits 2 without writing. A builder that finds its lock taken over at
 release leaves it in place and adds a `lock_lost` debug warning to the
 build result. The builder writes into a
 `.tmp-<generation>` sibling, fsyncs, renames it into place with
 `os.replace`, then replaces the pointer (`current.json`) atomically. Readers
 resolve the pointer once, so they never see a half-built generation; leftover
 `.tmp-*` entries are ignored and removed by the next builder. Pruning keeps
-the pointer's generation plus the newest other one (fts5 and nanograph alike).
+the pointer's generation plus one other: the previous pointer's generation
+when it still exists, else the newest (fts5 and nanograph alike).
 A reader that finds the lock held waits up to five seconds for a fresh
 generation; if none appears, bm25 answers from a temporary index and
 nanograph falls back to bm25, both with a `driver_note`. When the index

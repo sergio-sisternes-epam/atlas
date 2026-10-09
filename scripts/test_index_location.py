@@ -342,6 +342,8 @@ def main() -> int:
             cli("recall", "activate", "--profile", "atlas:ranked", "--root", str(leg2), "--json")
             cli("compile", "--root", str(leg2), "--json")
             cli("recall", "disable", "--root", str(leg2), "--json")
+            # The contract is a freshness input: refresh the index for the disabled config first.
+            cli("recall", "run", "ranking", "--engine", "bm25", "--root", str(leg2), "--json")
             index_location.clear_cache()
             to_legacy_fts5(leg2)
             shutil.rmtree(leg2 / ".atlas")

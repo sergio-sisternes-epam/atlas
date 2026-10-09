@@ -198,7 +198,8 @@ def _fts5_freshness(store: Path, schema: dict[str, Any] | None) -> dict[str, Any
     root = recall_index.index_root(store)
     cur = recall_index._read_pointer(root / recall_index.CURRENT_NAME)
     if cur and cur.get("complete") and recall_index._pointer_db(root, cur.get("db")) is not None:
-        state = "fresh" if digest and cur.get("corpus_digest") == digest else "stale"
+        fresh = recall_index.usable_pointer(cur) and bool(digest) and cur.get("corpus_digest") == digest
+        state = "fresh" if fresh else "stale"
         return {**out, "freshness": state, "generation": cur.get("generation"), "digest": _short(cur.get("corpus_digest"))}
     legacy = recall_index._read_pointer(recall_index.legacy_root(store) / recall_index.CURRENT_NAME)
     if legacy and legacy.get("complete") and recall_index._legacy_pointer_db(store, legacy.get("db")) is not None:

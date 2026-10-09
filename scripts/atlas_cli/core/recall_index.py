@@ -26,6 +26,10 @@ DB_NAME = "projection.sqlite"
 # The pointer's generation plus one previous one, so a reader that resolved the
 # old pointer just before a swap can finish its query.
 KEEP_GENERATIONS = 2
+# Recorded in every new-location pointer; a pointer with another format is
+# never fresh. 2: the corpus digest also covers the projection inputs
+# (SCHEMA/CONTRACT, schema.d overlays, projection version).
+INDEX_FORMAT = 2
 
 IndexError_ = IndexLocationError
 
@@ -77,7 +81,7 @@ def _candidates(store: Path) -> list[Generation]:
     """Usable published generations, new location first, then the legacy one."""
     out: list[Generation] = []
     root, cur = _new_pointer(store)
-    if root is not None and cur and cur.get("complete"):
+    if root is not None and usable_pointer(cur):
         db = _pointer_db(root, cur.get("db"))
         if db is not None:
             out.append(Generation(db, cur, False))
@@ -168,10 +172,34 @@ class Freshness:
     warnings: tuple[dict[str, Any], ...] = ()
 
 
+def usable_pointer(cur: dict[str, Any] | None) -> bool:
+    """A complete new-location pointer written by this index format."""
+    return bool(cur and cur.get("complete") and cur.get("format") == INDEX_FORMAT)
+
+
+def _refresh_fingerprint(root: Path, pointer: dict[str, Any]) -> None:
+    """Best effort: record a new cheap fingerprint, only if the lock is free and the pointer unchanged."""
+    lock = index_publish.BuildLock(root)
+    try:
+        if not lock.try_acquire():
+            return
+    except OSError:
+        return
+    try:
+        with index_publish.critical_section(lock):
+            cur = _read_pointer(root / CURRENT_NAME) or {}
+            if cur.get("generation") == pointer.get("generation") and cur.get("corpus_digest") == pointer.get("corpus_digest"):
+                _write_pointer(root, pointer)
+    except (OSError, index_publish.LockLost):
+        pass
+    finally:
+        lock.release()
+
+
 def _fresh_new(root: Path, *, digest: str | None) -> Generation | None:
     """The current new-location generation when its recorded corpus digest equals ``digest``."""
     cur = _read_pointer(root / CURRENT_NAME)
-    if not cur or not cur.get("complete"):
+    if not usable_pointer(cur):
         return None
     if digest is None or cur.get("corpus_digest") != digest:
         return None
@@ -179,24 +207,29 @@ def _fresh_new(root: Path, *, digest: str | None) -> Generation | None:
     return Generation(db, cur, False) if db is not None else None
 
 
-def _prune(root: Path, keep: str | None) -> None:
-    """Keep the pointer's generation plus the newest other one (readers mid-query keep working)."""
+def _prune(root: Path, keep: str | None, previous: str | None = None) -> list[Path]:
+    """Retire all but the pointer's generation and one other (readers mid-query keep working).
+
+    The other is the previous pointer's generation when it still exists, else
+    the newest one. Call inside the critical section: old generations are only
+    renamed aside to ``.tmp-*`` under ``root``; the caller removes the returned
+    paths afterwards.
+    """
     gens = root / "generations"
     if not gens.is_dir():
-        return
-    others: list[tuple[int, str, Path]] = []
+        return []
+    others: list[tuple[int, int, str, Path]] = []
     for child in gens.iterdir():
         if child.name == keep or child.is_symlink() or not child.is_dir():
             continue
         if child.name.startswith(index_publish.TMP_PREFIX):
             continue
         try:
-            others.append((child.stat().st_mtime_ns, child.name, child))
+            others.append((1 if child.name == previous else 0, child.stat().st_mtime_ns, child.name, child))
         except OSError:
             continue
     others.sort(reverse=True)
-    for _, _, old in others[KEEP_GENERATIONS - 1 :]:
-        shutil.rmtree(old, ignore_errors=True)
+    return index_publish.retire([old for *_, old in others[KEEP_GENERATIONS - 1 :]], root)
 
 
 def ensure_fresh(
@@ -241,10 +274,7 @@ def ensure_fresh(
         pointer = hit.pointer
         if pointer.get("cheap_fingerprint") != fingerprint:
             pointer = {**pointer, "cheap_fingerprint": fingerprint}
-            try:
-                _write_pointer(root, pointer)
-            except OSError:
-                pass
+            _refresh_fingerprint(root, pointer)
         return Freshness(Generation(hit.db, pointer, False), False)
     if projection is None:
         projection = project_store(store, schema, allow_partial=False)
@@ -252,7 +282,7 @@ def ensure_fresh(
             raise IndexNotBuilt("incomplete")
     digest = str(projection["corpus_digest"])
     current = _read_pointer(root / CURRENT_NAME)
-    if allow_legacy and not force and not (current and current.get("complete") and _pointer_db(root, current.get("db"))):
+    if allow_legacy and not force and not (usable_pointer(current) and _pointer_db(root, (current or {}).get("db"))):
         legacy = _read_pointer(legacy_root(store) / CURRENT_NAME)
         if legacy and legacy.get("complete") and legacy.get("corpus_digest") == digest:
             db = _legacy_pointer_db(store, legacy.get("db"))
@@ -279,12 +309,8 @@ def ensure_fresh(
         except BaseException:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
-        try:
-            index_publish.ensure_owned(lock)
-        except index_publish.LockLost:
-            shutil.rmtree(dest, ignore_errors=True)
-            raise
         pointer = {
+            "format": INDEX_FORMAT,
             "generation": gen_id,
             "corpus_digest": digest,
             "cheap_fingerprint": fingerprint,
@@ -292,8 +318,16 @@ def ensure_fresh(
             "complete": True,
             "count": inserted,
         }
-        _write_pointer(root, pointer)
-        _prune(root, gen_id)
+        # Final ownership check, pointer replace and prune under the takeover guard.
+        try:
+            with index_publish.critical_section(lock):
+                before = _read_pointer(root / CURRENT_NAME) or {}
+                _write_pointer(root, pointer)
+                retired = _prune(root, gen_id, str(before.get("generation") or "") or None)
+        except index_publish.LockLost:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        index_publish.discard(retired)
         return Generation(dest / DB_NAME, pointer, False)
 
     gen, built = index_publish.locked_build(

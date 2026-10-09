@@ -71,10 +71,21 @@ def mesh_lock(project: Path) -> Iterator[Any]:
         lock.release()
 
 
+class MeshLockLost(MeshFileError):
+    """The mesh lock was taken over (it went stale) before this writer replaced the file."""
+
+
 def _write_locked(lock: Any, fp: Path, doc: Any, indent: str | int = 2, trailing_newline: bool = True) -> None:
-    if not lock.still_owned():
-        raise MeshFileError(f"{lock.path} was taken over by another writer; {fp} not modified")
-    write_json_atomic(fp, doc, indent=indent, trailing_newline=trailing_newline)
+    """Re-check ownership and replace ``fp`` under the lock's takeover guard.
+
+    The guard is held from the check to the ``os.replace``, so a writer whose
+    stale lock was taken over can never overwrite the new holder's change.
+    """
+    lost = lambda _msg: MeshLockLost(  # noqa: E731
+        f"{lock.path} was taken over by another writer (lock_lost); {fp} not modified"
+    )
+    with lock.owned_critical_section(lost=lost):
+        write_json_atomic(fp, doc, indent=indent, trailing_newline=trailing_newline)
 
 
 def find_project_root(start: Path | None = None) -> Path:

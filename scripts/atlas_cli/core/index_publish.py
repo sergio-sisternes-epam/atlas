@@ -9,10 +9,14 @@ driver (core/drivers/nanograph.py). Both keep their files under
   than :data:`LOCK_STALE_SECONDS`, or whose pid is gone on this host, is stale:
   a new builder renames it aside to ``.lock.stale-<owner>-<rand>`` (atomic;
   losing that race means retrying) and then creates its own. Only the owner
-  releases a lock, and a builder checks it still owns the lock before
-  publishing; a builder that lost it publishes nothing (``lock_lost``).
+  releases a lock; a builder that lost it publishes nothing (``lock_lost``).
 - It builds into ``<parent>/.tmp-<name>``, fsyncs, then publishes with one
   ``os.replace`` of the directory and one ``os.replace`` of the pointer file.
+  The final ownership check, the pointer replace and the pruning of old
+  generations run inside :func:`critical_section` (the lock's takeover guard
+  held throughout), so a stale takeover cannot slip between the check and the
+  write; pruned generations are only renamed to ``.tmp-*`` there and removed
+  afterwards, keeping the section short.
   Readers resolve the pointer once and open that generation, so they never see
   a half-built one. Leftover ``.tmp-*`` entries are ignored by readers and
   removed by the next lock holder.
@@ -30,9 +34,11 @@ import shutil
 import time
 import uuid
 from pathlib import Path
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Callable, TypeVar
 
-from .owned_lock import TAKEOVER_STALE_SECONDS, OwnedLock
+from .owned_lock import TAKEOVER_STALE_SECONDS, OwnedLock, OwnershipLost
 
 LOCK_NAME = ".lock"
 LOCK_STALE_SECONDS = 600.0
@@ -129,10 +135,46 @@ class BuildLock(OwnedLock):
         super().__init__(parent, LOCK_NAME, LOCK_STALE_SECONDS, TAKEOVER_STALE_SECONDS)
 
 
-class LockLost(IndexBusy):
+class LockLost(IndexBusy, OwnershipLost):
     """The builder lock was taken over while building; nothing was published."""
 
     code = "lock_lost"
+
+
+@contextmanager
+def critical_section(lock: BuildLock | None) -> Iterator[None]:
+    """Hold the lock's takeover guard around a publish step; :class:`LockLost` if no longer ours.
+
+    ``None`` (no lock) runs the step unguarded. Wrap only the commit step
+    (pointer replace, prune), never a build.
+    """
+    if lock is None:
+        yield
+        return
+    with lock.owned_critical_section(lost=lambda _msg: LockLost("index build lock lost (lock_lost); generation not published")):
+        yield
+
+
+def retire(paths: list[Path], into: Path) -> list[Path]:
+    """Rename generations aside to ``<into>/.tmp-retired-*`` (cheap; call in the critical section).
+
+    Readers and the pointer never see ``.tmp-*`` names; :func:`discard` (or the
+    next lock holder's :func:`clean_temp`) removes them.
+    """
+    moved: list[Path] = []
+    for path in paths:
+        aside = into / f"{TMP_PREFIX}retired-{path.name}-{new_name()}"
+        try:
+            os.replace(path, aside)
+        except OSError:
+            continue
+        moved.append(aside)
+    return moved
+
+
+def discard(paths: list[Path]) -> None:
+    for path in paths:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def ensure_owned(lock: BuildLock | None) -> None:
@@ -159,8 +201,8 @@ def locked_build(
     """Return ``(result, built)``: a fresh generation found while waiting, or a new build.
 
     ``fresh`` is re-checked after taking the lock so two builders racing for
-    the same digest build once. ``build`` receives the lock and must call
-    :func:`ensure_owned` before publishing anything. A lock found taken over at
+    the same digest build once. ``build`` receives the lock and must publish
+    only inside :func:`critical_section`. A lock found taken over at
     release time appends a ``lock_lost`` debug warning to ``warnings``.
     """
     lock = BuildLock(parent)

@@ -7,9 +7,12 @@ absolute binary path fixed at detection time, and an Atlas-owned index under
 core/index_location.py). Builds run in a ``.tmp-<generation>`` sibling under
 the shared builder lock, are published with an atomic rename and then an
 atomic replace of ``current.json`` (see core/index_publish.py), so readers
-never see a half-built generation. A ready generation in the deprecated in-store
-``.atlas-index/nanograph/`` is reused read-only for 0.14.x. Any failure raises
-DriverError so callers fall back to the built-in driver.
+never see a half-built generation. The final ownership check, the pointer
+replace and pruning run under the lock's takeover guard, so a builder whose
+lock was taken over publishes nothing (``lock_lost``). A ready generation in
+the deprecated in-store ``.atlas-index/nanograph/`` is reused read-only for
+0.14.x. Any failure raises DriverError so callers fall back to the built-in
+driver.
 
 Every nanograph process runs with its working directory set to a private,
 empty ``atlas-nanograph-*`` temporary directory (mode 0700, removed
@@ -53,7 +56,9 @@ KEEP_GENERATIONS = 2
 # generations (for example with a capped bm25_text) are rebuilt, not reused.
 # 3: the corpus digest now covers relative paths plus content (content-digest
 # freshness), so generations recorded with the old digest rebuild once.
-INDEX_FORMAT = 3
+# 4: the corpus digest also covers the projection inputs (SCHEMA/CONTRACT,
+# schema.d overlays, projection version).
+INDEX_FORMAT = 4
 QUERIES_NAME = "atlas.gq"
 DB_NAME = "atlas.nano"
 READY_NAME = "ready.json"
@@ -486,22 +491,27 @@ class NanographDriver(BaseDriver):
             except BaseException:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 raise
+            ready = self._read_ready(dest) or {}
+            pointer = {
+                "generation": name,
+                "corpus_digest": digest,
+                "version": det.version,
+                "built_at": ready.get("built_at"),
+            }
+            # Final ownership check, pointer replace and prune under the takeover guard.
             try:
-                index_publish.ensure_owned(lock)
+                with index_publish.critical_section(lock):
+                    try:
+                        before = json.loads((base / CURRENT_NAME).read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        before = {}
+                    previous = before.get("generation") if isinstance(before, dict) else None
+                    index_publish.write_json_atomic(base / CURRENT_NAME, pointer)
+                    retired = self._prune(base, dest, previous if isinstance(previous, str) else None)
             except index_publish.LockLost:
                 shutil.rmtree(dest, ignore_errors=True)
                 raise
-            ready = self._read_ready(dest) or {}
-            index_publish.write_json_atomic(
-                base / CURRENT_NAME,
-                {
-                    "generation": name,
-                    "corpus_digest": digest,
-                    "version": det.version,
-                    "built_at": ready.get("built_at"),
-                },
-            )
-            self._prune(base, dest)
+            index_publish.discard(retired)
             return dest
 
         reused = gen_dir is not None
@@ -531,18 +541,21 @@ class NanographDriver(BaseDriver):
             self.last_index["driver_note"] = "; ".join(self.build_notes)
         return gen_dir
 
-    def _prune(self, base: Path, keep: Path) -> None:
-        others: list[tuple[str, float, Path]] = []
+    def _prune(self, base: Path, keep: Path, previous: str | None = None) -> list[Path]:
+        """Retire all but ``keep`` and one other: the previous pointer's generation if present, else the newest.
+
+        Old generations are only renamed to ``.tmp-*``; the caller removes the returned paths.
+        """
+        others: list[tuple[int, str, float, Path]] = []
         for child in base.iterdir():
             if child == keep or child.is_symlink() or not child.is_dir():
                 continue
             if child.name.startswith(index_publish.TMP_PREFIX):
                 continue
             ready = self._read_ready(child) or {}
-            others.append((str(ready.get("built_at") or ""), child.stat().st_mtime, child))
+            others.append((1 if child.name == previous else 0, str(ready.get("built_at") or ""), child.stat().st_mtime, child))
         others.sort(reverse=True)
-        for _, _, old in others[KEEP_GENERATIONS - 1 :]:
-            shutil.rmtree(old, ignore_errors=True)
+        return index_publish.retire([old for *_, old in others[KEEP_GENERATIONS - 1 :]], base)
 
     # --- capabilities -----------------------------------------------------
 

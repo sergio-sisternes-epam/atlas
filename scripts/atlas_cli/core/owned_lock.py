@@ -14,6 +14,13 @@ never move a lock that a takeover installed after the release's ownership
 check. A guard older than ``takeover_stale_seconds`` is abandoned and is broken
 (renamed aside, verified by token and identity, then removed).
 
+A holder's final commit step (pointer replace, prune, mesh replace) runs in
+:meth:`OwnedLock.owned_critical_section`: it takes the same guard, re-checks
+ownership and yields while still holding it, so no takeover or release can
+interleave between the check and the write. A holder that lost the lock gets
+an exception and writes nothing. Keep the section short; long work (a whole
+build) stays outside it.
+
 Used by core/index_publish.py (``.lock`` per index parent) and
 core/meshfile.py (``atlas-mesh.json.lock`` per project).
 """
@@ -25,6 +32,8 @@ import os
 import socket
 import time
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +41,14 @@ TAKEOVER_STALE_SECONDS = 30.0
 # How long a takeover waits for a busy guard (release waits until it is stale).
 GUARD_WAIT_SECONDS = 2.0
 GUARD_POLL_SECONDS = 0.005
+
+# Test-only hook, called with the lock just before a critical section takes the
+# guard (lets regression tests interleave a takeover deterministically).
+before_critical_section: Callable[["OwnedLock"], None] | None = None
+
+
+class OwnershipLost(RuntimeError):
+    """The lock no longer carries our token (or the guard stayed busy); nothing was written."""
 
 
 def _new_name() -> str:
@@ -128,6 +145,36 @@ class OwnedLock:
         if not owned:
             self.lost = True
         return owned
+
+    @contextmanager
+    def owned_critical_section(
+        self, lost: Callable[[str], BaseException] | None = None
+    ) -> Iterator[None]:
+        """Run the caller's commit step while holding the takeover guard and the lock.
+
+        Takes ``<name>.takeover`` (waiting until it is released or stale, like
+        :meth:`release`), re-checks that the lock still carries our token and
+        yields with the guard held, so no stale takeover or release can run
+        between that check and the caller's write. If the lock is no longer
+        ours (``lost`` is set) or the guard cannot be taken, raises
+        ``lost(message)`` (default :class:`OwnershipLost`) before yielding.
+        """
+        make = lost or OwnershipLost
+        hook = before_critical_section
+        if hook is not None:
+            hook(self)
+        if not self.held:
+            raise make(f"{self.path} is not held; not written")
+        token = self._acquire_guard(self.takeover_stale_seconds + GUARD_WAIT_SECONDS)
+        if token is None:
+            raise make(f"{self._guard_path()} stayed busy; not written")
+        try:
+            if (self.info() or {}).get("owner") != self.owner:
+                self.lost = True
+                raise make(f"{self.path} was taken over by another holder (lock_lost); not written")
+            yield
+        finally:
+            self._release_guard(token)
 
     def _create(self) -> bool:
         try:
