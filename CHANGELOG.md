@@ -29,6 +29,37 @@
 - Docs: `SKILL.md` and path `recall` describe the FTS5-backed
   `--engine bm25` and the any-word retry; BM25 is no longer listed as a
   non-goal.
+- New read-only command group `atlas graph` for structural lookups over
+  the shared projection (`relates_to` plus top-level frontmatter). It
+  works on every store (SCHEMA or CONTRACT, 1.0 or 2.0, recall on or off),
+  reads a matching published generation when there is one
+  (`fast_path: true`) and otherwise projects the tree in memory. It never
+  writes to the store. `--allow-partial` turns projection errors into
+  exit 1 with `complete: false` and an `omitted` list.
+  - `atlas graph nodes` filters pages with repeatable, ANDed
+    `--where field=value` on normalised scalar text (list fields match
+    any element), plus `--path` and `--limit`.
+  - `atlas graph edges --from|--to|--all [--kind K]` lists edges in
+    authored direction with `resolved` and `external` flags; unresolved
+    edges are never dropped and a leading `./` is normalised.
+  - `atlas graph neighbours PAGE` is a bounded, cycle-safe breadth-first
+    walk with `--direction in|out|both`, `--hops 1..3`, `--kind`,
+    `--where` (filters returned nodes, not traversal), `--max-nodes` /
+    `--max-edges` and `truncated`.
+  - `atlas graph export --format json|nanograph --out DIR` writes a
+    byte-stable `graph.json`, or a nanograph v1.3.0 `schema.pg`,
+    `seed.jsonl` and `export-receipt.json` (unresolved edges listed in
+    the receipt). DIR inside the store is refused.
+  - The recall exit-state rule (`terminated`/`deprecated`/`superseded`
+    hidden unless `--include-exits` or explicitly asked for) applies to
+    every verb except export.
+- Shared helpers: `projection.normalise_target`, and
+  `retrieve.is_exit_page` / `is_visible` / `adjacent` used by both the
+  recall neighbourhood and `atlas graph`. The recall neighbourhood now
+  also resolves `relates_to` targets written with a leading `./`.
+- Docs: new `references/graph.md`; `SKILL.md` lists the `atlas graph`
+  verbs and routes structural questions to them, and path `recall` notes
+  that `atlas graph neighbours` gives the Expand step as structured JSON.
 
 ## 0.13.0 - 2026-10-09
 

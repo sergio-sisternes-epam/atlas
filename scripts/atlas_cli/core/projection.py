@@ -88,6 +88,14 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None) -> str:
     return h.hexdigest()
 
 
+def normalise_target(target: str) -> str:
+    """Store-relative relates_to target with any leading ``./`` removed."""
+    text = str(target or "").strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def _edges_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
     raw = meta.get("relates_to") or []
     edges: list[dict[str, str]] = []
