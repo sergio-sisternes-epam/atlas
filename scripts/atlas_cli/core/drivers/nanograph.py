@@ -46,6 +46,8 @@ BIN_ENV = "ATLAS_NANOGRAPH_BIN"
 VERSION_TIMEOUT = 10
 BUILD_TIMEOUT = 120
 RUN_TIMEOUT = 30
+# graph neighbours: overall wall-clock deadline, in multiples of RUN_TIMEOUT.
+NEIGHBOURS_DEADLINE_RUNS = 4
 KEEP_GENERATIONS = 2
 # Bumped when generated queries or edge type naming change, so older ready
 # generations (for example with a capped bm25_text) are rebuilt, not reused.
@@ -276,7 +278,9 @@ class NanographDriver(BaseDriver):
             raise DriverError(f"{args[0]} failed (exit {proc.returncode})")
         return proc.stdout
 
-    def _run_query(self, gen_dir: Path, name: str, params: dict[str, str]) -> list[Any]:
+    def _run_query(
+        self, gen_dir: Path, name: str, params: dict[str, str], timeout: int = RUN_TIMEOUT
+    ) -> list[Any]:
         args = [
             "run",
             "--db", os.path.abspath(gen_dir / DB_NAME),
@@ -286,7 +290,7 @@ class NanographDriver(BaseDriver):
         ]
         for key, value in params.items():
             args += ["--param", f"{key}={value}"]
-        out = self._exec(args, RUN_TIMEOUT)
+        out = self._exec(args, timeout)
         try:
             data = json.loads(out)
         except json.JSONDecodeError as e:
@@ -606,35 +610,104 @@ class NanographDriver(BaseDriver):
             for e in edges
             if e["resolved"] and not e.get("external")
         }
+        wanted = frozenset(kinds or ())
+        pairs = sorted((t, k) for t, k in kind_of.items() if not wanted or k in wanted)
+        ways = [w for w in ("out", "in") if direction in (w, "both")]
+        max_nodes = options.get("max_nodes", graph.DEFAULT_MAX_NODES)
+        max_edges = options.get("max_edges", graph.DEFAULT_MAX_EDGES)
+        # Work budget: every expanded page is the seed or the far end of an
+        # accepted edge, so at most 1 + max_edges pages are ever expanded.
+        expandable = len(pages) if max_edges is None else min(len(pages), 1 + max(0, max_edges))
+        budget: dict[str, Any] = {
+            "calls": len(pairs) * len(ways) * expandable,
+            "deadline": time.monotonic() + RUN_TIMEOUT * NEIGHBOURS_DEADLINE_RUNS,
+            "stopped": None,
+            "calls_made": 0,
+        }
+        progress: dict[str, Any] = {}
         state: dict[str, Any] = {"gen_dir": None}
         cache: dict[tuple[str, str, str], list[str]] = {}
 
-        def step(page_id: str, way: str, edge_type: str) -> list[str]:
+        def step(page_id: str, way: str, edge_type: str, timeout: int) -> list[str]:
             key = (page_id, way, edge_type)
             if key not in cache:
                 if state["gen_dir"] is None:
                     state["gen_dir"] = self.ensure_index(store, source)
+                budget["calls"] -= 1
+                budget["calls_made"] += 1
                 rows = self._run_query(
-                    state["gen_dir"], f"neighbours_{way}_{query_ident(edge_type)}", {"seed": page_id}
+                    state["gen_dir"],
+                    f"neighbours_{way}_{query_ident(edge_type)}",
+                    {"seed": page_id},
+                    timeout=timeout,
                 )
                 found = (_row_value(r, ("slug", "$n.slug", "n.slug"), 0) for r in rows)
                 cache[key] = sorted({str(s) for s in found if isinstance(s, str) and s})
             return cache[key]
 
-        def adjacency(page_id: str, way: str, wanted: frozenset[str]) -> list[tuple[str, str, str]]:
-            out: list[tuple[str, str, str]] = []
-            for edge_type, kind in sorted(kind_of.items()):
-                if wanted and kind not in wanted:
+        def over_cap(page_id: str, found: list[tuple[str, str, str]]) -> bool:
+            """True once ``found`` is certain to push the traversal past a cap (it truncates anyway)."""
+            seen, accepts = progress["seen"], progress["accepts"]
+            new_nodes: set[str] = set()
+            new_edges: set[tuple[str, str, str]] = set()
+            for other, kind, step_dir in found:
+                visible, counts = accepts(other)
+                if not visible:
                     continue
-                if way in ("out", "both"):
-                    out += [(o, kind, "outgoing") for o in step(page_id, "out", edge_type)]
-                if way in ("in", "both"):
-                    out += [(o, kind, "incoming") for o in step(page_id, "in", edge_type)]
+                key = (page_id, other, kind) if step_dir == "outgoing" else (other, page_id, kind)
+                if key not in progress["edge_keys"]:
+                    new_edges.add(key)
+                if counts and other not in seen:
+                    new_nodes.add(other)
+            return (max_nodes is not None and len(new_nodes) > max_nodes - len(progress["nodes"])) or (
+                max_edges is not None and len(new_edges) > max_edges - len(progress["edges"])
+            )
+
+        def adjacency(page_id: str, way: str, wanted: frozenset[str]) -> list[tuple[str, str, str]]:
+            if budget["stopped"]:
+                return []
+            if (max_nodes is not None and len(progress["nodes"]) >= max_nodes) or (
+                max_edges is not None and len(progress["edges"]) >= max_edges
+            ):
+                budget["stopped"] = "cap"
+                return []
+            out: list[tuple[str, str, str]] = []
+            for w in ways:
+                for edge_type, kind in pairs:
+                    timeout = RUN_TIMEOUT
+                    if (page_id, w, edge_type) not in cache:
+                        if over_cap(page_id, out):
+                            budget["stopped"] = "cap"
+                            return out
+                        left = budget["deadline"] - time.monotonic()
+                        if budget["calls"] <= 0 or left < 1:
+                            budget["stopped"] = "budget"
+                            return out
+                        timeout = min(RUN_TIMEOUT, int(left))
+                    found = step(page_id, w, edge_type, timeout)
+                    out += [(o, kind, "outgoing" if w == "out" else "incoming") for o in found]
             return out
 
         result = graph.query_neighbours(
-            pages, seed, kinds=kinds, direction=direction, hops=hops, adjacency=adjacency, **options
+            pages,
+            seed,
+            kinds=kinds,
+            direction=direction,
+            hops=hops,
+            adjacency=adjacency,
+            progress=progress,
+            **options,
         )
         if state["gen_dir"] is None:
             self.ensure_index(store, source)
-        return {**result, "driver": self.id}
+        result = {**result, "driver": self.id}
+        if budget["stopped"] == "cap":
+            result["truncated"] = True
+            result["driver_note"] = "nanograph traversal stopped at the --max-nodes/--max-edges cap"
+        elif budget["stopped"] == "budget":
+            result["truncated"] = True
+            result["driver_note"] = (
+                "nanograph traversal stopped at its work budget "
+                f"({budget['calls_made']} calls, {RUN_TIMEOUT * NEIGHBOURS_DEADLINE_RUNS}s deadline)"
+            )
+        return result

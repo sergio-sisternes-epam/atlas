@@ -133,7 +133,23 @@ macOS arm64. Atlas does not install it.
   `references/graph.md` (nanograph mapping), and each result is mapped back
   to its original Atlas kind, so kinds such as `foo-bar` and `foo_bar` stay
   distinct. Atlas merges the results in the same breadth-first walk as
-  `native-graph`, so the output matches it exactly.
+  `native-graph`, so the output matches it exactly when no cap is hit.
+- **Neighbours work budget:** `--max-nodes` / `--max-edges` bound the
+  nanograph calls as well as the output. Only edge types of relation kinds
+  that occur as resolved page edges in the projection (narrowed further by
+  `--kind`) are queried, never the whole SCHEMA vocabulary. Each frontier
+  page is queried one edge type and direction at a time (the query syntax
+  Atlas uses has no multi-seed form), and Atlas stops issuing `run` calls as
+  soon as the results so far are certain to exceed the remaining node or
+  edge budget, or once the budget is already used up. The traversal also
+  stops at a call budget (edge types x directions x at most
+  `1 + --max-edges` expanded pages) and an overall deadline of 4 x the 30 s
+  `run` timeout. A stopped traversal returns `truncated: true` and a
+  `driver_note` (`nanograph traversal stopped at the --max-nodes/--max-edges
+  cap`, or `... stopped at its work budget ...`). Its nodes and edges stay
+  within the caps but, because later edge types were never fetched, they
+  can be a different subset from the one `native-graph` returns for the same
+  caps.
 
 ## External driver environment
 

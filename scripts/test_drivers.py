@@ -498,9 +498,12 @@ def main() -> int:
             code_n, native, out_n = cli("graph", "neighbours", *q)
             code_g, nano, out_g = cli("graph", "neighbours", *q, "--driver", "nanograph")
             label = " ".join(q)
-            check(f"neighbours-driver-{label}", code_g == 0 and nano.get("driver_used") == "nanograph" and "driver_note" not in nano, out_g)
+            # A capped traversal stops fetching at the cap and says so; nodes, edges and truncated still match.
+            capped = "--max-nodes" in q or "--max-edges" in q
+            note_ok = "stopped at the --max-nodes/--max-edges cap" in nano.get("driver_note", "") if capped else "driver_note" not in nano
+            check(f"neighbours-driver-{label}", code_g == 0 and nano.get("driver_used") == "nanograph" and note_ok, out_g)
             check(f"neighbours-native-{label}", native.get("driver_used") == "native-graph")
-            strip = lambda d: {k: v for k, v in d.items() if k not in ("driver_used",)}  # noqa: E731
+            strip = lambda d: {k: v for k, v in d.items() if k not in ("driver_used", "driver_note")}  # noqa: E731
             check(f"neighbours-parity-{label}", code_n == code_g and strip(native) == strip(nano), f"{native} != {nano}")
         code, p, out = cli("graph", "neighbours", "nope.md", "--driver", "nanograph")
         check("neighbours-unknown-still-exit-2", code == 2, out)

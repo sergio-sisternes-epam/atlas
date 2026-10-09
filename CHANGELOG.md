@@ -73,7 +73,22 @@
 - Index builder locks carry an `owner` token: only the owner releases a
   lock, stale takeovers rename the old lock aside one at a time, and a
   builder that lost its lock publishes nothing and reports `lock_lost`
-  (readers keep the old pointer).
+  (readers keep the old pointer). Release now re-checks ownership and
+  removes the lock under the same `<name>.takeover` guard as stale takeover.
+  The guard has its own owner token, only its creator removes it, and an
+  abandoned guard is broken after 30 s. A takeover can no longer slip
+  between a release's check and its rename, which used to move the new
+  owner's lock aside briefly, so that owner saw it as lost and aborted a
+  legitimate build. A failed `still_owned()` read is confirmed once under
+  the guard before `lost` is set. This applies to index builders and
+  `atlas-mesh.json.lock`.
+- `atlas graph neighbours --driver nanograph` budgets its work:
+  `--max-nodes` / `--max-edges` now bound the nanograph `run` calls, not
+  just the output. Only relation kinds present in the projection (or
+  given with `--kind`) are queried. Calls stop as soon as a cap is certain
+  to be hit, or once a call budget or a 120 s overall deadline is reached.
+  The result then has `truncated: true` and a `driver_note`. Uncapped
+  results still match `native-graph` exactly.
 - `atlas-mesh.json` validation rejects duplicate store ids (compared after
   normalisation and ignoring case), naming both rows and their paths. Mount,
   `atlas index` (exit 2) and recall refuse such a file instead of letting

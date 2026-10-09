@@ -331,10 +331,16 @@ def query_neighbours(
     max_edges: int | None = DEFAULT_MAX_EDGES,
     include_exits: bool = False,
     adjacency: Callable[[str, str, frozenset[str]], list[tuple[str, str, str]]] | None = None,
+    progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bounded BFS. ``adjacency(page_id, direction, kinds)`` may replace the
     in-memory edge lookup (drivers); it returns (other, kind, outgoing|incoming).
-    ``None`` leaves a cap unbounded; a cap below 1 raises ``GraphError``."""
+    ``None`` leaves a cap unbounded; a cap below 1 raises ``GraphError``.
+
+    ``progress`` (a dict, filled in place) lets a driver's ``adjacency`` see the
+    live traversal state so it can stop fetching once a cap is certain to be
+    hit: ``nodes`` and ``edges`` (the accepted lists), ``seen`` (page id ->
+    hop), ``edge_keys`` and ``accepts(other) -> (visible, counts_as_node)``."""
     if direction not in ("in", "out", "both"):
         raise GraphError("--direction must be in, out or both")
     if hops < 1 or hops > MAX_HOPS:
@@ -360,6 +366,14 @@ def query_neighbours(
     edges: list[dict[str, Any]] = []
     edge_keys: set[tuple[str, str, str]] = set()
     truncated = False
+    if progress is not None:
+
+        def accepts(other: str) -> tuple[bool, bool]:
+            page = by_id.get(other)
+            visible = page is not None and is_visible(page, reveal)
+            return visible, visible and where_matches(page.meta, wheres)
+
+        progress.update(nodes=nodes, edges=edges, seen=hop_of, edge_keys=edge_keys, accepts=accepts)
     level = [seed_page.page_id]
     hop = 0
     while level and hop < hops and not truncated:

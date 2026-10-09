@@ -221,7 +221,8 @@ def run_neighbours(
                         for w in nano_index.get("warnings") or []
                         if isinstance(w, dict) and w.get("level") == "warning" and w.get("code")
                     ]
-                    note = nano_index.get("driver_note")
+                    notes = [nano_index.get("driver_note"), result.pop("driver_note", None)]
+                    note = "; ".join(n for n in notes if n) or None
         if result is None:
             result = driver_overlay.get_driver("native-graph").neighbours(
                 r, page, kinds, direction, hops, source=source, **options

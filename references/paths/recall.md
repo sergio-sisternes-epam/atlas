@@ -118,8 +118,13 @@ yourself; it is never treated as already ignored.
 (`O_CREAT|O_EXCL`, JSON with a per-build `owner` token, pid, host and
 `created_at`). A lock older than ten minutes, or whose pid is no longer
 running on the same host, is stale: the next builder renames it aside
-(`.lock.stale-<owner>-<random>`, atomic, one takeover at a time) and creates
-its own. Only the owner releases a lock. Before it publishes the pointer and
+(`.lock.stale-<owner>-<random>`, atomic) and creates its own. Only the owner
+releases a lock. Takeover (re-check, rename aside, create) and release
+(re-check, remove) both run under a short-lived `.lock.takeover` guard
+(`O_EXCL`, with its own owner token, removed only by its creator; a guard
+older than 30 s is abandoned and broken safely). A takeover therefore cannot
+land between a release's ownership check and its removal, and a legitimate
+owner's lock is never moved aside, even briefly. Before it publishes the pointer and
 prunes, a builder checks it still owns the lock; if it lost the lock it
 publishes nothing, deletes its new generation and reports `lock_lost`, and
 readers keep the old pointer. A builder that finds its lock taken over at
