@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,12 @@ from ..core.recall_config import (
     validate_against,
     validate_store_v2,
 )
-from ..core.recall_index import IndexError_, load_current, publish_generation
+from ..core import index_location
+from ..core.recall_index import (
+    active_generation,
+    legacy_warning,
+    load_current,
+)
 from ..core.schema import find_contract_path, load_schema
 from ..core.schema_upgrade import (
     RECALL_LOCK_TAG,
@@ -46,6 +52,17 @@ def _print(as_json: bool, payload: dict[str, Any]) -> None:
             print(f"{key}: {payload[key]}")
     for line in payload.get("notes") or []:
         print(line)
+
+
+def _index_location_fail(as_json: bool, root: Path, err: Exception) -> int:
+    """Exit 2 for an index location that cannot be resolved (no traceback)."""
+    message = str(err)
+    if as_json:
+        payload = {"ok": False, "error": {"code": "index_location_error", "message": message}, "root": str(root)}
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return 2
 
 
 def _effective(root: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -109,7 +126,11 @@ def run_profiles(root: str | None, as_json: bool = False) -> int:
             "supported": not unsupported,
             "unsupported": unsupported,
         }
-    payload = {"ok": True, "root": str(r), "profiles": profiles, "tgrep": tgrep_driver.capability()}
+    try:
+        tgrep_cap = tgrep_driver.capability(store=r)
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    payload = {"ok": True, "root": str(r), "profiles": profiles, "tgrep": tgrep_cap}
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
@@ -154,6 +175,16 @@ def run_status(root: str | None, as_json: bool = False) -> int:
     r = store_root(root)
     schema, err = _effective(r)
     caps = {name: {**cap, "available": driver_supported(name)[0]} for name, cap in DRIVER_CAPABILITIES.items()}
+    try:
+        tgrep_cap = tgrep_driver.capability(store=r)
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    try:
+        where = index_location.describe(r, "fts5")
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    except OSError:
+        where = {}
     payload = {
         "ok": schema is not None,
         "root": str(r),
@@ -162,11 +193,19 @@ def run_status(root: str | None, as_json: bool = False) -> int:
         "enabled": recall_enabled(schema) if schema else False,
         "capabilities": caps,
         "generation": load_current(r),
-        "tgrep": tgrep_driver.capability(),
+        "tgrep": tgrep_cap,
+        **where,
     }
+    active = active_generation(r)
+    if active is not None and active.legacy:
+        payload["warnings"] = [legacy_warning(r)]
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
+        for item in payload.get("warnings") or []:
+            print(f"warning: {index_location.warning_text(item)}", file=sys.stderr)
+        if payload.get("index_dir"):
+            print(f"index: {payload['index_dir']}")
         print(f"schema={payload['schema_version']} enabled={payload['enabled']}")
         print(f"tgrep: {payload['tgrep'].get('reason') or payload['tgrep'].get('binary') or 'unavailable'}")
         gen = payload["generation"]
@@ -287,22 +326,10 @@ def _disable_locked(r: Path, as_json: bool) -> int:
 
 
 def run_index_build(root: str | None, as_json: bool = False) -> int:
-    r = store_root(root)
-    schema, err = _effective(r)
-    if schema is None:
-        _print(as_json, {"ok": False, "error": err, "root": str(r)})
-        return 2
-    try:
-        result = publish_generation(r, schema, focused=False)
-    except (IndexError_, Exception) as e:
-        _print(as_json, {"ok": False, "error": str(e), "root": str(r)})
-        return 2
-    payload = {"ok": True, "root": str(r), **result}
-    if as_json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print(f"published={result.get('published')} generation={result.get('generation')}")
-    return 0
+    """Deprecated alias of ``atlas index build`` for the store from --root (removal after 0.14.x)."""
+    from .index import run_build
+
+    return run_build(root, None, False, False, as_json, deprecated=True)
 
 
 def run_probe(root: str | None, query: str, profile: str | None, allow_partial: bool, as_json: bool) -> int:
@@ -311,6 +338,8 @@ def run_probe(root: str | None, query: str, profile: str | None, allow_partial: 
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
     else:
+        for item in payload.get("warnings") or []:
+            print(f"warning: {index_location.warning_text(item)}", file=sys.stderr)
         if not payload.get("ok"):
             print(payload.get("error"))
         else:

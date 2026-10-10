@@ -33,7 +33,7 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
     rewrite_relates_to,
     run_prune,
 )
-from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint  # noqa: E402
+from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint, content_digest  # noqa: E402
 from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
 from atlas_cli.commands.validate import _bad_relation_ref, _relation_path_escapes  # noqa: E402
@@ -2598,15 +2598,17 @@ def main() -> int:
         current = stale / ".atlas-index" / "recall" / "current.json"
         current.write_text(json.dumps(pointer), encoding="utf-8")
         if recall_index.matching_fast_path(stale, None) is not None:
-            failures.append("old recall generation should not take the fast path")
+            failures.append("a matching fingerprint must not serve a stale digest")
         else:
-            print("[PASS] fast path rejects a pre-fence recall generation")
-        pointer["index_format"] = recall_index.INDEX_FORMAT
+            print("[PASS] fast path rejects a fingerprint-only recall generation")
+        pointer["corpus_digest"] = content_digest(stale, None)
         current.write_text(json.dumps(pointer), encoding="utf-8")
         if recall_index.matching_fast_path(stale, None) != db.resolve():
-            failures.append("current recall generation should still take the fast path")
+            failures.append(
+                f"matching content digest should take the fast path: {pointer['corpus_digest']}"
+            )
         else:
-            print("[PASS] fast path accepts the current recall format")
+            print("[PASS] fast path accepts a generation whose content digest matches")
 
         future = tmp / "future-rev"
         future_init = run(["init", "--root", str(future), "--json"])

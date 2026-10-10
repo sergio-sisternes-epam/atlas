@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from ..core.auth import AuthResult, resolve_auth
 from ..core.authstore import lookup
@@ -44,7 +45,9 @@ def run(
     as_json: bool,
     quiet: bool = False,
     strategy: str | None = None,
+    warnings_out: list[dict[str, Any]] | None = None,
 ) -> int:
+    """Mount a store. With ``quiet``, non-fatal warning items go to ``warnings_out`` (else stderr)."""
     base = Path(start).resolve() if start else Path.cwd()
     try:
         parsed = parse_pointer(pointer)
@@ -144,6 +147,7 @@ def run(
                 snapshot,
                 quiet=quiet,
                 strategy=strategy,
+                warnings_out=warnings_out,
             )
             return result
         stored = None
@@ -165,6 +169,7 @@ def run(
             "noop",
             quiet=quiet,
             strategy=strategy,
+            warnings_out=warnings_out,
         )
 
     dest_empty = dest.is_dir() and not any(dest.iterdir())
@@ -250,6 +255,7 @@ def run(
         snapshot,
         quiet=quiet,
         strategy=strategy,
+        warnings_out=warnings_out,
     )
 
 
@@ -345,6 +351,7 @@ def _finish(
     snapshot: SubmoduleSnapshot | None = None,
     quiet: bool = False,
     strategy: str | None = None,
+    warnings_out: list[dict[str, Any]] | None = None,
 ) -> int:
     try:
         rel = dest.relative_to(project)
@@ -366,11 +373,15 @@ def _finish(
     if chosen:
         row["strategy"] = chosen
     try:
-        upsert(project, row)
+        written = upsert(project, row)
     except MeshFileError as e:
         cleanup = rollback_submodule_state(snapshot) if snapshot else []
         return _fail_with_cleanup(str(e), cleanup, as_json)
-    return _ok(str(dest), atlas_id, landed, as_json, status, quiet)
+    warnings = list(written.warnings)
+    if quiet and warnings_out is not None:
+        warnings_out.extend(warnings)
+        warnings = []
+    return _ok(str(dest), atlas_id, landed, as_json, status, quiet, warnings)
 
 
 def _fail(msg: str, as_json: bool) -> int:
@@ -394,11 +405,16 @@ def _ok(
     as_json: bool,
     status: str,
     quiet: bool = False,
+    warnings: list[dict[str, Any]] | None = None,
 ) -> int:
-    if quiet:
+    if as_json and not quiet:
+        payload: dict[str, Any] = {"ok": True, "path": path, "id": atlas_id, "ref": ref, "status": status}
+        if warnings:
+            payload["warnings"] = warnings
+        print(json.dumps(payload))
         return 0
-    if as_json:
-        print(json.dumps({"ok": True, "path": path, "id": atlas_id, "ref": ref, "status": status}))
-    else:
+    for item in warnings or []:
+        print(f"atlas mount: warning: {item.get('message')}", file=sys.stderr)
+    if not quiet:
         print(path)
     return 0
