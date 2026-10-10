@@ -105,16 +105,20 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
-def list_overlays(root: Path) -> list[str]:
+def overlay_files(root: Path) -> list[Path]:
+    """Overlay files :func:`merge_overlays` reads, in order (receipts excluded).
+
+    Follows a symlinked ``schema.d`` and lists symlinked (even dangling)
+    ``*.json`` entries. The projection freshness inputs use this same list.
+    """
     d = overlay_dir(root)
     if not d.is_dir():
         return []
-    ids: list[str] = []
-    for p in sorted(d.glob("*.json")):
-        if p.name.endswith(".receipt.json"):
-            continue
-        ids.append(p.stem)
-    return ids
+    return [p for p in sorted(d.glob("*.json")) if not p.name.endswith(".receipt.json")]
+
+
+def list_overlays(root: Path) -> list[str]:
+    return [p.stem for p in overlay_files(root)]
 
 
 def load_overlay(root: Path, cid: str) -> tuple[dict[str, Any] | None, str | None]:

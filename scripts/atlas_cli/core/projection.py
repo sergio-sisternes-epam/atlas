@@ -4,10 +4,11 @@ Freshness inputs: an index generation is current only when its recorded
 corpus digest equals :func:`content_digest` of the store, which covers every
 eligible Markdown file (relative path plus sha256) *and* the projection inputs
 (:func:`projection_inputs`): the bytes of SCHEMA.json / CONTRACT.json and the
-``schema.d/*.json`` overlays, which decide how pages are parsed (schema
+``schema.d/*.json`` overlays that ``merge_overlays`` reads (the same
+enumeration, symlinks followed), which decide how pages are parsed (schema
 version, relation vocabulary, recall field config), plus
 :data:`PROJECTION_VERSION`. :func:`project_store` records the same digest, and
-:func:`cheap_fingerprint` covers the same files by stat, so every caller
+:func:`cheap_fingerprint` covers the same files by stat (of a link's target), so every caller
 (fts5, nanograph, the graph fast path, legacy reuse, ``index show/status``)
 agrees.
 """
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .frontmatter import FrontmatterError, read_page
+from .overlay import overlay_files
 from .paths import CONTRACT_NAME, SCHEMA_NAME, rel, store_root
 from .recall_config import schema_version
 from .schema import staging_dir_name
@@ -91,30 +93,45 @@ def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
 def projection_inputs(root: Path) -> list[Path]:
     """Store files besides pages that decide how pages are projected (sorted, existing only).
 
-    SCHEMA.json / CONTRACT.json and the ``schema.d/*.json`` overlays (receipts
-    excluded): they carry the schema version, relation vocabulary and recall
-    field config that :func:`project_store` and its callers read.
+    SCHEMA.json / CONTRACT.json and the overlays :func:`overlay.overlay_files`
+    lists (the very list :func:`overlay.merge_overlays` reads, so a symlinked
+    ``schema.d`` or overlay file is included): they carry the schema version,
+    relation vocabulary and recall field config that :func:`project_store`
+    and its callers read.
     """
     out = [root / name for name in (CONTRACT_NAME, SCHEMA_NAME) if os.path.lexists(root / name)]
-    overlays = root / OVERLAY_DIR
-    if overlays.is_dir() and not overlays.is_symlink():
-        out.extend(
-            p for p in sorted(overlays.glob("*.json")) if not p.name.endswith(".receipt.json") and os.path.lexists(p)
-        )
+    out.extend(overlay_files(root))
     return out
+
+
+def _input_key(root: Path, path: Path) -> str:
+    """Store-relative name of a projection input, without resolving symlinks."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return rel(root, path)
+
+
+def _input_digest(path: Path) -> str:
+    """sha256 of the bytes a reader gets (symlinks followed).
+
+    A dangling or unreadable input gets a marker that is never a hex digest,
+    keyed by the link text for a symlink so retargeting it still counts.
+    """
+    try:
+        return _sha256_bytes(path.read_bytes())
+    except OSError:
+        pass
+    try:
+        return "unreadable-link:" + _sha256_bytes(os.readlink(path).encode("utf-8", "surrogateescape"))
+    except OSError:
+        return "unreadable"
 
 
 def _input_entries(root: Path) -> list[tuple[str, str]]:
     entries = [("\0projection-version", str(PROJECTION_VERSION))]
     for path in projection_inputs(root):
-        if path.is_symlink():
-            digest = "symlink:" + _sha256_bytes(os.readlink(path).encode("utf-8", "surrogateescape"))
-        else:
-            try:
-                digest = _sha256_bytes(path.read_bytes())
-            except OSError:
-                digest = "unreadable"
-        entries.append(("\0input:" + rel(root, path), digest))
+        entries.append(("\0input:" + _input_key(root, path), _input_digest(path)))
     return entries
 
 
@@ -132,12 +149,18 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None, paths: list[Pat
     """
     h = hashlib.sha256()
     h.update(f"projection-version {PROJECTION_VERSION}\n".encode("ascii"))
-    for path in [*projection_inputs(root), *(eligible_paths(root, schema) if paths is None else paths)]:
+    inputs = [(_input_key(root, p), p) for p in projection_inputs(root)]
+    pages = [(rel(root, p), p) for p in (eligible_paths(root, schema) if paths is None else paths)]
+    for key, path in [*inputs, *pages]:
+        # stat() follows symlinks, so an edited link target changes the fingerprint.
         try:
-            st = path.lstat() if path.is_symlink() else path.stat()
+            st = path.stat()
         except OSError:
-            continue
-        h.update(rel(root, path).encode("utf-8"))
+            try:
+                st = path.lstat()
+            except OSError:
+                continue
+        h.update(key.encode("utf-8"))
         h.update(b"\0")
         h.update(str(st.st_size).encode("ascii"))
         h.update(b"\0")

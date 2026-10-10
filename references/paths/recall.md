@@ -101,8 +101,10 @@ the `nanograph` index under `.atlas/indexes/<driver-type>/<atlas-id>/`;
 `grep` has no index. Whenever the engine comes from `cli`, `env`, `store` or
 `project`, recall checks the content-based corpus digest (sorted relative
 paths plus the sha256 of each page, plus the projection inputs: the bytes of
-`SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and the
-projection version, so a schema-only change such as SCHEMA 1.0 to 2.0 or a
+`SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays (the same
+list overlay merging reads, receipts excluded, with a symlinked `schema.d`,
+symlinked overlays and a symlinked contract file hashed from the bytes of
+their targets) and the projection version, so a schema-only change such as SCHEMA 1.0 to 2.0 or a
 new relation vocabulary also makes the index stale; the path/size/mtime
 fingerprint is only a pre-check that can rule an index stale, never fresh) and, for nanograph,
 the binary version. If the index is missing or stale it

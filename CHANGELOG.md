@@ -19,7 +19,12 @@
   reuse and `atlas index show` / `status`. The digest is hashed from raw
   bytes once per command. It also covers the projection inputs: the bytes
   of `SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and a
-  `PROJECTION_VERSION`, so a schema-only change (for example SCHEMA 1.0 to
+  `PROJECTION_VERSION`. The overlay list is the one overlay merging reads
+  (receipts excluded), including a symlinked `schema.d` and symlinked
+  overlay files, and each input is hashed from the bytes behind any symlink
+  (a dangling or unreadable link gets a fixed marker), so editing an
+  external overlay or `SCHEMA.json` target makes the index stale; the
+  fingerprint stats the link target too. So a schema-only change (for example SCHEMA 1.0 to
   2.0, a new relation vocabulary or recall field config) makes the index
   stale and recall, graph and nanograph rebuild with the new parse, while
   files outside the projection inputs do not. The fts5 pointer now records
