@@ -25,7 +25,6 @@ from ..core.recall_config import (
 )
 from ..core import index_location
 from ..core.recall_index import (
-    IndexError_,
     active_generation,
     legacy_warning,
     load_current,
@@ -53,6 +52,17 @@ def _print(as_json: bool, payload: dict[str, Any]) -> None:
             print(f"{key}: {payload[key]}")
     for line in payload.get("notes") or []:
         print(line)
+
+
+def _index_location_fail(as_json: bool, root: Path, err: Exception) -> int:
+    """Exit 2 for an index location that cannot be resolved (no traceback)."""
+    message = str(err)
+    if as_json:
+        payload = {"ok": False, "error": {"code": "index_location_error", "message": message}, "root": str(root)}
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return 2
 
 
 def _effective(root: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -116,7 +126,11 @@ def run_profiles(root: str | None, as_json: bool = False) -> int:
             "supported": not unsupported,
             "unsupported": unsupported,
         }
-    payload = {"ok": True, "root": str(r), "profiles": profiles, "tgrep": tgrep_driver.capability(store=r)}
+    try:
+        tgrep_cap = tgrep_driver.capability(store=r)
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    payload = {"ok": True, "root": str(r), "profiles": profiles, "tgrep": tgrep_cap}
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
@@ -161,6 +175,16 @@ def run_status(root: str | None, as_json: bool = False) -> int:
     r = store_root(root)
     schema, err = _effective(r)
     caps = {name: {**cap, "available": driver_supported(name)[0]} for name, cap in DRIVER_CAPABILITIES.items()}
+    try:
+        tgrep_cap = tgrep_driver.capability(store=r)
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    try:
+        where = index_location.describe(r, "fts5")
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    except OSError:
+        where = {}
     payload = {
         "ok": schema is not None,
         "root": str(r),
@@ -169,12 +193,9 @@ def run_status(root: str | None, as_json: bool = False) -> int:
         "enabled": recall_enabled(schema) if schema else False,
         "capabilities": caps,
         "generation": load_current(r),
-        "tgrep": tgrep_driver.capability(store=r),
+        "tgrep": tgrep_cap,
+        **where,
     }
-    try:
-        payload.update(index_location.describe(r, "fts5"))
-    except (IndexError_, OSError):
-        pass
     active = active_generation(r)
     if active is not None and active.legacy:
         payload["warnings"] = [legacy_warning(r)]

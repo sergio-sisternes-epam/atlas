@@ -81,14 +81,22 @@
   longer treated as unlimited, and the in-process graph API raises
   `ValueError` for a cap or limit below 1 instead of disabling it.
 - Security: every external driver subprocess (nanograph's `--version`
-  probe, `init`, `load` and `run`) now gets an allow-listed environment from
+  probe, `init`, `load` and `run`, and tgrep's `index` and `search`) now
+  gets an allow-listed environment from
   one helper (`core/drivers/subprocess_env.py`): only `PATH`, `HOME`, temp,
   locale, user, Windows system, `RUST_BACKTRACE`, `RUST_LOG` and `NO_COLOR`
   pass, and a deny pass removes GitHub tokens (`ATLAS_PAT`, `GH_*`,
   `GITHUB_*`, `COPILOT_*`), model API keys and anything named like a
   token, secret, password or credential. Atlas's GitHub tokens no longer
-  reach nanograph. See `references/drivers.md`, External driver
+  reach nanograph or tgrep (tgrep previously inherited Atlas's whole
+  environment). See `references/drivers.md`, External driver
   environment.
+- `atlas recall profiles` and `atlas recall status` exit 2 with a structured
+  error instead of a traceback when the index location cannot be resolved
+  (for example an `atlas-mesh.json` whose duplicate store ids include the
+  store): with `--json`, `{"ok": false, "error": {"code":
+  "index_location_error", "message": ...}, "root": ...}`; in text mode, one
+  `error: ...` line on stderr.
 - Security: the driver platform gate always uses the real platform.
   Production code reads no environment variable for it; tests use an injectable provider and the
   test-only entry `scripts/testing/atlas_test_cli.py`.

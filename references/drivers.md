@@ -158,7 +158,9 @@ macOS arm64. Atlas does not install it.
 
 ## External driver environment
 
-Every external driver subprocess gets an environment built by one helper,
+Every external driver subprocess (nanograph's `--version` probe, `init`,
+`load` and `run`; tgrep's `index` and `search`, all through
+`tgrep.run_argv()`) gets an environment built by one helper,
 `external_driver_env()` in `scripts/atlas_cli/core/drivers/subprocess_env.py`.
 It never inherits Atlas's own environment.
 
@@ -175,7 +177,10 @@ It never inherits Atlas's own environment.
    `OPENAI_`, `GEMINI_`, `ANTHROPIC_`, `AZURE_OPENAI_` or `AWS_`.
 
 So GitHub tokens, model API keys and unrelated variables never reach
-nanograph. A future external driver uses the same helper.
+nanograph or tgrep. A future external driver uses the same helper; a test
+(`scripts/test_review_r10.py`) fails when any `subprocess` call under
+`core/drivers/` omits `env=` or passes anything other than
+`external_driver_env()`.
 
 ## Selection and fallback
 

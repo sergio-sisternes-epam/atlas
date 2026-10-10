@@ -1,9 +1,12 @@
-"""tgrep coarse driver: argv subprocess, Atlas-owned on-disk index, never serve."""
+"""tgrep coarse driver: argv subprocess, Atlas-owned on-disk index, never serve.
+
+Every tgrep subprocess goes through :func:`run_argv`, which passes the
+allow-listed, credential-free environment from ``subprocess_env``.
+"""
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -11,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .scan import tokenise
+from .subprocess_env import external_driver_env
 from .. import index_location
 from ..ignore_guard import ensure_indexes_ignored
 from ..index_location import IndexLocationError
@@ -114,7 +118,7 @@ def run_argv(
         text=True,
         timeout=timeout,
         check=False,
-        env=os.environ.copy(),
+        env=external_driver_env(),
     )
 
 

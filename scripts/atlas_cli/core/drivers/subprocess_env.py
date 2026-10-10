@@ -1,6 +1,6 @@
 """Allow-listed environment for every external driver subprocess.
 
-External drivers (nanograph today) never inherit Atlas's environment. They get
+External drivers (nanograph and tgrep) never inherit Atlas's environment. They get
 only the variables in :data:`ALLOWED_ENV` that are already set, and a deny pass
 then removes anything that looks like a credential, even when it is also on
 the allow-list. See references/drivers.md.
