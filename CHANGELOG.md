@@ -2,6 +2,25 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed: `atlas index show/status` in mesh mode without `--store` no longer
+  invent a store. Run from a consuming project's root (or a subdirectory)
+  that has an `atlas-mesh.json` but is not itself a store, `show` reported a
+  made-up `local/<dir>-<hash>` store with `ok: true` next to a
+  missing-schema error. Now `show` exits 2 with `code: store_required`,
+  the known ids (`known_ids` in `--json`) and a hint for `--store` or
+  `atlas index status`; a mesh with exactly one store row selects that row
+  (`selected: only_mesh_row`). `status` lists every mesh row and the
+  project default from the project root, a subdirectory or inside a
+  mounted store (marking that store with `current_store`). `build` without
+  `--store`/`--all` follows `show`, with a hint for `--store`/`--all`. A
+  plain directory with no mesh exits 2 with `code: not_a_store` and the
+  `atlas mount` hint. `--root` inside a mounted store now selects that
+  store. `ok` is `false` whenever an `error` is reported (exit 1 for a
+  store whose contract cannot be read). At the root cause, index location
+  resolution refuses to derive any atlas id for a directory that is neither
+  a mesh row nor a store, so `atlas recall status` on such a directory no
+  longer shows a synthetic index path either; real standalone stores keep
+  their origin or `local/` id.
 - FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)
   are tokenised like the index's `unicode61` tokenizer instead of keeping
   only ASCII letters, digits and `_`. `café`, `résumé`, `Grüße` and `東京`

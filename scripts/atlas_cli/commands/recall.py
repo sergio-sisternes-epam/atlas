@@ -175,12 +175,19 @@ def run_status(root: str | None, as_json: bool = False) -> int:
     r = store_root(root)
     schema, err = _effective(r)
     caps = {name: {**cap, "available": driver_supported(name)[0]} for name, cap in DRIVER_CAPABILITIES.items()}
+    # A non-store has no atlas id: report the schema error without index fields.
+    store: Path | None = r
     try:
-        tgrep_cap = tgrep_driver.capability(store=r)
+        if schema is None and not index_location.is_store(r) and index_location.mesh_match(r) is None:
+            store = None
     except index_location.IndexLocationError as e:
         return _index_location_fail(as_json, r, e)
     try:
-        where = index_location.describe(r, "fts5")
+        tgrep_cap = tgrep_driver.capability(store=store)
+    except index_location.IndexLocationError as e:
+        return _index_location_fail(as_json, r, e)
+    try:
+        where = index_location.describe(r, "fts5") if store is not None else {}
     except index_location.IndexLocationError as e:
         return _index_location_fail(as_json, r, e)
     except OSError:

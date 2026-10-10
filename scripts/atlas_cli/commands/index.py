@@ -31,10 +31,20 @@ DEPRECATION = {
 }
 UNAVAILABLE_CODE = "engine_unavailable_here"
 MOUNT_HINT = "register the store with `atlas mount <source>` (from the project root) first"
+STORE_REQUIRED = "store_required"
+NOT_A_STORE = "not_a_store"
 
 
 class UsageError(Exception):
     """Bad target or arguments; exit 2 and nothing written."""
+
+    def __init__(self, message: str, *, code: str | None = None, hint: str | None = None, **extra: Any) -> None:
+        super().__init__(message)
+        self.fields: dict[str, Any] = {
+            **({"code": code} if code else {}),
+            **({"hint": hint} if hint else {}),
+            **extra,
+        }
 
 
 @dataclass
@@ -57,6 +67,7 @@ class StoreRef:
     row: dict[str, Any] | None = None
     rel: str | None = None
     errors: list[str] = field(default_factory=list)
+    selected: str | None = None
 
     @property
     def mounted(self) -> bool:
@@ -76,13 +87,23 @@ def _emit(as_json: bool, payload: dict[str, Any], lines: list[str]) -> None:
         print(line)
 
 
-def _fail(as_json: bool, error: str, code: int = 2, **extra: Any) -> int:
+def _fail(as_json: bool, error: str, exit_code: int = 2, **extra: Any) -> int:
     payload = {"ok": False, "error": error, **extra}
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
     else:
         print(f"atlas index — error: {error}", file=sys.stderr)
-    return code
+        hint = extra.get("hint")
+        if hint and hint not in error:
+            print(f"hint: {hint}", file=sys.stderr)
+    return exit_code
+
+
+def _usage_fail(as_json: bool, e: UsageError, root: Path) -> int:
+    """Exit 2 with the error's structured fields (``code``, ``hint``, ``known_ids``...)."""
+    fields = dict(e.fields)
+    code = fields.pop("code", None)
+    return _fail(as_json, str(e), **({"code": code} if code else {}), root=str(root), **fields)
 
 
 # --- locating the project and stores ------------------------------------------------
@@ -96,11 +117,16 @@ def _nearest_mesh(start: Path) -> Path | None:
 
 
 def locate(root: str | None) -> Located:
-    """The store at ``--root`` (when it is a mesh row) and the project that owns the mesh file."""
+    """The mounted store at or above ``--root`` (a mesh row) and the project that owns the mesh file.
+
+    A standalone store at ``--root`` is never replaced by a mounted store above it.
+    """
     r = store_root(root)
     index_location.clear_cache()
     try:
         match = index_location.mesh_match(r)
+        if match is None and not index_location.is_store(r):
+            match = index_location.mounted_store_at_or_above(r)
     except index_location.IndexLocationError as e:
         return Located(r, _nearest_mesh(r), None, error=str(e))
     if match is not None:
@@ -120,6 +146,14 @@ def _load_doc(loc: Located) -> dict[str, Any]:
     return loc.doc
 
 
+def _not_a_store_error(loc: Located) -> UsageError:
+    return UsageError(
+        f"{loc.root} is not an Atlas store and no {meshfile.MESH_NAME} is at or above it; {MOUNT_HINT}",
+        code=NOT_A_STORE,
+        hint=MOUNT_HINT,
+    )
+
+
 def _no_mesh_error(loc: Located) -> UsageError:
     return UsageError(
         f"no {meshfile.MESH_NAME} at or above {loc.root}; {MOUNT_HINT}. "
@@ -131,8 +165,12 @@ def _rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return [r for r in doc.get("stores") or [] if isinstance(r, dict) and isinstance(r.get("id"), str)]
 
 
+def _known_ids(doc: dict[str, Any]) -> list[str]:
+    return [str(r["id"]) for r in _rows(doc)]
+
+
 def _known(doc: dict[str, Any]) -> str:
-    ids = [str(r["id"]) for r in _rows(doc)]
+    ids = _known_ids(doc)
     return ", ".join(ids) if ids else "(none)"
 
 
@@ -158,10 +196,20 @@ def _row_for(loc: Located, raw_id: str) -> StoreRef:
     folded = [row for row in _rows(doc) if row["id"].lower() == wanted.lower()]
     if len(folded) == 1:
         return _ref(loc.project, folded[0])
-    raise UsageError(f"unknown store id {raw_id!r} in {loc.mesh_file}; known ids: {_known(doc)}")
+    raise UsageError(
+        f"unknown store id {raw_id!r} in {loc.mesh_file}; known ids: {_known(doc)}",
+        code="unknown_store",
+        known_ids=_known_ids(doc),
+    )
 
 
-def _root_store(loc: Located, *, need_row: bool) -> StoreRef:
+def _root_store(loc: Located, *, need_row: bool, verb: str = "show") -> StoreRef:
+    """The store at ``--root``. Never derives an id for a directory that is not a store.
+
+    Without a mounted or standalone store at ``--root``: a mesh with exactly
+    one store row selects that row; any other mesh raises ``store_required``
+    and no mesh raises ``not_a_store`` (both exit 2).
+    """
     if loc.match is not None:
         assert loc.project is not None
         return _ref(loc.project, loc.match.row)
@@ -171,9 +219,37 @@ def _root_store(loc: Located, *, need_row: bool) -> StoreRef:
         doc = _load_doc(loc)
         raise UsageError(
             f"{loc.root} is not a store listed in {loc.mesh_file}; pass --store <atlas-id> "
-            f"(known ids: {_known(doc)}) or --default"
+            f"(known ids: {_known(doc)}) or --default",
+            code=STORE_REQUIRED,
+            known_ids=_known_ids(doc),
         )
-    return StoreRef(index_location.resolve(loc.root).atlas_id, loc.root)
+    if index_location.is_store(loc.root):
+        try:
+            return StoreRef(index_location.resolve(loc.root).atlas_id, loc.root)
+        except index_location.IndexLocationError as e:
+            raise UsageError(str(e)) from e
+    if loc.project is None:
+        raise _not_a_store_error(loc)
+    doc = _load_doc(loc)
+    rows = _rows(doc)
+    if len(rows) == 1:
+        ref = _ref(loc.project, rows[0])
+        ref.selected = "only_mesh_row"
+        return ref
+    what = "a project root, not a store" if loc.root == loc.project else f"not a store (project root: {loc.project})"
+    other = "--all for every store" if verb == "build" else "run `atlas index status` for every store"
+    raise UsageError(
+        f"{loc.root} is {what}; pass --store <atlas-id> (known: {_known(doc)}) or {other}",
+        code=STORE_REQUIRED,
+        hint=(
+            "run `atlas index build --store <atlas-id>` for one store or `atlas index build --all` for every mounted store"
+            if verb == "build"
+            else "run `atlas index show --store <atlas-id>` for one store or `atlas index status` for every store"
+        ),
+        known_ids=_known_ids(doc),
+        project=str(loc.project),
+        mesh_file=_rel(loc, loc.mesh_file),
+    )
 
 
 def _rel(loc: Located, path: Path | None) -> str | None:
@@ -364,9 +440,9 @@ def run_build(
         elif store:
             refs = [_row_for(loc, store)]
         else:
-            refs = [_root_store(loc, need_row=False)]
+            refs = [_root_store(loc, need_row=False, verb="build")]
     except UsageError as e:
-        return _fail(as_json, str(e), root=str(loc.root))
+        return _usage_fail(as_json, e, loc.root)
     results = [build_store(ref, force) for ref in refs]
     failed = [r for r in results if r.get("status") == "failed"]
     if all_stores:
@@ -383,6 +459,8 @@ def run_build(
         if only.get("config_error"):
             return _fail(as_json, str(only.get("error")), root=str(refs[0].path))
         payload = {"ok": not failed, "root": str(refs[0].path), **only, "stores": results}
+        if refs[0].selected:
+            payload["selected"] = refs[0].selected
         code = 1 if failed else 0
     if deprecated:
         payload["warnings"] = [DEPRECATION, *(payload.get("warnings") or [])]
@@ -424,7 +502,7 @@ def _write(
         project, target, ref = _write_target(loc, store, default)
         result = meshfile.set_recall_engine(project, target, value)
     except UsageError as e:
-        return _fail(as_json, str(e), root=str(loc.root))
+        return _usage_fail(as_json, e, loc.root)
     except (meshfile.MeshFileError, OSError) as e:
         return _fail(as_json, str(e), root=str(loc.root), mesh_file=_rel(loc, loc.mesh_file))
     index_location.clear_cache()
@@ -593,12 +671,16 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
         ref = _row_for(loc, store) if store else _root_store(loc, need_row=False)
         doc = _load_doc(loc) if ref.row is not None else None
     except UsageError as e:
-        return _fail(as_json, str(e), root=str(loc.root))
+        return _usage_fail(as_json, e, loc.root)
     info = describe_store(ref, doc)
     if info.get("error"):
         return _fail(as_json, str(info["error"]), root=str(ref.path))
     ignore = indexes_ignore_status(ref.path, loc.project)
     payload = {"ok": True, "mesh_file": _rel(loc, loc.mesh_file) if ref.row is not None else None, **info, "ignore": ignore}
+    if ref.selected:
+        payload["selected"] = ref.selected
+    if info.get("schema_error"):
+        payload.update(ok=False, error=info["schema_error"])
     lv = info["levels"]
     lines = [
         f"store: {ref.store_id}" + (f" ({ref.rel})" if ref.rel else "") + ("" if ref.mounted else " — not mounted"),
@@ -618,8 +700,12 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
     idx = info.get("index") or {}
     lines.append(f"index: {idx.get('index_dir') or '-'} {_freshness_text(idx, ref.mounted)}")
     lines.append(_ignore_line(ignore))
+    if ref.selected:
+        lines.insert(0, f"note: {loc.root} is not a store; showing the only store in {_rel(loc, loc.mesh_file)}")
+    if payload.get("error"):
+        lines.append(f"error: {payload['error']}")
     _emit(as_json, payload, lines)
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 def _ignore_line(ignore: dict[str, Any]) -> str:
@@ -631,17 +717,22 @@ def run_status(root: str | None, as_json: bool) -> int:
     loc = locate(root)
     if loc.error:
         return _fail(as_json, loc.error, root=str(loc.root))
+    current: str | None = None
     if loc.project is None:
-        refs = [_root_store(loc, need_row=False)]
+        try:
+            refs = [_root_store(loc, need_row=False)]
+        except UsageError as e:
+            return _usage_fail(as_json, e, loc.root)
         doc: dict[str, Any] | None = None
         mode = "standalone"
     else:
         try:
             doc = _load_doc(loc)
         except UsageError as e:
-            return _fail(as_json, str(e), root=str(loc.root))
+            return _usage_fail(as_json, e, loc.root)
         refs = [_ref(loc.project, row) for row in _rows(doc)]
         mode = "mesh"
+        current = str(loc.match.row["id"]) if loc.match is not None else None
     top = (doc or {}).get("recall")
     default = top.get("engine") if isinstance(top, dict) else None
     rows = []
@@ -650,9 +741,11 @@ def run_status(root: str | None, as_json: bool) -> int:
         lv = d.get("levels") or {}
         configured, source = (lv.get("store"), "store") if lv.get("store") else (lv.get("project"), "project") if lv.get("project") else (None, "default")
         idx = d.get("index") or {}
+        error = d.get("error") or d.get("schema_error")
         rows.append(
             {
                 "store_id": ref.store_id,
+                **({"current": ref.store_id == current} if current else {}),
                 "path": ref.rel,
                 "mounted": ref.mounted,
                 "configured": configured,
@@ -664,20 +757,24 @@ def run_status(root: str | None, as_json: bool) -> int:
                 "freshness": idx.get("freshness") if ref.mounted else None,
                 "generation": idx.get("generation") if ref.mounted else None,
                 "index_dir": idx.get("index_dir"),
-                **({"error": d["error"]} if d.get("error") else {}),
+                **({"error": error} if error else {}),
             }
         )
     ignore = indexes_ignore_status(refs[0].path if refs else loc.root, loc.project)
+    errors = [r for r in rows if r.get("error")]
     payload = {
-        "ok": True,
+        "ok": not errors,
         "mode": mode,
         "project": str(loc.project) if loc.project else None,
         "mesh_file": _rel(loc, loc.mesh_file),
+        "current_store": current,
         "default": default,
         "ignore": ignore,
         "stores": rows,
     }
     lines = [f"project default: {default or '-'}" + (f" ({payload['mesh_file']})" if payload["mesh_file"] else " (standalone store)")]
+    if current:
+        lines.append(f"current store: {current}")
     header = ("ID", "MOUNTED", "CONFIGURED", "EFFECTIVE", "FRESHNESS", "INDEX")
     table = [header]
     for row in rows:
@@ -691,5 +788,7 @@ def run_status(root: str | None, as_json: bool) -> int:
     widths = [max(len(str(r[i])) for r in table) for i in range(len(header))]
     lines += ["  ".join(str(c).ljust(w) for c, w in zip(r, widths)).rstrip() for r in table]
     lines.append(_ignore_line(ignore))
+    if errors:
+        lines.append(f"{len(errors)} store(s) with errors")
     _emit(as_json, payload, lines)
-    return 0
+    return 0 if payload["ok"] else 1

@@ -195,7 +195,7 @@ python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|acti
 # index verbs all take [--root <dir>] [--json]; `index build` replaces deprecated `recall index build`
 python3 <atlas-skill>/scripts/atlas.py index set <grep|bm25|nanograph> [--store <id> | --default] [--build]
 python3 <atlas-skill>/scripts/atlas.py index unset [--store <id> | --default]
-python3 <atlas-skill>/scripts/atlas.py index show [--store <id>]
+python3 <atlas-skill>/scripts/atlas.py index show [--store <id>]   # at a project root of 2+ stores: --store required (exit 2, store_required)
 python3 <atlas-skill>/scripts/atlas.py index status
 python3 <atlas-skill>/scripts/atlas.py index build [--store <id> | --all] [--force]
 python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N]

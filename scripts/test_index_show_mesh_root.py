@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""`atlas index show|status|build` at a project root (mesh mode, no --store).
+
+Regression for B1: from a consuming project's root (an `atlas-mesh.json`, not
+a store) `atlas index show` invented a store such as `local/project-<hash>`
+and reported `ok: true` next to a missing-schema error. No `atlas index` verb
+may synthesise an id for a directory that is not a store, and `ok` is never
+true alongside an error.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+ATLAS = ROOT / "scripts" / "atlas.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from atlas_cli.core import index_location  # noqa: E402
+
+A = "github.com/acme/alpha"
+B = "github.com/acme/beta"
+GONE = "github.com/acme/gone"
+CLEAN_ENV = ("ATLAS_RECALL_ENGINE", "ATLAS_INDEX_ROOT", "ATLAS_TEST_PLATFORM")
+
+
+def atlas(*args: str) -> tuple[int, str, str]:
+    env = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
+    proc = subprocess.run([sys.executable, str(ATLAS), *args], cwd=ROOT, text=True, capture_output=True, env=env)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def as_json(text: str) -> dict:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def init_store(path: Path) -> Path:
+    code, out, err = atlas("init", "--root", str(path), "--schema-version", "1.0", "--json")
+    if code != 0:
+        raise SystemExit(f"atlas init failed for {path}: {out}{err}")
+    return path
+
+
+def write_mesh(project: Path, rows: list[dict], default: str | None = "bm25") -> None:
+    doc: dict = {"version": 1, "stores": rows}
+    if default:
+        doc["recall"] = {"engine": default}
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "atlas-mesh.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
+def errors_in(payload: object) -> list[object]:
+    """Every ``error`` / ``schema_error`` value anywhere in a payload."""
+    found: list[object] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in ("error", "schema_error") and value:
+                found.append(value)
+            found.extend(errors_in(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            found.extend(errors_in(item))
+    return found
+
+
+def main() -> int:
+    failed: list[str] = []
+    invariant: list[tuple[str, dict]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name} {detail if not ok else ''}".rstrip())
+        if not ok:
+            failed.append(name)
+
+    def run_json(label: str, *args: str) -> tuple[int, dict, str]:
+        code, out, err = atlas(*args, "--json")
+        payload = as_json(out)
+        invariant.append((label, payload))
+        return code, payload, out + err
+
+    tmp = Path(tempfile.mkdtemp(prefix="atlas-index-mesh-root-"))
+    try:
+        project = tmp / "project"
+        sa = init_store(project / "atlas" / "alpha")
+        init_store(project / "atlas" / "beta")
+        write_mesh(
+            project,
+            [
+                {"id": A, "path": "atlas/alpha"},
+                {"id": B, "path": "atlas/beta"},
+                {"id": GONE, "path": "atlas/gone"},
+            ],
+        )
+        subdir = project / "src" / "deep"
+        subdir.mkdir(parents=True)
+        mesh_ids = [A, B, GONE]
+
+        # --- show at the project root -------------------------------------------------
+        code, p, out = run_json("show-root", "index", "show", "--root", str(project))
+        check(
+            "show-root-store-required",
+            code == 2 and p.get("ok") is False and p.get("code") == "store_required" and p.get("known_ids") == mesh_ids,
+            out[:600],
+        )
+        check("show-root-no-local-id", "local/" not in out, out[:600])
+        check("show-root-message", "is a project root, not a store" in str(p.get("error")) and "--store" in str(p.get("error")), out[:400])
+
+        code, out, err = atlas("index", "show", "--root", str(project))
+        err_lines = [line for line in err.splitlines() if line.strip()]
+        check(
+            "show-root-text",
+            code == 2
+            and not out.strip()
+            and len(err_lines) == 2
+            and "error:" in err_lines[0]
+            and "project root, not a store" in err_lines[0]
+            and err_lines[1].startswith("hint:")
+            and "local/" not in out + err,
+            out + err,
+        )
+
+        code, p, out = run_json("show-subdir", "index", "show", "--root", str(subdir))
+        check("show-subdir-store-required", code == 2 and p.get("code") == "store_required" and "local/" not in out, out[:600])
+
+        # --- status at the project root and from a subdirectory ------------------------
+        for label, where in (("root", project), ("subdir", subdir)):
+            code, p, out = run_json(f"status-{label}", "index", "status", "--root", str(where))
+            ids = [r.get("store_id") for r in p.get("stores") or []]
+            check(
+                f"status-{label}-mesh-rows",
+                code == 0 and p.get("mode") == "mesh" and ids == mesh_ids and p.get("default") == "bm25"
+                and p.get("project") == str(project.resolve()) and p.get("current_store") is None,
+                out[:600],
+            )
+            check(f"status-{label}-no-local-id", "local/" not in out, out[:600])
+            check(f"status-{label}-ok-consistent", p.get("ok") is (not errors_in(p.get("stores"))), out[:600])
+            code, out, err = atlas("index", "status", "--root", str(where))
+            check(f"status-{label}-text", code == 0 and all(i in out for i in mesh_ids) and "local/" not in out + err, out + err)
+
+        # --root inside a mounted store: the whole project, with the current row marked.
+        inner = sa / "notes"
+        inner.mkdir(exist_ok=True)
+        code, p, out = run_json("status-in-store", "index", "status", "--root", str(inner))
+        rows = p.get("stores") or []
+        check(
+            "status-in-store-current",
+            code == 0
+            and [r.get("store_id") for r in rows] == mesh_ids
+            and p.get("current_store") == A
+            and [r.get("current") for r in rows] == [True, False, False],
+            out[:600],
+        )
+
+        # --- show with --store, and with --root inside a mounted store -------------------
+        code, p, out = run_json("show-store", "index", "show", "--root", str(project), "--store", B)
+        check("show-store-flag", code == 0 and p.get("ok") is True and p.get("store_id") == B and "local/" not in out, out[:500])
+        code, p, out = run_json("show-in-store", "index", "show", "--root", str(sa))
+        check("show-root-is-store", code == 0 and p.get("store_id") == A and p.get("mesh_file") == "atlas-mesh.json", out[:500])
+        code, p, out = run_json("show-in-store-subdir", "index", "show", "--root", str(inner))
+        check("show-inside-store", code == 0 and p.get("store_id") == A and "local/" not in out, out[:500])
+        code, p, out = run_json("show-unknown", "index", "show", "--root", str(project), "--store", "github.com/acme/nope")
+        check("show-unknown-store", code == 2 and p.get("known_ids") == mesh_ids, out[:400])
+
+        # A mesh row whose directory exists but holds no contract: ok is false with the error.
+        broken = tmp / "broken"
+        init_store(broken / "atlas" / "alpha")
+        (broken / "atlas" / "empty").mkdir(parents=True)
+        write_mesh(broken, [{"id": A, "path": "atlas/alpha"}, {"id": "github.com/acme/empty", "path": "atlas/empty"}])
+        code, p, out = run_json("show-broken", "index", "show", "--root", str(broken), "--store", "github.com/acme/empty")
+        check("show-schema-error-not-ok", code == 1 and p.get("ok") is False and bool(p.get("error")), out[:500])
+        code, p, out = run_json("status-broken", "index", "status", "--root", str(broken))
+        check("status-schema-error-not-ok", code == 1 and p.get("ok") is False, out[:500])
+
+        # --- a plain directory with no mesh ----------------------------------------------
+        plain = tmp / "plain"
+        plain.mkdir()
+        for verb in ("show", "status", "build"):
+            code, p, out = run_json(f"{verb}-plain", "index", verb, "--root", str(plain))
+            check(
+                f"{verb}-plain-mount-hint",
+                code == 2 and p.get("ok") is False and p.get("code") == "not_a_store"
+                and "atlas mount" in str(p.get("error")) and "local/" not in out,
+                out[:500],
+            )
+
+        # A standalone store (no mesh) still gets exactly one row.
+        lone = init_store(tmp / "lone")
+        code, p, out = run_json("status-lone", "index", "status", "--root", str(lone))
+        check("status-standalone-one-row", code == 0 and p.get("mode") == "standalone" and len(p.get("stores") or []) == 1, out[:400])
+
+        # --- build at the project root ------------------------------------------------------
+        code, out, err = atlas("index", "build", "--root", str(project), "--json")
+        p = as_json(out)
+        check(
+            "build-root-store-required",
+            code == 2 and p.get("code") == "store_required" and "--all" in str(p.get("hint")) and "--store" in str(p.get("hint"))
+            and "local/" not in out and not (project / ".atlas").exists(),
+            out[:500],
+        )
+        code, out, err = atlas("index", "build", "--root", str(project))
+        check("build-root-text-hint", code == 2 and "hint:" in err and "--all" in err, out + err)
+
+        # --- single-row mesh: the only row is selected ------------------------------------
+        single = tmp / "single"
+        init_store(single / "atlas" / "alpha")
+        write_mesh(single, [{"id": A, "path": "atlas/alpha"}], default=None)
+        code, p, out = run_json("show-single", "index", "show", "--root", str(single))
+        check(
+            "show-single-row-selected",
+            code == 0 and p.get("ok") is True and p.get("store_id") == A and p.get("selected") == "only_mesh_row" and "local/" not in out,
+            out[:500],
+        )
+        code, out, err = atlas("index", "show", "--root", str(single))
+        check("show-single-row-text-note", code == 0 and out.startswith("note:") and A in out, out + err)
+
+        # --- core: no id is ever derived for a non-store directory --------------------------
+        index_location.clear_cache()
+        for label, where in (("project", project), ("subdir", subdir), ("plain", plain)):
+            try:
+                loc = index_location.resolve(where)
+            except index_location.NotAStoreError:
+                check(f"resolve-{label}-refused", True)
+            else:
+                check(f"resolve-{label}-refused", False, loc.atlas_id)
+        check("resolve-mesh-row", index_location.resolve(sa).atlas_id == A)
+        check("resolve-standalone-local", index_location.resolve(lone).id_source in ("local", "origin"))
+
+        # `atlas recall status` on a non-store reports its error without an index id.
+        code, out, err = atlas("recall", "status", "--root", str(project), "--json")
+        check("recall-status-root-no-local-id", as_json(out).get("ok") is False and "local/" not in out, out[:400])
+
+        # --- invariant: ok: true never coexists with an error ---------------------------------
+        bad = [label for label, payload in invariant if payload.get("ok") is True and errors_in(payload)]
+        check("ok-never-true-with-error", not bad and len(invariant) > 10, str(bad))
+        check("all-json-parsed", all(payload for _, payload in invariant), str([lbl for lbl, pl in invariant if not pl]))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if failed:
+        print(f"\n{len(failed)} check(s) failed: {', '.join(failed)}")
+        return 1
+    print("\nall index show/status mesh-root checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

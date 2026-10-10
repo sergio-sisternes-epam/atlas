@@ -21,6 +21,10 @@ b. Standalone mode (no mesh row matches). ``project_root`` is the git
    (``id_source = "local"``). A store in a subdirectory of a larger work tree
    always gets a ``local`` id so two stores in one repository never share an
    index.
+   Standalone mode applies only to a directory that is a store (it holds
+   ``SCHEMA.json`` or ``CONTRACT.json``). Any other directory that no mesh row
+   lists (a project root, a project subdirectory, a plain directory) raises
+   :class:`NotAStoreError`: no atlas id is ever derived for a non-store.
 c. ``ATLAS_INDEX_ROOT`` (an absolute path) replaces ``project_root``; the
    atlas id and mode are resolved as above. Relative values are ignored with
    a warning.
@@ -45,6 +49,7 @@ from typing import Any
 
 from . import gitops, meshfile
 from .identity import IdentityError, normalise
+from .paths import has_contract_file
 
 DRIVER_TYPES = frozenset({"fts5", "nanograph", "tgrep"})
 INDEXES_REL = PurePosixPath(".atlas") / "indexes"
@@ -62,6 +67,10 @@ _warned_relative = False
 
 class IndexLocationError(ValueError):
     """An index path cannot be resolved or would escape its base."""
+
+
+class NotAStoreError(IndexLocationError):
+    """The directory is neither a mesh row nor a store, so it has no atlas id."""
 
 
 @dataclass(frozen=True)
@@ -163,6 +172,21 @@ def _reject_duplicate_ids(directory: Path, store: Path) -> None:
         raise IndexLocationError(f"{directory / meshfile.MESH_NAME}: {'; '.join(errs)}")
 
 
+def mounted_store_at_or_above(path: Path) -> MeshMatch | None:
+    """The mesh row for ``path`` or for the nearest ancestor that is a mounted (mesh-listed) store."""
+    path = Path(path).expanduser().resolve()
+    for candidate in [path, *path.parents]:
+        found = mesh_match(candidate)
+        if found is not None:
+            return found
+    return None
+
+
+def is_store(path: Path) -> bool:
+    """A store directory: it holds ``SCHEMA.json`` or ``CONTRACT.json``."""
+    return Path(path).is_dir() and has_contract_file(Path(path))
+
+
 def _mesh_match(store: Path) -> tuple[Path, str] | None:
     found = mesh_match(store)
     return (found.directory, str(found.row["id"])) if found else None
@@ -219,6 +243,11 @@ def resolve(store: Path) -> IndexLocation:
         project_root, atlas_id = match
         loc = IndexLocation(store_r, project_root, atlas_id, "mesh", "mesh")
     else:
+        if not is_store(store_r):
+            raise NotAStoreError(
+                f"{store_r} is not an Atlas store (no SCHEMA.json or CONTRACT.json) and no "
+                f"{meshfile.MESH_NAME} row lists it; no index id can be derived for it"
+            )
         project_root, atlas_id, source = _standalone(store_r)
         loc = IndexLocation(store_r, project_root, atlas_id, source, "standalone")
     if override is not None:

@@ -300,7 +300,11 @@ is the single source of truth.
    index. In standalone mode the index sits inside the store's own work
    tree at `.atlas/indexes/`; the ignore guard excludes it and projection
    and validation skip `.atlas/`, so it never becomes content or a tracked
-   file.
+   file. Standalone mode applies only when `S` is a store (it holds
+   `SCHEMA.json` or `CONTRACT.json`). A directory that no mesh row lists and
+   that is not a store (a project root, a project subdirectory, a plain
+   directory) gets no atlas id at all: resolution fails, `atlas index` exits
+   2 (`store_required` or `not_a_store`) and the ignore guard does nothing.
 3. **Override.** `ATLAS_INDEX_ROOT`, when it is an absolute path, replaces
    the project root (the id and mode are resolved as above). A relative
    value is ignored with a warning. Intended for tests and unusual layouts.

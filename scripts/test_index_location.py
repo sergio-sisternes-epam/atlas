@@ -57,6 +57,13 @@ def git_init(path: Path) -> None:
     git(path, "config", "commit.gpgsign", "false")
 
 
+def mark_store(path: Path) -> Path:
+    """A bare directory becomes a store for index location purposes (it holds a contract file)."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
+    return path
+
+
 def commit_all(path: Path) -> None:
     git(path, "add", "-A")
     git(path, "commit", "-q", "-m", "init")
@@ -183,6 +190,7 @@ def main() -> int:
         check("guard-idempotent", ignore_guard.ensure_indexes_ignored(mstore) is None)
         guarded = tmp / "guarded"
         git_init(guarded)
+        mark_store(guarded)
         (guarded / ".git" / "info").mkdir(parents=True, exist_ok=True)
         (guarded / ".git" / "info" / "exclude").write_text(".atlas/\n", encoding="utf-8")
         (guarded / ".gitignore").write_text("*.tmp\n", encoding="utf-8")
@@ -216,6 +224,7 @@ def main() -> int:
         origin_store = tmp / "origin-store"
         git_init(origin_store)
         git(origin_store, "remote", "add", "origin", "https://github.com/o/s.git")
+        mark_store(origin_store)
         index_location.clear_cache()
         loc = index_location.resolve(origin_store)
         check(
@@ -229,8 +238,7 @@ def main() -> int:
         )
 
         # --- standalone without git -------------------------------------------
-        plain = tmp / "My Store!"
-        plain.mkdir()
+        plain = mark_store(tmp / "My Store!")
         index_location.clear_cache()
         loc = index_location.resolve(plain)
         index_location.clear_cache()
@@ -242,6 +250,14 @@ def main() -> int:
             str(loc),
         )
         check("local-deterministic", loc == loc2)
+        bare = tmp / "bare-dir"
+        bare.mkdir()
+        index_location.clear_cache()
+        try:
+            index_location.resolve(bare)
+            check("bare-dir-no-local-id", False)
+        except index_location.NotAStoreError:
+            check("bare-dir-no-local-id", True)
 
         # --- sanitising -------------------------------------------------------
         for bad in ("..", "a/../b", "/abs", "a//b", "a\\b", "", ".", "a/b c", "a/\x00b", "-x/y"):
@@ -252,8 +268,7 @@ def main() -> int:
                 check(f"sanitise-rejects-{bad!r}", repr(bad) in str(e) or bad in str(e) or bad == "", str(e))
         check("sanitise-accepts", str(index_location.safe_id_path("github.com/o/r")) == "github.com/o/r")
 
-        sym = tmp / "sym-store"
-        sym.mkdir()
+        sym = mark_store(tmp / "sym-store")
         outside = tmp / "outside"
         outside.mkdir()
         (sym / ".atlas" / "indexes").mkdir(parents=True)
