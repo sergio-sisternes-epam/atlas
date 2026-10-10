@@ -19,8 +19,11 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
 - Resolver (M4, M21): every ``relates_to`` target of every included page is
   classified exactly once, in this order: local edge; canonical
   ``atlas://<atlas-id>/<path>[#fragment]``; mesh-relative path; otherwise
-  unresolved with one reason. A short form ``atlas://<name>/<path>`` is never
-  resolved as an alias.
+  unresolved with one reason. The first segment after ``atlas://`` is a
+  host when it is host-shaped (a dot, a ``:port``, an IP literal or
+  ``localhost``) or is the host of a mesh row id (:func:`is_canonical_host`);
+  otherwise ``atlas://<name>/<path>`` is a short form, never resolved as an
+  alias.
 
 Edge records: ``from`` (node id), ``to`` (a node id when the target lands in
 an included member, otherwise the authored target), ``kind``, ``cross`` (target store is
@@ -38,7 +41,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import graph, index_location, meshfile
-from .identity import IdentityError, parse_pointer
+from .identity import IdentityError, fold_host, parse_pointer
 from .paths import has_contract_file
 from .projection import ProjectedPage, normalise_target
 
@@ -99,11 +102,19 @@ def node_id(atlas_id: str, path: str) -> str:
     return f"{ATLAS_SCHEME}{atlas_id}/{rel}"
 
 
-def parse_node_id(uri: str) -> tuple[str, str]:
-    """Inverse of :func:`node_id`: ``(atlas_id, path)``; any ``#fragment`` is dropped."""
+def parse_node_id(uri: str, hosts: frozenset[str] | set[str] | None = None) -> tuple[str, str]:
+    """Inverse of :func:`node_id`: ``(atlas_id, path)``; any ``#fragment`` is dropped.
+
+    The id is read with the identity grammar (:func:`identity.parse_pointer`),
+    so every atlas id mesh validation accepts round-trips, whatever its host.
+    Pass ``hosts`` (see :func:`mesh_hosts`) to also apply the short-form rule
+    of :func:`is_canonical_host`.
+    """
     text = str(uri or "").strip()
-    if not text.startswith(ATLAS_SCHEME) or not is_canonical_host(text):
+    if not text.startswith(ATLAS_SCHEME):
         raise MeshScopeError(f"{uri!r} is not a canonical atlas://<host>/<org>/<repo>/<path> node id")
+    if hosts is not None and not is_canonical_host(text, hosts):
+        raise MeshScopeError(f"{uri!r} is a short form, not a canonical atlas://<host>/<org>/<repo>/<path> node id")
     try:
         parsed = parse_pointer(text)
     except IdentityError as e:
@@ -114,10 +125,35 @@ def parse_node_id(uri: str) -> tuple[str, str]:
     return parsed.atlas_id, path
 
 
-def is_canonical_host(uri: str) -> bool:
-    """True when the first segment after ``atlas://`` looks like a host (has a dot)."""
+def is_host_shaped(segment: str) -> bool:
+    """A host on its own: a dotted name, an IP literal, ``host:port`` or ``localhost``."""
+    host = fold_host(segment)
+    return "." in host or ":" in host or host.startswith("[") or host == "localhost"
+
+
+def mesh_hosts(atlas_ids: Any) -> frozenset[str]:
+    """Folded hosts (first segments) of the given atlas ids, as :func:`identity.normalise` writes them."""
+    out: set[str] = set()
+    for sid in atlas_ids:
+        try:
+            canon = parse_pointer(str(sid)).atlas_id
+        except IdentityError:
+            canon = str(sid)
+        out.add(fold_host(_first_segment(canon)).lower())
+    return frozenset(out)
+
+
+def is_canonical_host(uri: str, hosts: frozenset[str] | set[str] | None = None) -> bool:
+    """True when the first segment after ``atlas://`` is a host, not a short-form name.
+
+    One rule for node ids and the resolver: the segment is host-shaped
+    (:func:`is_host_shaped`) or it is the host of a mesh row id (``hosts``).
+    Anything else, such as ``atlas://<repo>/<path>``, is a short form.
+    """
     first = _first_segment(uri.removeprefix(ATLAS_SCHEME))
-    return "." in first
+    if not first:
+        return False
+    return is_host_shaped(first) or fold_host(first).lower() in (hosts or ())
 
 
 def _first_segment(body: str) -> str:
@@ -312,6 +348,7 @@ class Resolver:
         self.members = all_members
         self.loaded = loaded
         self.by_key = {meshfile.id_key(m.atlas_id): m for m in all_members}
+        self.hosts = mesh_hosts(m.atlas_id for m in all_members)
         # Longest root first, so a nested member root wins over its parent.
         self.by_root = sorted(all_members, key=lambda m: len(m.root.parts), reverse=True)
 
@@ -371,7 +408,7 @@ class Resolver:
     def _atlas_uri(self, source: Member, text: str) -> dict[str, Any]:
         body = text[len(ATLAS_SCHEME) :]
         first = _first_segment(body)
-        if "." not in first:
+        if not is_canonical_host(text, self.hosts):
             return self._short_form(source, text, first, body)
         try:
             parsed = parse_pointer(text)

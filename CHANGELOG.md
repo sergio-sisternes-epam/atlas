@@ -36,7 +36,10 @@
   `noncanonical_cross_store_link` warning and a canonical suggestion), or
   leaves it unresolved with one reason: `unmounted`, `excluded_member`,
   `missing_page`, `withheld`, `outside_mesh` or `noncanonical_atlas_uri`. A
-  short form such as `atlas://<repo>/<path>` is never resolved as an alias;
+  link is canonical when its first segment is a host: it has a dot, a
+  `:port` or an IP literal, is `localhost`, or is the host of a mesh row id,
+  so every atlas id `atlas-mesh.json` accepts round-trips. Any other short
+  form such as `atlas://<repo>/<path>` is never resolved as an alias;
   it is suggested in canonical form only when exactly one member's repo name
   matches. `atlas-mesh.json` accepts new keys: top-level `recall.scope`
   (`store`|`mesh`) and `recall.rrf_k` (integer 1-1000), a top-level `graph`
