@@ -469,6 +469,89 @@ created: 2026-10-05
         self.assertIn("path: new.md", live)
         self.assertNotIn("path: old.md", live)
 
+    def test_commented_relates_to_key_keeps_history_edge(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "commented-history.md",
+            """
+type: document
+title: Commented history
+created: 2026-10-05
+relates_to: # still the relation list
+  - path: old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nCommented history page has enough prose and no live link.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("commented-history.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(store, "old.md", "new.md", ["commented-history.md"])
+        history = (root / "commented-history.md").read_text(encoding="utf-8")
+        self.assertIn("path: old.md", history)
+        self.assertIn("ref: abcdef1234567890", history)
+        self.assertNotIn("new.md", history)
+
+    def test_relates_remove_keeps_history_edge_with_same_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "schema.md",
+            """
+type: schema
+title: Schema
+created: 2026-10-05
+relates_to:
+  - path: missing.md
+    kind: related
+  - path: missing.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nSchema page has enough prose for a concept page.",
+        )
+        store = opt.Store(root)
+        opt._apply_relates_remove(store, "schema.md", "missing.md")
+        text = (root / "schema.md").read_text(encoding="utf-8")
+        self.assertEqual(text.count("path: missing.md"), 1)
+        self.assertIn("ref: abcdef1234567890", text)
+        from atlas_cli.core.frontmatter import read_page
+
+        meta, _body = read_page(root / "schema.md", store.version)
+        live, history = opt._member_edge_counts(store, meta, "missing.md")
+        self.assertEqual((live, history), (0, 1))
+
+    def test_relates_remove_refuses_a_history_only_match(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "schema.md",
+            """
+type: schema
+title: Schema
+created: 2026-10-05
+relates_to:
+  - path: missing.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nSchema page has enough prose for a concept page.",
+        )
+        before = (root / "schema.md").read_text(encoding="utf-8")
+        store = opt.Store(root)
+        with self.assertRaises(opt.Refusal):
+            opt._apply_relates_remove(store, "schema.md", "missing.md")
+        self.assertEqual((root / "schema.md").read_text(encoding="utf-8"), before)
+
     def test_nested_ref_text_does_not_freeze_live_path(self) -> None:
         import atlas_optimise as opt
 

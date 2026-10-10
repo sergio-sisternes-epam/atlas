@@ -12,6 +12,7 @@
 
 - `atlas ref prune` treats a quoted `relates_to` key as the same list, and leaves an indented `- path:` bullet inside a block scalar untouched. A history scan uses that same item indentation, so prose is not a second edge.
 - Optimise treats a quoted `relates_to` key as that list. A ref-bearing item under it stays history and is not rewritten when a live page moves.
+- Optimise treats `relates_to:` with a trailing YAML comment as that list, so a ref-bearing item under it stays history. Removing a dead schema member drops the live item and leaves a history item with the same path.
 - `atlas ref prune` leaves a protocol-relative markdown link (`//host/path`) unchanged. It is not a store-root path.
 - `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself, and the worktree bytes match that blob and the HEAD blob. A later or unrelated commit, or a dirty worktree that only matches the older rev, is not the pre-prune snapshot.
 - Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.

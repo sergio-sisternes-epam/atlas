@@ -133,8 +133,8 @@ not a refusal and does not fail the run.
      labelled with the schema's own title.
    - `uncovered-gist`: auto when the folder has exactly one schema (add the
      gist to its `relates_to`); handoff when it has none or several.
-   - `dead-schema-member` (auto): drop a schema `relates_to` entry whose gist
-     no longer exists.
+   - `dead-schema-member` (auto): drop a live schema `relates_to` entry whose
+     gist no longer exists. A ref-bearing item with the same path stays.
    - `stale-gist-description`: auto copies the memory page's existing
      `description` verbatim up into the gist. The memory text is never edited.
      If the memory has no plain one-line description, the task is handoff to

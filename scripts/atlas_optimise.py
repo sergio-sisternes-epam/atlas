@@ -298,7 +298,7 @@ def _single_line_value(lines: list[str], key: str) -> tuple[int, str] | None:
 
 
 _RELATES_BLOCK = re.compile(
-    r"""^(?:relates_to|(['"])relates_to\1)\s*:\s*$"""
+    r"""^(?:relates_to|(['"])relates_to\1)\s*:\s*(?:#.*)?$"""
 )
 
 
@@ -2112,18 +2112,48 @@ def _apply_relates_add(store: Store, schema_key: str, gist_key: str) -> None:
         raise Refusal(f"{schema_key}: relates_to edit did not round-trip; reverted")
 
 
+def _member_edge_counts(store: Store, meta: dict, member: str) -> tuple[int, int]:
+    """Live and history counts for one path. History is a ref-bearing item."""
+    want = store.canonical(member)
+    live = 0
+    history = 0
+    for item in _relates(meta):
+        path = str(item.get("path") or "")
+        if want is None:
+            if path.strip() != member:
+                continue
+        elif store.canonical(path) != want:
+            continue
+        if str(item.get("ref") or "").strip():
+            history += 1
+        else:
+            live += 1
+    return live, history
+
+
 def _apply_relates_remove(store: Store, schema_key: str, member: str) -> None:
     path = store.root / schema_key
     text = path.read_text(encoding="utf-8")
+    before, _ = read_page(path, store.version)
+    before_live, before_history = _member_edge_counts(store, before, member)
     lines, rest = _fm_lines(text)
     blk = _relates_block(lines)
-    if not blk:
-        return
-    for span in reversed(_item_spans(lines, *blk)):
-        if _item_path(lines, span) == member:
+    removed = False
+    if blk:
+        for span in reversed(_item_spans(lines, *blk)):
+            if _span_is_history(lines, span) or _item_path(lines, span) != member:
+                continue
             del lines[span[0]:span[1]]
+            removed = True
             break
+    if not removed:
+        raise Refusal(f"{schema_key}: no live relates_to entry {member} to remove")
     _write(path, "".join(lines) + rest)
+    after, _ = read_page(path, store.version)
+    after_live, after_history = _member_edge_counts(store, after, member)
+    if after_live != before_live - 1 or after_history != before_history:
+        _write(path, text)
+        raise Refusal(f"{schema_key}: relates_to removal did not drop the live edge; reverted")
 
 
 def _apply_schema_cue(store: Store, t: dict) -> None:
