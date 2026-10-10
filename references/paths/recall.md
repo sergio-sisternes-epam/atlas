@@ -53,6 +53,9 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    ```bash
    python3 <atlas-skill>/scripts/atlas.py recall run "<query>" --root <root> --json
    ```
+   Mesh scope (federated recall over the members of the project's `atlas-mesh.json`):
+   `recall run "<query>" --root <root> --scope store|mesh [--rrf-k N] [--engine E] [--limit N] [--json]`.
+   Precedence: `--scope` > top-level `recall.scope` > `store`; `--rrf-k` > top-level `recall.rrf_k` > 60 (integer 1-1000). Each member runs its own engine and index; hits carry `atlas_id` and `uri` (`atlas://<atlas-id>/<path>`), all-words hits (tier 1) always precede any-word retry hits (tier 2), and `sensitivity: restricted` pages are never returned. Exit 2 for `--profile` (or `--allow-partial`) with mesh scope, `--rrf-k` in store scope, a bad k or no mesh listing the store; exit 1 with `complete: false` when a member fails.
    For a structural question, run the matching `atlas graph nodes|edges|neighbours … --root <root> --json` here instead (`references/graph.md`).
    Run this step regardless of whether the hot list or abstraction walk already answered the ask — the exit receipt always records `recall_cmd`. Stopping at the gist (step 3) decides whether the parent memory page is opened, not whether search runs.
    Do **not** use unbounded whole-tree `grep` / `rg` / `find` as the primary discovery method. `rg` inside one already-chosen file is reading, not discovery.

@@ -188,8 +188,9 @@ the following commands relative to the consumer project.
 python3 <atlas-skill>/scripts/atlas.py init --root <atlas> [--force] [--schema-version 1.0|2.0]
 python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <type>] [--path <prefix>] [--dry-run]
                        # --dry-run reports findings (including memory_rung) without writing mesh.json or publishing the recall index
-python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25|nanograph] [--include-exits] [--profile <id>] [--allow-partial]
+python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25|nanograph] [--include-exits] [--profile <id>] [--allow-partial] [--scope store|mesh] [--rrf-k N]
                        # query tokens: type: kva: status: work_id: path:
+                       # --scope mesh: federated recall over the atlas-mesh.json members (tiered RRF, k 1-1000, default 60); no --profile
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
 # index verbs all take [--root <dir>] [--json]; `index build` replaces deprecated `recall index build`

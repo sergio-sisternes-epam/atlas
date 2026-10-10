@@ -6,12 +6,14 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from ..core.frontmatter import FrontmatterError, read_page
 from ..core.index_location import warning_text
 from ..core.overlay import merge_overlays
-from ..core import recall_index
+from ..core import mesh_recall, recall_index
 from ..core import graph as graph_core
 from ..core.driver_overlay import DriverError, get_driver
 from ..core.drivers import fts5 as fts5_driver
@@ -29,6 +31,8 @@ from ..core.schema import load_schema, staging_dir_name
 
 EXIT_STATES = frozenset({"terminated", "deprecated", "superseded"})
 RELATES_CAP = 5
+
+Withhold = Callable[[dict], bool]
 
 AGENTIC_GUIDANCE = """
 Agentic search pattern (grep mode):
@@ -167,6 +171,7 @@ def _grep_search(
     limit: int,
     include_exits: bool,
     page_schema_version: str = "1.0",
+    withhold: Withhold | None = None,
 ) -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     filters, rest = _split_filters(query)
@@ -226,6 +231,8 @@ def _grep_search(
         except FrontmatterError as e:
             if sum(1 for w in warnings if w.startswith("frontmatter:")) < 8:
                 warnings.append(f"frontmatter: {rel(root, path)}: {e}")
+            continue
+        if withhold is not None and withhold(meta):
             continue
         if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
             continue
@@ -296,10 +303,13 @@ def _bm25_eligible(
     filters: dict[str, str],
     prefix: Path | None,
     include_exits: bool,
+    withhold: Withhold | None = None,
 ) -> bool:
     if page.role == "log":
         return False
     meta = page.meta
+    if withhold is not None and withhold(meta):
+        return False
     for key in ("type", "kva", "status", "work_id"):
         if filters.get(key) and str(meta.get(key) or "").strip() != filters[key]:
             return False
@@ -331,6 +341,7 @@ def _bm25_search(
     limit: int,
     include_exits: bool,
     persist: bool = False,
+    withhold: Withhold | None = None,
 ) -> tuple[list[dict] | None, list[str], dict]:
     """Rank with SQLite FTS5. Returns (None, warnings, {}) when grep must take over.
 
@@ -397,7 +408,7 @@ def _bm25_search(
         db_path = recall_index.build_ephemeral(projection)
         ephemeral = True
 
-    eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+    eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits, withhold)}
     try:
         try:
             ranked, match_mode = _fts5_rank(db_path, rest, eligible, limit)
@@ -458,6 +469,7 @@ def _nanograph_search(
     query: str,
     limit: int,
     include_exits: bool,
+    withhold: Withhold | None = None,
 ) -> tuple[list[dict] | None, list[str], dict]:
     """Rank with the optional nanograph driver.
 
@@ -477,7 +489,7 @@ def _nanograph_search(
         if prefix is not None and not prefix.exists():
             return [], warnings, {"index": None}
         pages = source["pages"]
-        eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits)}
+        eligible = {p.page_id for p in pages if _bm25_eligible(root, p, filters, prefix, include_exits, withhold)}
         ranked = driver.bm25_search(root, rest, 0, source=source)
     except (graph_core.GraphError, DriverError) as e:
         return None, [], {"error": str(e)}
@@ -515,6 +527,20 @@ def _driver_note(requested: str, steps: list[tuple[str, str, str]], used: str) -
     return "; ".join(parts) + f"; used {used}"
 
 
+@dataclass
+class SearchOutcome:
+    """One store's ``recall run`` result before printing (see :func:`render`)."""
+
+    render: str
+    payload: dict
+    code: int
+    root: Path
+    query: str
+    all_warnings: list = field(default_factory=list)
+    index_warnings: list = field(default_factory=list)
+    source: str = ""
+
+
 def run(
     root: str | None,
     query: str,
@@ -526,6 +552,61 @@ def run(
     allow_partial: bool = False,
 ) -> int:
     r = store_root(root)
+    outcome = search(r, query, limit, engine_override, include_exits, profile, allow_partial)
+    return render(outcome, as_json)
+
+
+def run_scoped(
+    root: str | None,
+    query: str,
+    limit: int = 10,
+    as_json: bool = False,
+    engine_override: str | None = None,
+    include_exits: bool = False,
+    profile: str | None = None,
+    allow_partial: bool = False,
+    scope: str | None = None,
+    rrf_k: str | None = None,
+) -> int:
+    """``recall run`` with ``--scope``: store scope is :func:`run`, unchanged; mesh scope federates."""
+    r = store_root(root)
+    try:
+        settings = mesh_recall.resolve_settings(r, scope, rrf_k)
+    except mesh_recall.MeshRecallError as e:
+        return _fail(as_json, {"ok": False, "error": str(e), "root": str(r), "query": query})
+    if settings.scope != "mesh":
+        return run(root, query, limit, as_json, engine_override, include_exits, profile, allow_partial)
+    if profile:
+        return _fail(as_json, {"ok": False, "error": mesh_recall.PROFILE_ERROR, "root": str(r), "query": query})
+    if allow_partial:
+        return _fail(as_json, {"ok": False, "error": mesh_recall.PARTIAL_ERROR, "root": str(r), "query": query})
+    payload, code = mesh_recall.federate(
+        settings, query, limit=limit, engine_override=engine_override, include_exits=include_exits
+    )
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for line in mesh_recall.render_text(payload):
+            print(line)
+    return code
+
+
+def search(
+    r: Path,
+    query: str,
+    limit: int = 10,
+    engine_override: str | None = None,
+    include_exits: bool = False,
+    profile: str | None = None,
+    allow_partial: bool = False,
+    withhold: Withhold | None = None,
+) -> SearchOutcome:
+    """Run one store's recall without printing.
+
+    ``withhold`` (mesh scope) is a frontmatter predicate: matching pages leave
+    the eligible set before ranking in every engine, so neither hits, ranks
+    nor counts reveal them.
+    """
     schema, _ = load_schema(r)
     effective = schema
     if schema is not None:
@@ -537,23 +618,24 @@ def run(
                 "root": str(r),
                 "query": query,
             }
-            if as_json:
-                print(json.dumps(payload, indent=2))
-            else:
-                print(f"atlas recall run — FAIL: {payload['error']}")
-            return 2
+            return SearchOutcome("critical", payload, 2, r, query)
         effective = merged
     if engine_override and profile:
-        return _fail(
-            as_json,
+        return SearchOutcome(
+            "fail",
             {"ok": False, "error": "conflicting flags: --engine and --profile", "root": str(r), "query": query},
+            2,
+            r,
+            query,
         )
     try:
         pref = resolve_engine(r, engine_override, schema)
     except EnginePreferenceError as e:
-        return _fail(as_json, {"ok": False, "error": str(e), "root": str(r), "query": query})
+        return SearchOutcome("fail", {"ok": False, "error": str(e), "root": str(r), "query": query}, 2, r, query)
     if engine_override and recall_enabled(effective):
-        return _fail(as_json, {"ok": False, "error": PROFILE_ENGINE_ERROR, "root": str(r), "query": query})
+        return SearchOutcome(
+            "fail", {"ok": False, "error": PROFILE_ENGINE_ERROR, "root": str(r), "query": query}, 2, r, query
+        )
     use_smr = bool(profile) or recall_enabled(effective)
     if use_smr:
         payload, code = run_recall(
@@ -563,6 +645,7 @@ def run(
             allow_partial=allow_partial,
             include_exits=include_exits,
             limit=limit,
+            withhold=withhold,
         )
         if not payload.get("legacy"):
             if payload.get("ok"):
@@ -571,37 +654,11 @@ def run(
                 preset = (payload.get("recall") or {}).get("preset")
                 if pref.is_preference and pref.requested != "bm25":
                     payload.setdefault("info", []).append(ignored_notice(str(preset), pref))
-            if as_json:
-                print(json.dumps(payload, indent=2, default=str))
-            else:
-                for item in payload.get("warnings") or []:
-                    print(f"warning: {warning_text(item)}", file=sys.stderr)
-                for item in payload.get("info") or []:
-                    print(f"info: {warning_text(item)}", file=sys.stderr)
-                if not payload.get("ok"):
-                    print(f"atlas recall run — FAIL: {payload.get('error')}")
-                else:
-                    print(f"atlas recall run — root={r}")
-                    print(f"query: {query}")
-                    rec = payload.get("recall") or {}
-                    print(
-                        f"engine: configured={payload.get('engine_configured')} used={payload.get('engine_used')} complete={rec.get('complete')}"
-                    )
-                    hits = payload.get("hits") or []
-                    if not hits:
-                        print("no hits")
-                    for i, h in enumerate(hits, 1):
-                        typ = f" [{h['type']}]" if h.get("type") else ""
-                        print(f"{i}. {h['path']}  score={h['score']}{typ}")
-                        if h.get("title"):
-                            print(f"   title: {h['title']}")
-            return code
+            return SearchOutcome("smr", payload, code, r, query)
     if allow_partial and not use_smr:
-        if as_json:
-            print(json.dumps({"ok": False, "error": "--allow-partial requires SCHEMA 2.0 recall", "root": str(r)}))
-        else:
-            print("--allow-partial requires SCHEMA 2.0 recall")
-        return 2
+        return SearchOutcome(
+            "partial", {"ok": False, "error": "--allow-partial requires SCHEMA 2.0 recall", "root": str(r)}, 2, r, query
+        )
     staging_name = staging_dir_name(schema)
     requested = pref.requested
     persist = pref.persist
@@ -625,7 +682,7 @@ def run(
     _, free_text = _split_filters(query)
     has_terms = bool(fts5_driver.query_tokens(free_text))
     if engine == "nanograph" and has_terms:
-        hits, extra_warnings, nano_meta = _nanograph_search(r, query, limit, include_exits)
+        hits, extra_warnings, nano_meta = _nanograph_search(r, query, limit, include_exits, withhold)
         if hits is not None:
             mode_used = "nanograph"
         else:
@@ -636,7 +693,7 @@ def run(
             engine = "bm25"
     if hits is None and engine == "bm25" and has_terms:
         bm25_hits, bm25_warnings, bm25_meta = _bm25_search(
-            r, schema, query, limit, include_exits, persist=persist
+            r, schema, query, limit, include_exits, persist=persist, withhold=withhold
         )
         if bm25_hits is None:
             warning = bm25_warnings[-1] if bm25_warnings else None
@@ -645,7 +702,7 @@ def run(
                 steps.append(("bm25", "failed", warning))
             mode_used = "grep"
             hits, grep_warnings = _grep_search(
-                r, query, staging_name, limit, include_exits, page_ver
+                r, query, staging_name, limit, include_exits, page_ver, withhold
             )
             extra_warnings += [w for w in grep_warnings if w not in extra_warnings]
         else:
@@ -655,7 +712,7 @@ def run(
     elif hits is None:
         mode_used = "grep"
         hits, extra_warnings = _grep_search(
-            r, query, staging_name, limit, include_exits, page_ver
+            r, query, staging_name, limit, include_exits, page_ver, withhold
         )
 
     all_warnings: list = [w for w in [warning, *extra_warnings] if w]
@@ -712,12 +769,64 @@ def run(
         payload["score_orientation"] = "higher_better"
         payload["nanograph_index"] = nano_meta.get("index")
 
+    return SearchOutcome("engine", payload, 0, r, query, all_warnings, index_warnings, pref.source)
+
+
+def render(outcome: SearchOutcome, as_json: bool) -> int:
+    """Print one store's outcome exactly as ``recall run`` always has; return its exit code."""
+    payload, r, query = outcome.payload, outcome.root, outcome.query
+    if outcome.render == "critical":
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"atlas recall run — FAIL: {payload['error']}")
+        return outcome.code
+    if outcome.render == "fail":
+        return _fail(as_json, payload)
+    if outcome.render == "partial":
+        if as_json:
+            print(json.dumps(payload))
+        else:
+            print(payload["error"])
+        return outcome.code
+    if outcome.render == "smr":
+        if as_json:
+            print(json.dumps(payload, indent=2, default=str))
+        else:
+            for item in payload.get("warnings") or []:
+                print(f"warning: {warning_text(item)}", file=sys.stderr)
+            for item in payload.get("info") or []:
+                print(f"info: {warning_text(item)}", file=sys.stderr)
+            if not payload.get("ok"):
+                print(f"atlas recall run — FAIL: {payload.get('error')}")
+            else:
+                print(f"atlas recall run — root={r}")
+                print(f"query: {query}")
+                rec = payload.get("recall") or {}
+                print(
+                    f"engine: configured={payload.get('engine_configured')} used={payload.get('engine_used')} complete={rec.get('complete')}"
+                )
+                hits = payload.get("hits") or []
+                if not hits:
+                    print("no hits")
+                for i, h in enumerate(hits, 1):
+                    typ = f" [{h['type']}]" if h.get("type") else ""
+                    print(f"{i}. {h['path']}  score={h['score']}{typ}")
+                    if h.get("title"):
+                        print(f"   title: {h['title']}")
+        return outcome.code
+    requested = payload["engine_requested"]
+    mode_used = payload["engine_used"]
+    include_exits = payload["include_exits"]
+    hits = payload["hits"]
+    all_warnings = outcome.all_warnings
+    index_warnings = outcome.index_warnings
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
         print(f"atlas recall run — root={r}")
         print(f"query: {query}")
-        print(f"engine: requested={requested} ({pref.source}) used={mode_used}")
+        print(f"engine: requested={requested} ({outcome.source}) used={mode_used}")
         if payload.get("driver_note"):
             print(f"driver: {mode_used} ({payload['driver_note']})")
         if mode_used == "sqlite-fts5":
@@ -755,4 +864,4 @@ def run(
             print()
             print(AGENTIC_GUIDANCE)
 
-    return 0
+    return outcome.code

@@ -25,6 +25,20 @@
   a mesh row nor a store, so `atlas recall status` on such a directory no
   longer shows a synthetic index path either; real standalone stores keep
   their origin or `local/` id.
+- Federated recall: `atlas recall run "<q>" --scope mesh [--rrf-k N]` searches
+  every included member of the project's `atlas-mesh.json` in process, each
+  with its own engine, profile, exclusions and per-store index (no shared
+  text index is built). `sensitivity: restricted` pages are removed from each
+  member's eligible set before ranking, so neither hits nor `members[].hits`
+  counts reveal them; excluded members are never read and unmounted ones are
+  reported, never mounted. Hits are fused by tier (all-words before any-word
+  retry), then reciprocal rank fusion `sum(1/(k + rank))`, then mesh row
+  order and path, and carry `atlas_id`, `uri`, `tier`, `rrf_score` and
+  `engine_used`. Precedence: `--scope` > `recall.scope` > `store`, and
+  `--rrf-k` > `recall.rrf_k` > 60, with the sources reported. A failing member
+  is reported as `error` with `complete: false` and exit 1; `--profile` with
+  mesh scope, `--rrf-k` in store scope, a bad k or no mesh exits 2. Store
+  scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
   as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
