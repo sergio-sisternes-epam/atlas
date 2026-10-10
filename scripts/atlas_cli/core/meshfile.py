@@ -23,6 +23,18 @@ DEFAULT_STRATEGY = "dedicated"
 SHARED_REF = "atlas"
 RECALL_ENGINES = ("grep", "bm25", "nanograph")
 RECALL_KEYS = frozenset({"engine"})
+# Mesh-level keys (accepted, inert until the mesh graph and federated recall
+# packets read them). ``scope`` and ``rrf_k`` live only in the top-level
+# ``recall`` block: scope is a mesh-wide choice, never a store row setting.
+SCOPES = ("store", "mesh")
+GRAPH_DRIVERS = ("native", "nanograph")
+GRAPH_KEYS = frozenset({"scope", "driver"})
+MESH_RECALL_KEYS = frozenset({"scope", "rrf_k"})
+TOP_RECALL_KEYS = RECALL_KEYS | MESH_RECALL_KEYS
+RRF_K_MIN = 1
+RRF_K_MAX = 1000
+DEFAULT_RRF_K = 60
+MESH_MEMBER_KEY = "mesh_member"
 LOCK_NAME = f"{MESH_NAME}.lock"
 # Mesh writes take milliseconds: a lock this old is abandoned, and a writer
 # gives up (exit 2) rather than wait longer than MESH_LOCK_WAIT_SECONDS.
@@ -133,11 +145,12 @@ def load(project: Path) -> dict[str, Any]:
 
 
 def load_for_location(project: Path) -> dict[str, Any]:
-    """Like :func:`load`, but a bad ``recall`` block does not hide the store rows.
+    """Like :func:`load`, but a bad ``recall``, ``graph`` or ``mesh_member`` key does not hide the store rows.
 
-    Index location must not move because a recall preference is invalid; the
-    recall preference resolver reports that error on its own (see
-    core/engine_preference.py).
+    Index location must not move because a preference is invalid; the recall
+    preference resolver reports that error on its own (see
+    core/engine_preference.py), and mesh scope validates the whole document
+    (see core/mesh_scope.py).
     """
     fp = mesh_path(project)
     try:
@@ -147,11 +160,23 @@ def load_for_location(project: Path) -> dict[str, Any]:
             data = json.loads(fp.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             raise
-        if not isinstance(data, dict) or not recall_errors(data, str(fp)):
+        if not isinstance(data, dict) or not (recall_errors(data, str(fp)) or mesh_key_errors(data, str(fp))):
             raise
-        if validate_doc(strip_recall(data)):
+        if validate_doc(_strip_preferences(data)):
             raise
         return data
+
+
+def _strip_preferences(data: dict[str, Any]) -> dict[str, Any]:
+    out = strip_recall(data)
+    out.pop("graph", None)
+    stores = out.get("stores")
+    if isinstance(stores, list):
+        out["stores"] = [
+            {k: v for k, v in row.items() if k != MESH_MEMBER_KEY} if isinstance(row, dict) else row
+            for row in stores
+        ]
+    return out
 
 
 def strip_recall(data: dict[str, Any]) -> dict[str, Any]:
@@ -166,16 +191,72 @@ def strip_recall(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def recall_block_errors(block: Any, where: str) -> list[str]:
+def recall_block_errors(block: Any, where: str, top_level: bool = False) -> list[str]:
+    """Errors for one ``recall`` block; ``top_level`` also allows ``scope`` and ``rrf_k``."""
     allowed = ", ".join(RECALL_ENGINES)
     if not isinstance(block, dict):
         return [f"{where}: recall must be an object like {{\"engine\": \"bm25\"}}; allowed engine values: {allowed}"]
     errs: list[str] = []
-    for key in sorted(k for k in block if k not in RECALL_KEYS):
-        errs.append(f"{where}: unknown key {key!r} in recall; allowed keys: {', '.join(sorted(RECALL_KEYS))}")
+    keys = TOP_RECALL_KEYS if top_level else RECALL_KEYS
+    for key in sorted(k for k in block if k not in keys):
+        if not top_level and key in MESH_RECALL_KEYS:
+            errs.append(
+                f"{where}: recall.{key} is a mesh-level setting and is not allowed on a store row; "
+                "set it in the top-level recall block"
+            )
+            continue
+        errs.append(f"{where}: unknown key {key!r} in recall; allowed keys: {', '.join(sorted(keys))}")
     if "engine" in block and block["engine"] not in RECALL_ENGINES:
         errs.append(f"{where}: recall.engine {block['engine']!r} is not allowed; allowed values: {allowed}")
+    if top_level and "scope" in block and block["scope"] not in SCOPES:
+        errs.append(f"{where}: recall.scope {block['scope']!r} is not allowed; allowed values: {', '.join(SCOPES)}")
+    if top_level and "rrf_k" in block and not valid_rrf_k(block["rrf_k"]):
+        errs.append(
+            f"{where}: recall.rrf_k {block['rrf_k']!r} is not allowed; "
+            f"expected an integer from {RRF_K_MIN} to {RRF_K_MAX}"
+        )
     return errs
+
+
+def valid_rrf_k(value: Any) -> bool:
+    """An integer in 1..1000; booleans and floats (even 60.0) are rejected."""
+    return type(value) is int and RRF_K_MIN <= value <= RRF_K_MAX
+
+
+def graph_block_errors(block: Any, where: str) -> list[str]:
+    if not isinstance(block, dict):
+        return [f"{where}: graph must be an object like {{\"scope\": \"store\", \"driver\": \"native\"}}"]
+    errs: list[str] = []
+    for key in sorted(k for k in block if k not in GRAPH_KEYS):
+        errs.append(f"{where}: unknown key {key!r} in graph; allowed keys: {', '.join(sorted(GRAPH_KEYS))}")
+    if "scope" in block and block["scope"] not in SCOPES:
+        errs.append(f"{where}: graph.scope {block['scope']!r} is not allowed; allowed values: {', '.join(SCOPES)}")
+    if "driver" in block and block["driver"] not in GRAPH_DRIVERS:
+        errs.append(
+            f"{where}: graph.driver {block['driver']!r} is not allowed; allowed values: {', '.join(GRAPH_DRIVERS)}"
+        )
+    return errs
+
+
+def mesh_key_errors(data: Any, source: str | None = None) -> list[str]:
+    """Clear messages for the top-level ``graph`` block and row ``mesh_member`` flags."""
+    if not isinstance(data, dict):
+        return []
+    label = source or MESH_NAME
+    errs: list[str] = []
+    if "graph" in data:
+        errs += graph_block_errors(data["graph"], f"{label}: project default")
+    stores = data.get("stores")
+    for i, row in enumerate(stores if isinstance(stores, list) else []):
+        if isinstance(row, dict) and MESH_MEMBER_KEY in row and not isinstance(row[MESH_MEMBER_KEY], bool):
+            sid = str(row.get("id") or f"stores[{i}]")
+            errs.append(f"{label}: store {sid}: {MESH_MEMBER_KEY} must be true or false, got {row[MESH_MEMBER_KEY]!r}")
+    return errs
+
+
+def is_mesh_member(row: dict[str, Any] | None) -> bool:
+    """``mesh_member`` defaults to true; only an explicit ``false`` excludes a row."""
+    return (row or {}).get(MESH_MEMBER_KEY) is not False
 
 
 def recall_errors(data: Any, source: str | None = None) -> list[str]:
@@ -185,7 +266,7 @@ def recall_errors(data: Any, source: str | None = None) -> list[str]:
     label = source or MESH_NAME
     errs: list[str] = []
     if "recall" in data:
-        errs += recall_block_errors(data["recall"], f"{label}: project default")
+        errs += recall_block_errors(data["recall"], f"{label}: project default", top_level=True)
     stores = data.get("stores")
     for i, row in enumerate(stores if isinstance(stores, list) else []):
         if isinstance(row, dict) and "recall" in row:
@@ -197,6 +278,14 @@ def recall_errors(data: Any, source: str | None = None) -> list[str]:
 def _in_recall(path: Any) -> bool:
     parts = list(path)
     return (parts[:1] == ["recall"]) or (len(parts) >= 3 and parts[0] == "stores" and parts[2] == "recall")
+
+
+def _custom_checked(path: Any) -> bool:
+    """Schema paths reported by :func:`recall_errors` or :func:`mesh_key_errors` with clearer text."""
+    parts = list(path)
+    if _in_recall(parts) or parts[:1] == ["graph"]:
+        return True
+    return len(parts) >= 3 and parts[0] == "stores" and parts[2] == MESH_MEMBER_KEY
 
 
 def validate_doc(data: Any, source: str | None = None) -> list[str]:
@@ -211,12 +300,13 @@ def validate_doc(data: Any, source: str | None = None) -> list[str]:
             schema = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
             validator = jsonschema.Draft202012Validator(schema)
             for err in validator.iter_errors(data):
-                if _in_recall(err.absolute_path):
+                if _custom_checked(err.absolute_path):
                     continue
                 errs.append(err.message)
         except Exception as e:
             errs.append(f"schema engine: {e}")
     errs.extend(recall_errors(data, source))
+    errs.extend(mesh_key_errors(data, source))
     if not isinstance(data, dict):
         return errs or ["mesh root must be an object"]
     if data.get("version") != 1:
@@ -252,6 +342,11 @@ def _id_key(sid: str) -> str:
     except IdentityError:
         canon = sid
     return canon.lower()
+
+
+def id_key(sid: str) -> str:
+    """Comparison key for atlas ids: the normalisation duplicate detection uses."""
+    return _id_key(sid)
 
 
 def duplicate_id_errors(data: Any) -> list[str]:
@@ -303,7 +398,7 @@ def strategy_errors(row: dict[str, Any], index: int | str = "") -> list[str]:
 
 
 def upsert(project: Path, row: dict[str, str]) -> MeshWrite:
-    """Add or replace a store row (keeping its ``recall`` block) under the mesh lock."""
+    """Add or replace a store row (keeping its ``recall`` and ``mesh_member`` keys) under the mesh lock."""
     warnings: list[dict[str, Any]] = []
     with mesh_lock(project, warnings) as lock:
         fp = _upsert_locked(lock, project, row)
@@ -316,8 +411,9 @@ def _upsert_locked(lock: Any, project: Path, row: dict[str, str]) -> Path:
     previous = next((s for s in doc["stores"] if s.get("id") == sid), None)
     stores = [s for s in doc["stores"] if s.get("id") != sid]
     clean = {k: v for k, v in row.items() if v}
-    if previous and "recall" in previous and "recall" not in clean:
-        clean["recall"] = previous["recall"]
+    for kept in ("recall", MESH_MEMBER_KEY):
+        if previous and kept in previous and kept not in clean:
+            clean[kept] = previous[kept]
     stores.append(clean)
     doc["stores"] = stores
     errs = validate_doc(doc)

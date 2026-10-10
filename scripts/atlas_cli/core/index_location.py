@@ -52,6 +52,13 @@ from .identity import IdentityError, normalise
 from .paths import has_contract_file
 
 DRIVER_TYPES = frozenset({"fts5", "nanograph", "tgrep"})
+# Mesh-level indexes live beside the per-store ones at
+# ``<project>/.atlas/indexes/<type>/_mesh/``. No atlas id can map there: the
+# id segment rule (:data:`_SEGMENT`) rejects a leading underscore. ``graph``
+# is a mesh-only driver type and is deliberately absent from DRIVER_TYPES
+# (the single-store graph stays index-free); FTS5 has no mesh directory.
+MESH_SEGMENT = "_mesh"
+MESH_DRIVER_TYPES = frozenset({"graph", "nanograph"})
 INDEXES_REL = PurePosixPath(".atlas") / "indexes"
 LEGACY_DIR = ".atlas-index"
 LEGACY_NAMES = {"fts5": "recall", "nanograph": "nanograph", "tgrep": "tgrep"}
@@ -327,6 +334,26 @@ def index_dir(store: Path, driver_type: str) -> Path:
         path.resolve().relative_to(type_base.resolve())
     except ValueError as e:
         raise IndexLocationError("index path escapes its driver-type base") from e
+    return path
+
+
+def mesh_index_dir(project: Path, driver_type: str) -> Path:
+    """``<project>/.atlas/indexes/<driver_type>/_mesh``, with :func:`index_dir`'s guards."""
+    if driver_type not in MESH_DRIVER_TYPES:
+        raise ValueError(
+            f"unknown mesh index driver type {driver_type!r}; expected one of {sorted(MESH_DRIVER_TYPES)}"
+        )
+    base = Path(project).expanduser().resolve() / INDEXES_REL
+    for guarded in (base.parent, base):
+        if guarded.is_symlink():
+            raise IndexLocationError(f"{guarded} must not be a symlink")
+    type_base = base / driver_type
+    path = type_base / MESH_SEGMENT
+    reject_symlink_escape(base, path)
+    try:
+        path.resolve().relative_to(type_base.resolve())
+    except ValueError as e:
+        raise IndexLocationError("mesh index path escapes its driver-type base") from e
     return path
 
 
