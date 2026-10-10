@@ -73,6 +73,29 @@ class NotAStoreError(IndexLocationError):
     """The directory is neither a mesh row nor a store, so it has no atlas id."""
 
 
+ROOT_NOT_FOUND = "root_not_found"
+
+
+class RootNotFoundError(IndexLocationError):
+    """``--root`` is not an existing directory, so no store may be matched for it."""
+
+    code = ROOT_NOT_FOUND
+
+
+def require_directory(path: Path) -> Path:
+    """``path`` resolved; raises :class:`RootNotFoundError` unless it is an existing directory.
+
+    ``Path.resolve()`` accepts missing paths, so without this a typo below a
+    mounted store would walk up to that store and select it.
+    """
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        raise RootNotFoundError(f"--root {resolved} does not exist")
+    if not resolved.is_dir():
+        raise RootNotFoundError(f"--root {resolved} is not a directory")
+    return resolved
+
+
 @dataclass(frozen=True)
 class IndexLocation:
     store: Path
@@ -173,8 +196,11 @@ def _reject_duplicate_ids(directory: Path, store: Path) -> None:
 
 
 def mounted_store_at_or_above(path: Path) -> MeshMatch | None:
-    """The mesh row for ``path`` or for the nearest ancestor that is a mounted (mesh-listed) store."""
-    path = Path(path).expanduser().resolve()
+    """The mesh row for ``path`` or for the nearest ancestor that is a mounted (mesh-listed) store.
+
+    ``path`` must be an existing directory (:class:`RootNotFoundError` otherwise).
+    """
+    path = require_directory(path)
     for candidate in [path, *path.parents]:
         found = mesh_match(candidate)
         if found is not None:

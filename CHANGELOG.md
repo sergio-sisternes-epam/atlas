@@ -15,7 +15,11 @@
   `--store`/`--all` follows `show`, with a hint for `--store`/`--all`. A
   plain directory with no mesh exits 2 with `code: not_a_store` and the
   `atlas mount` hint. `--root` inside a mounted store now selects that
-  store. `ok` is `false` whenever an `error` is reported (exit 1 for a
+  store; a `--root` that does not exist or is a file exits 2 with
+  `code: root_not_found` before any store matching (for every `atlas index`
+  verb and `atlas recall index build`), so a typo such as
+  `<mounted-store>/missing` can no longer select, or let `set`/`unset`
+  rewrite, the mounted store's mesh row. `ok` is `false` whenever an `error` is reported (exit 1 for a
   store whose contract cannot be read). At the root cause, index location
   resolution refuses to derive any atlas id for a directory that is neither
   a mesh row nor a store, so `atlas recall status` on such a directory no

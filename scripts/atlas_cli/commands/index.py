@@ -54,6 +54,7 @@ class Located:
     match: index_location.MeshMatch | None
     doc: dict[str, Any] | None = None
     error: str | None = None
+    code: str | None = None
 
     @property
     def mesh_file(self) -> Path | None:
@@ -99,6 +100,11 @@ def _fail(as_json: bool, error: str, exit_code: int = 2, **extra: Any) -> int:
     return exit_code
 
 
+def _locate_fail(as_json: bool, loc: Located) -> int:
+    assert loc.error is not None
+    return _fail(as_json, loc.error, **({"code": loc.code} if loc.code else {}), root=str(loc.root))
+
+
 def _usage_fail(as_json: bool, e: UsageError, root: Path) -> int:
     """Exit 2 with the error's structured fields (``code``, ``hint``, ``known_ids``...)."""
     fields = dict(e.fields)
@@ -120,8 +126,14 @@ def locate(root: str | None) -> Located:
     """The mounted store at or above ``--root`` (a mesh row) and the project that owns the mesh file.
 
     A standalone store at ``--root`` is never replaced by a mounted store above it.
+    A ``--root`` that is not an existing directory is ``root_not_found`` before any matching.
     """
     r = store_root(root)
+    if root:
+        try:
+            index_location.require_directory(r)
+        except index_location.RootNotFoundError as e:
+            return Located(r, None, None, error=str(e), code=e.code)
     index_location.clear_cache()
     try:
         match = index_location.mesh_match(r)
@@ -431,7 +443,7 @@ def run_build(
         return _fail(as_json, "--store and --all are mutually exclusive")
     loc = locate(root)
     if loc.error:
-        return _fail(as_json, loc.error, root=str(loc.root))
+        return _locate_fail(as_json, loc)
     try:
         if all_stores:
             if loc.project is None:
@@ -497,7 +509,7 @@ def _write(
 ) -> int:
     loc = locate(root)
     if loc.error:
-        return _fail(as_json, loc.error, root=str(loc.root))
+        return _locate_fail(as_json, loc)
     try:
         project, target, ref = _write_target(loc, store, default)
         result = meshfile.set_recall_engine(project, target, value)
@@ -666,7 +678,7 @@ def _freshness_text(idx: dict[str, Any], mounted: bool) -> str:
 def run_show(root: str | None, store: str | None, as_json: bool) -> int:
     loc = locate(root)
     if loc.error:
-        return _fail(as_json, loc.error, root=str(loc.root))
+        return _locate_fail(as_json, loc)
     try:
         ref = _row_for(loc, store) if store else _root_store(loc, need_row=False)
         doc = _load_doc(loc) if ref.row is not None else None
@@ -716,7 +728,7 @@ def _ignore_line(ignore: dict[str, Any]) -> str:
 def run_status(root: str | None, as_json: bool) -> int:
     loc = locate(root)
     if loc.error:
-        return _fail(as_json, loc.error, root=str(loc.root))
+        return _locate_fail(as_json, loc)
     current: str | None = None
     if loc.project is None:
         try:

@@ -168,6 +168,40 @@ def main() -> int:
         check("show-root-is-store", code == 0 and p.get("store_id") == A and p.get("mesh_file") == "atlas-mesh.json", out[:500])
         code, p, out = run_json("show-in-store-subdir", "index", "show", "--root", str(inner))
         check("show-inside-store", code == 0 and p.get("store_id") == A and "local/" not in out, out[:500])
+        # --- a missing --root never walks up to a mounted store ---------------------------
+        missing = sa / "missing"
+        mesh_original = (project / "atlas-mesh.json").read_bytes()
+        code, p, out = run_json("set-in-store-subdir", "index", "set", "grep", "--root", str(inner))
+        check("set-existing-subdir-selects-store", code == 0 and p.get("target") == A, out[:500])
+        mesh_before = (project / "atlas-mesh.json").read_bytes()
+        for verb, extra in (("set", ("bm25",)), ("unset", ())):
+            code, p, out = run_json(f"{verb}-missing-root", "index", verb, *extra, "--root", str(missing))
+            check(
+                f"{verb}-missing-root-not-found",
+                code == 2 and p.get("ok") is False and p.get("code") == "root_not_found"
+                and str(missing) in str(p.get("error")) and p.get("root") == str(missing),
+                out[:500],
+            )
+            check(f"{verb}-missing-root-mesh-unchanged", (project / "atlas-mesh.json").read_bytes() == mesh_before)
+            (project / "atlas-mesh.json").write_bytes(mesh_before)
+        for verb in ("show", "status", "build"):
+            code, p, out = run_json(f"{verb}-missing-root", "index", verb, "--root", str(missing))
+            check(f"{verb}-missing-root-not-found", code == 2 and p.get("code") == "root_not_found", out[:500])
+        code, out, err = atlas("index", "set", "bm25", "--root", str(missing))
+        err_lines = [line for line in err.splitlines() if line.strip()]
+        check(
+            "set-missing-root-text",
+            code == 2 and not out.strip() and len(err_lines) == 1 and "error:" in err_lines[0] and str(missing) in err_lines[0],
+            out + err,
+        )
+        as_file = sa / "page.md"
+        as_file.write_text("x\n", encoding="utf-8")
+        code, p, out = run_json("show-file-root", "index", "show", "--root", str(as_file))
+        check("show-file-root-not-found", code == 2 and p.get("code") == "root_not_found", out[:500])
+        check("missing-root-mesh-unchanged", (project / "atlas-mesh.json").read_bytes() == mesh_before)
+        as_file.unlink()
+        (project / "atlas-mesh.json").write_bytes(mesh_original)
+
         code, p, out = run_json("show-unknown", "index", "show", "--root", str(project), "--store", "github.com/acme/nope")
         check("show-unknown-store", code == 2 and p.get("known_ids") == mesh_ids, out[:400])
 

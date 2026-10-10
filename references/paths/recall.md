@@ -190,8 +190,10 @@ The profile therefore stays authoritative for the rank pipeline:
 `atlas index` manages the preferred engine and its indexes so nobody needs to
 edit `atlas-mesh.json` by hand (hand-editing still works). "Engine" is
 `grep`, `bm25` or `nanograph`; the file key stays `recall.engine`. Every
-command takes `--root` (default: the current directory): a mounted store,
-or any directory inside one, selects that store and its mesh project; any
+command takes `--root` (default: the current directory). A `--root` that
+does not exist or is not a directory exits 2 with `code: root_not_found`
+before any store matching, and nothing is written. A mounted store, or any
+existing directory inside one, selects that store and its mesh project; any
 other directory uses the nearest `atlas-mesh.json` at or above it. A
 directory that is neither a store nor inside a mounted store (a project
 root, a project subdirectory, a plain directory) is never given an invented
