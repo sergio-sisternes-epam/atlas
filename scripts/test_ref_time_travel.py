@@ -3594,6 +3594,30 @@ def main() -> int:
                 failures.append("root-relative link should ignore an existing filesystem /dead.md")
             else:
                 print("[PASS] root-relative link ignores a filesystem path of the same name")
+            protocol = refcmd._link_hits_drop(
+                rooted, rooted / "living.md", "//example.invalid/dead.md", {"dead.md"}
+            )
+            bare_protocol = refcmd._link_hits_drop(
+                rooted, rooted / "living.md", "//dead.md", {"dead.md"}
+            )
+            rewritten, count = refcmd.rewrite_markdown_links(
+                "See [external](//example.invalid/dead.md) and [bare](//dead.md) and [trial](/dead.md).",
+                rooted,
+                rooted / "living.md",
+                {"dead.md"},
+                rooted / "summary.md",
+            )
+            if (
+                protocol
+                or bare_protocol
+                or count != 1
+                or "//example.invalid/dead.md" not in rewritten
+                or "(//dead.md)" not in rewritten
+                or "](/dead.md)" in rewritten
+            ):
+                failures.append(f"protocol-relative link must stay unchanged:\n{rewritten}")
+            else:
+                print("[PASS] protocol-relative link is not a store-root path")
             git(rooted, ["init", "-b", "main"])
             git(rooted, ["add", "."])
             git(rooted, ["commit", "-m", "rooted"])

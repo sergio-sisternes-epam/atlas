@@ -769,10 +769,11 @@ def _url_path(token: str) -> tuple[str, str]:
 
 def _link_hits_drop(root: Path, page: Path, token: str, drop: set[str]) -> bool:
     token, _suffix = _url_path(token)
-    if not token or token.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
+    if not token or token.startswith(("http://", "https://", "mailto:", "atlas://", "#", "//")):
         return False
-    # A single leading slash is store-root relative. Joining it onto the page
-    # directory would discard that directory and consult the filesystem root.
+    # A single leading slash is store-root relative. A protocol-relative `//`
+    # link is remote and is rejected above. Joining a store-root link onto the
+    # page directory would discard that directory and consult the filesystem root.
     if token.startswith("/") and not token.startswith("//"):
         root_path = root / token.lstrip("/")
         try:
