@@ -190,9 +190,14 @@ The profile therefore stays authoritative for the rank pipeline:
 `atlas index` manages the preferred engine and its indexes so nobody needs to
 edit `atlas-mesh.json` by hand (hand-editing still works). "Engine" is
 `grep`, `bm25` or `nanograph`; the file key stays `recall.engine`. Every
-command takes `--root` (default: the current directory): a mounted store
-selects that store and its mesh project; any other directory uses the
-nearest `atlas-mesh.json` at or above it.
+command takes `--root` (default: the current directory). A `--root` that
+does not exist or is not a directory exits 2 with `code: root_not_found`
+before any store matching, and nothing is written. A mounted store, or any
+existing directory inside one, selects that store and its mesh project; any
+other directory uses the nearest `atlas-mesh.json` at or above it. A
+directory that is neither a store nor inside a mounted store (a project
+root, a project subdirectory, a plain directory) is never given an invented
+store id: verbs that need one store exit 2 instead (see `show` and `build`).
 
 ```text
 atlas index set bm25                                # store at --root (its atlas-mesh.json row)
@@ -231,14 +236,33 @@ atlas index build [--store <atlas-id> | --all] [--force]
   `stale`, `missing` or `legacy-only` (decided by the content digest), plus
   the generation id and a corpus digest prefix, and `ignore: ok|missing|failed`
   (with the reason; `n/a` outside git): whether git actually ignores
-  `.atlas/indexes/` (`git check-ignore`).
+  `.atlas/indexes/` (`git check-ignore`). `show` is per store: `--store`,
+  or the store at (or containing) `--root`. At a project root or another
+  directory that is not a store, without `--store`, it exits 2 with
+  `code: store_required`, for example "<root> is a project root, not a
+  store; pass --store <atlas-id> (known: a, b) or run `atlas index status`
+  for every store", plus a `hint` and, in `--json`, `known_ids`. When the
+  mesh has exactly one store row, that row is shown instead, with
+  `selected: only_mesh_row` (a `note:` line in text mode). Without any
+  `atlas-mesh.json` and not a store, it exits 2 with `code: not_a_store`
+  and suggests `atlas mount`. A store whose contract cannot be read
+  reports `ok: false` with the `error` (exit 1); `ok` is never `true`
+  alongside an `error`.
 - **`status`** shows every row of the project's `atlas-mesh.json` and the
   project default: id, mounted, configured engine and source, effective
   engine, freshness and index directory (one row for a standalone store),
-  plus the project's `ignore` status as in `show`.
+  plus the project's `ignore` status as in `show`. It does so from the
+  project root, any subdirectory or inside a mounted store; inside a store,
+  `current_store` (and `current: true` on its row, a `current store:` line
+  in text mode) names that store. `ok` is `false` (exit 1) when any row has
+  an `error`. Without an `atlas-mesh.json`, a directory that is not a store
+  exits 2 with `code: not_a_store` and the `atlas mount` hint.
 - **`build`** builds or refreshes the index for the effective engine of the
-  store at `--root`, of `--store <atlas-id>`, or of every mounted row with
-  `--all` (unmounted rows are skipped). It rebuilds only when stale unless
+  store at (or containing) `--root`, of `--store <atlas-id>`, or of every
+  mounted row with `--all` (unmounted rows are skipped). At a project root
+  without `--store`/`--all` it resolves the store as `show` does: the only
+  row of a one-store mesh, otherwise exit 2 with `code: store_required` and
+  a hint for `--store`/`--all`. It rebuilds only when stale unless
   `--force` is given. Profile stores build the profile's `fts5` index. Exit
   0 when every build succeeded or was not needed; exit 1 when any failed
   (the others are still attempted and each failure is reported).

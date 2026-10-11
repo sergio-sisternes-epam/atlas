@@ -146,6 +146,7 @@ class RecallConfigTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))
         store = tmp / "store"
         store.mkdir()
+        (store / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
         page = SimpleNamespace(path="decisions/alpha.md", role="page")
         calls: list[list[str]] = []
 
@@ -202,6 +203,7 @@ class RecallConfigTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="atlas-tgrep-"))
         store = tmp / "store"
         store.mkdir()
+        (store / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
         outside = tmp / "outside-index"
         outside.mkdir()
         (store / ".atlas" / "indexes").mkdir(parents=True)
@@ -216,6 +218,7 @@ class RecallConfigTests(unittest.TestCase):
         store = tmp / "store"
         (store / ".tgrep").mkdir(parents=True)
         (store / ".tgrep" / "serve.json").write_text("{}", encoding="utf-8")
+        (store / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
         with self.assertRaises(tgrep_driver.TgrepError) as ctx:
             tgrep_driver.ensure_index(store, "digest", binary=Path("/bin/echo"))
         self.assertEqual(str(ctx.exception), tgrep_driver.SERVE_DETECTED)

@@ -24,6 +24,7 @@ _GLOB_SPECIAL = re.compile(r"([*?\[\]\\])")
 IGNORED_ADDED = "ignored_added"
 ALREADY_IGNORED = "already_ignored"
 NOT_GIT = "not_git"
+NOT_A_STORE = "not_a_store"
 FAILED = "failed"
 
 
@@ -234,12 +235,17 @@ def guard_indexes(store: Path) -> GuardResult:
     """Primary guard: ``/.atlas/indexes/`` (anchored at the work-tree top) in ``info/exclude``.
 
     Uses the repository that contains the store's index project root (see
-    core/index_location.py); a project root outside git is ``not_git``. Never raises.
+    core/index_location.py); a project root outside git is ``not_git`` and a
+    directory that is not a store is ``not_a_store``. Never raises.
     """
     try:
-        from .index_location import resolve
+        from .index_location import NotAStoreError, resolve
 
-        project = resolve(store).project_root
+        try:
+            project = resolve(store).project_root
+        except NotAStoreError:
+            # Not a store: it has no indexes to guard (and no atlas id).
+            return GuardResult(NOT_A_STORE, "atlas_indexes_ignore_failed", f"/{INDEXES_DIR}/")
         return _guard(
             project,
             subdir=INDEXES_DIR,

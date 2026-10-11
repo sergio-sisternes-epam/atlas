@@ -119,6 +119,7 @@ def main() -> int:
             index_location.clear_cache()
             store = tmp / "tgrep-store"
             store.mkdir()
+            (store / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
             (store / "hub.md").write_text("# hub\n", encoding="utf-8")
             pages = [ProjectedPage("hub", "hub.md", "concept", "d", {}, "hub", "hub", "")]
             tgrep.search(store, pages, "hub", 5, "a" * 64, binary=fake)

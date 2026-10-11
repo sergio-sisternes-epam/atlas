@@ -265,6 +265,7 @@ def main() -> int:
         def tgrep_rule() -> None:
             store = tmp / "tstore"
             store.mkdir()
+            (store / "SCHEMA.json").write_text("{}\n", encoding="utf-8")
             (store / "note.md").write_text("# Note\n\nhub text\n", encoding="utf-8")
             digest = "a" * 64
             index_location.clear_cache()
