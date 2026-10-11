@@ -115,7 +115,9 @@ def resolve_engine(
         store_id = str(match.row.get("id"))
         errs = meshfile.recall_block_errors(match.row["recall"], f"{mesh_file}: store {store_id}") if "recall" in match.row else []
         if "recall" in match.doc:
-            errs += meshfile.recall_block_errors(match.doc["recall"], f"{mesh_file}: project default")
+            errs += meshfile.recall_block_errors(
+                match.doc["recall"], f"{mesh_file}: project default", top_level=True
+            )
         if errs:
             raise EnginePreferenceError("; ".join(errs))
         store_value = (match.row.get("recall") or {}).get("engine")

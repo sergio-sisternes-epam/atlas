@@ -43,15 +43,23 @@ import json
 import os
 import re
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterator
 
 from . import gitops, meshfile
 from .identity import IdentityError, normalise
 from .paths import has_contract_file
 
 DRIVER_TYPES = frozenset({"fts5", "nanograph", "tgrep"})
+# Mesh-level indexes live beside the per-store ones at
+# ``<project>/.atlas/indexes/<type>/_mesh/``. No atlas id can map there: the
+# id segment rule (:data:`_SEGMENT`) rejects a leading underscore. ``graph``
+# is a mesh-only driver type and is deliberately absent from DRIVER_TYPES
+# (the single-store graph stays index-free); FTS5 has no mesh directory.
+MESH_SEGMENT = "_mesh"
+MESH_DRIVER_TYPES = frozenset({"graph", "nanograph"})
 INDEXES_REL = PurePosixPath(".atlas") / "indexes"
 LEGACY_DIR = ".atlas-index"
 LEGACY_NAMES = {"fts5": "recall", "nanograph": "nanograph", "tgrep": "tgrep"}
@@ -62,6 +70,7 @@ _SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 _cache: dict[tuple[str, str], "IndexLocation"] = {}
+_pinned: dict[str, "IndexLocation"] = {}
 _warned_relative = False
 
 
@@ -256,10 +265,37 @@ def _override_root() -> Path | None:
     return path.resolve()
 
 
+@contextmanager
+def pinned(location: IndexLocation) -> Iterator[IndexLocation]:
+    """Within the block, :func:`resolve` returns ``location`` for its store without any lookup.
+
+    For callers that already know the store's mesh row (mesh scope), so no
+    walk-up, ``git`` subprocess or standalone id is involved.
+    ``ATLAS_INDEX_ROOT`` still replaces the project root, as in :func:`resolve`.
+    """
+    store_r = Path(location.store).expanduser().resolve()
+    loc = IndexLocation(store_r, location.project_root, location.atlas_id, location.id_source, location.mode)
+    key = str(store_r)
+    previous = _pinned.get(key)
+    _pinned[key] = loc
+    try:
+        yield loc
+    finally:
+        if previous is None:
+            _pinned.pop(key, None)
+        else:
+            _pinned[key] = previous
+
+
 def resolve(store: Path) -> IndexLocation:
     """Resolve the project root and atlas id that own this store's indexes."""
     store_r = Path(store).expanduser().resolve()
     override = _override_root()
+    pin = _pinned.get(str(store_r))
+    if pin is not None:
+        if override is not None:
+            return IndexLocation(store_r, override, pin.atlas_id, pin.id_source, pin.mode)
+        return pin
     key = (str(store_r), str(override or ""))
     hit = _cache.get(key)
     if hit is not None:
@@ -327,6 +363,26 @@ def index_dir(store: Path, driver_type: str) -> Path:
         path.resolve().relative_to(type_base.resolve())
     except ValueError as e:
         raise IndexLocationError("index path escapes its driver-type base") from e
+    return path
+
+
+def mesh_index_dir(project: Path, driver_type: str) -> Path:
+    """``<project>/.atlas/indexes/<driver_type>/_mesh``, with :func:`index_dir`'s guards."""
+    if driver_type not in MESH_DRIVER_TYPES:
+        raise ValueError(
+            f"unknown mesh index driver type {driver_type!r}; expected one of {sorted(MESH_DRIVER_TYPES)}"
+        )
+    base = Path(project).expanduser().resolve() / INDEXES_REL
+    for guarded in (base.parent, base):
+        if guarded.is_symlink():
+            raise IndexLocationError(f"{guarded} must not be a symlink")
+    type_base = base / driver_type
+    path = type_base / MESH_SEGMENT
+    reject_symlink_escape(base, path)
+    try:
+        path.resolve().relative_to(type_base.resolve())
+    except ValueError as e:
+        raise IndexLocationError("mesh index path escapes its driver-type base") from e
     return path
 
 

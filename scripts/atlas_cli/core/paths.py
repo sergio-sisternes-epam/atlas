@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 RESERVED = frozenset({"index.md", "log.md"})
@@ -31,6 +32,46 @@ def has_contract_file(root: Path) -> bool:
     not the strict single-file compile gate in core.schema.find_contract_path.
     """
     return any((root / name).is_file() for name in CONTRACT_FILENAMES)
+
+
+def join_under(base: Path, *relatives: str) -> Path | None:
+    """``base`` joined with each relative part, or None for an absolute part or a ``..`` segment."""
+    cur = base
+    for rel_part in relatives:
+        if not rel_part:
+            continue
+        part = Path(rel_part)
+        if part.is_absolute() or part.drive or ".." in part.parts:
+            return None
+        cur = cur.joinpath(*part.parts)
+    return cur
+
+
+def contained_root(project: Path, *relatives: str) -> Path | None:
+    """``project / relatives`` (normalised) when it stays inside ``project``, else None.
+
+    Rejects an absolute part or a ``..`` segment lexically, then walks the
+    components from ``project`` and rejects a symlink that resolves outside
+    it. The walk stops at the first escaping link, so nothing under an
+    outside target is ever stat-ed or opened.
+    """
+    lexical = join_under(project, *relatives)
+    if lexical is None:
+        return None
+    try:
+        real_project = project.resolve()
+    except (OSError, RuntimeError):
+        return None
+    acc = project
+    for part in lexical.relative_to(project).parts:
+        acc = acc / part
+        if not os.path.islink(acc):
+            continue
+        try:
+            acc.resolve().relative_to(real_project)
+        except (OSError, RuntimeError, ValueError):
+            return None
+    return Path(os.path.normpath(lexical))
 
 
 def rel(root: Path, path: Path) -> str:

@@ -15,7 +15,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from . import recall_index
+from . import index_location, recall_index
 from .overlay import merge_overlays
 from .projection import ProjectedPage, ProjectionError, normalise_target, project_store
 from .retrieve import EXIT_FIELDS, adjacent, build_incoming, is_exit_page, is_exit_value, is_visible
@@ -45,7 +45,17 @@ class GraphError(ValueError):
 # --- data source -----------------------------------------------------------
 
 
-def load_source(root: Path, allow_partial: bool = False) -> dict[str, Any]:
+def load_source(
+    root: Path, allow_partial: bool = False, location: index_location.IndexLocation | None = None
+) -> dict[str, Any]:
+    """Pages of ``root``; ``location``, when given, is the store's known index location (no lookup)."""
+    if location is not None:
+        with index_location.pinned(location):
+            return _load_source(root, allow_partial)
+    return _load_source(root, allow_partial)
+
+
+def _load_source(root: Path, allow_partial: bool) -> dict[str, Any]:
     schema, err = load_schema(root)
     if schema is None:
         raise GraphError(err or "missing schema")

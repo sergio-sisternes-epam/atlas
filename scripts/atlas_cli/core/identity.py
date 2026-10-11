@@ -63,6 +63,11 @@ def parse_pointer(pointer: str) -> ParsedPointer:
     )
 
 
+def fold_host(host: str) -> str:
+    """The host as :func:`normalise` writes it (``www.`` dropped, ASCII lower-cased)."""
+    return _fold_host(host)
+
+
 def _fold_host(host: str) -> str:
     h = host.strip()
     lower = h.lower()

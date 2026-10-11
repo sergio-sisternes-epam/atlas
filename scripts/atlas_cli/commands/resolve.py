@@ -7,24 +7,13 @@ from pathlib import Path
 from ..core.gitops import git_root, inside_git
 from ..core.identity import IdentityError, parse_pointer
 from ..core.meshfile import MeshFileError, find_store
+from ..core.paths import join_under as _join_under
 
 _RESOLVE_ERRORS = (OSError, RuntimeError)
 
 
 def default_mount(project: Path, atlas_id: str) -> Path:
     return project / ".atlas" / Path(*atlas_id.split("/"))
-
-
-def _join_under(base: Path, *relatives: str) -> Path | None:
-    cur = base
-    for rel in relatives:
-        if not rel:
-            continue
-        part = Path(rel)
-        if part.is_absolute() or ".." in part.parts:
-            return None
-        cur = cur.joinpath(*part.parts)
-    return cur
 
 
 def run(pointer: str, start: str | None, as_json: bool) -> int:

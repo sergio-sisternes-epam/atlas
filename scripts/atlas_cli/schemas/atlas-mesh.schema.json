@@ -11,7 +11,8 @@
       "type": "array",
       "items": { "$ref": "#/$defs/store" }
     },
-    "recall": { "$ref": "#/$defs/recall" }
+    "recall": { "$ref": "#/$defs/meshRecall" },
+    "graph": { "$ref": "#/$defs/graph" }
   },
   "$defs": {
     "store": {
@@ -24,15 +25,39 @@
         "ref": { "type": "string" },
         "path": { "type": "string" },
         "strategy": { "type": "string", "enum": ["shared", "dedicated"] },
-        "recall": { "$ref": "#/$defs/recall" }
+        "recall": { "$ref": "#/$defs/recall" },
+        "mesh_member": {
+          "type": "boolean",
+          "default": true,
+          "description": "false leaves this store out of mesh scope entirely: it is never read, projected or searched there."
+        }
       }
     },
     "recall": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Preferred recall engine for this consumer (see references/paths/recall.md).",
+      "description": "Preferred recall engine for this consumer (see references/paths/recall.md). scope and rrf_k are mesh-level and are not allowed on a store row.",
       "properties": {
         "engine": { "type": "string", "enum": ["grep", "bm25", "nanograph"] }
+      }
+    },
+    "meshRecall": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-wide recall preferences: engine, plus the mesh-level scope and Reciprocal Rank Fusion k.",
+      "properties": {
+        "engine": { "type": "string", "enum": ["grep", "bm25", "nanograph"] },
+        "scope": { "type": "string", "enum": ["store", "mesh"] },
+        "rrf_k": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-wide graph preferences: scope (store or mesh) and mesh graph driver.",
+      "properties": {
+        "scope": { "type": "string", "enum": ["store", "mesh"] },
+        "driver": { "type": "string", "enum": ["native", "nanograph"] }
       }
     }
   }

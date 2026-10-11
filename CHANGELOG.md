@@ -64,6 +64,37 @@
   a mesh row nor a store, so `atlas recall status` on such a directory no
   longer shows a synthetic index path either; real standalone stores keep
   their origin or `local/` id.
+- Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
+  the mesh for a project or a listed store, lists its members in file order
+  as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
+  read, and nothing is mounted, fetched or run through git). A row whose
+  `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
+  that resolves outside the project is `invalid` with reason
+  `outside_project`, and a row id with an empty host (such as `/acme/repo`)
+  is `invalid` with reason `invalid_atlas_id`. Nothing under it is read, and links into it stay
+  unresolved as `outside_mesh`. The module names pages
+  `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
+  non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
+  builds an in-memory, structure-only view of nodes and edges. Its strict
+  cross-store resolver classifies every `relates_to` target exactly once as
+  a local edge, a canonical `atlas://` link or a mesh-relative path (with a
+  `noncanonical_cross_store_link` warning and a canonical suggestion), or
+  leaves it unresolved with one reason: `unmounted`, `excluded_member`,
+  `missing_page`, `withheld`, `outside_mesh` or `noncanonical_atlas_uri`. A
+  link is canonical when its first segment is a host: it has a dot, a
+  `:port` or an IP literal, is `localhost`, or is the host of a mesh row id,
+  so every atlas id `atlas-mesh.json` accepts round-trips. Any other short
+  form such as `atlas://<repo>/<path>` is never resolved as an alias;
+  it is suggested in canonical form only when exactly one member's repo name
+  matches. `atlas-mesh.json` accepts new keys: top-level `recall.scope`
+  (`store`|`mesh`) and `recall.rrf_k` (integer 1-1000), a top-level `graph`
+  block with `scope` (`store`|`mesh`) and `driver` (`native`|`nanograph`),
+  and a row-level `mesh_member` (boolean, default true). `scope` or `rrf_k`
+  in a store row's `recall` block is an error that names the row. The keys
+  are validated and kept by `atlas index set|unset` and mount, but have no
+  effect yet. `index_location.mesh_index_dir()` reserves
+  `.atlas/indexes/<graph|nanograph>/_mesh/`, which no valid atlas id can
+  reach. Without the new keys, all existing output is byte-identical.
 - FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)
   are tokenised like the index's `unicode61` tokenizer instead of keeping
   only ASCII letters, digits and `_`. `café`, `résumé`, `Grüße` and `東京`
