@@ -2,6 +2,9 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Docs: the terminate-wrong-path recipe names a non-duplicate atlas-tasks
+  cancel as an explicit trigger for the cancelled task's own pages. No CLI,
+  contract or schema change.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

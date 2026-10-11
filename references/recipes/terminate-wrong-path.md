@@ -9,6 +9,8 @@ description: When the user kills a frame during remember or query, load discuss 
 
 User says the current comparison, thesis, or branch is wrong. Examples: “wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”.
 
+A non-duplicate cancel in the atlas-tasks companion (its update path, step 8a) is an explicit trigger for the cancelled task's own pages: the task pointer and its body page are the `subject_node`; the page holding the standing answer is the `living_node`. A duplicate cancel or a task marked done is not a trigger.
+
 Model disagreement alone is not a trigger.
 
 ## Do
