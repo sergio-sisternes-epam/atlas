@@ -33,7 +33,8 @@
   that resolves outside the project is `invalid` with reason
   `outside_project`. Nothing under it is read, and links into it stay
   unresolved as `outside_mesh`. The module names pages
-  `atlas://<atlas-id>/<path>`, withholds `sensitivity: restricted` pages and
+  `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
+  non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
   builds an in-memory, structure-only view of nodes and edges. Its strict
   cross-store resolver classifies every `relates_to` target exactly once as
   a local edge, a canonical `atlas://` link or a mesh-relative path (with a

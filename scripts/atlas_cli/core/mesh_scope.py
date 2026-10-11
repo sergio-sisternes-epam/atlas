@@ -16,7 +16,13 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   is unresolved with reason ``outside_mesh``. A row whose root is not a
   directory holding a contract file is ``unmounted``; it is never mounted,
   and no git or network call is made for it.
-- Node ids (M3): ``atlas://<atlas-id>/<store-relative path>``.
+- Node ids (M3): ``atlas://<atlas-id>/<store-relative path>``. Path
+  segments are percent-encoded by :func:`encode_path` (``%``, ``#``, ``?``,
+  whitespace and non-printable characters only; ``/`` stays the separator,
+  other ASCII and non-ASCII letters stay as written), so every page
+  round-trips. :func:`decode_path` is the one inverse, used by
+  :func:`parse_node_id` and the resolver after the fragment is split off; a
+  literal ``#`` in an authored link still starts a fragment (write ``%23``).
 - Privacy (M7, M20): ``sensitivity: restricted`` pages are dropped from the
   view and remembered only as a set of withheld paths. Node records carry
   structure only (M6): no title, description, body, tags or other text.
@@ -44,6 +50,7 @@ import posixpath
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
@@ -102,16 +109,44 @@ class MeshScopeError(ValueError):
 # --- node ids ----------------------------------------------------------------
 
 
+_ENCODED = frozenset("%#?")
+
+
+def _needs_encoding(ch: str) -> bool:
+    return ch in _ENCODED or ch.isspace() or not ch.isprintable()
+
+
+def encode_path(path: str) -> str:
+    """Percent-encode a store-relative path for a node id.
+
+    Encoded (as UTF-8 bytes, upper-case hex): ``%``, ``#``, ``?``, every
+    whitespace character and every non-printable character. Everything else,
+    ``/`` included, is kept as written, so ordinary ids do not change.
+    """
+    if not any(_needs_encoding(ch) for ch in path):
+        return path
+    return "".join(
+        "".join(f"%{b:02X}" for b in ch.encode("utf-8")) if _needs_encoding(ch) else ch for ch in path
+    )
+
+
+def decode_path(path: str) -> str:
+    """Inverse of :func:`encode_path`; malformed ``%`` escapes are kept literally."""
+    return unquote(path) if "%" in path else path
+
+
 def node_id(atlas_id: str, path: str) -> str:
-    """``atlas://<atlas-id>/<store-relative path>``."""
+    """``atlas://<atlas-id>/<store-relative path>``, path encoded by :func:`encode_path`."""
     rel = normalise_target(path).lstrip("/")
     if not atlas_id or not rel:
         raise MeshScopeError(f"node id needs an atlas id and a path, got {atlas_id!r} and {path!r}")
-    return f"{ATLAS_SCHEME}{atlas_id}/{rel}"
+    return f"{ATLAS_SCHEME}{atlas_id}/{encode_path(rel)}"
 
 
 def parse_node_id(uri: str, hosts: frozenset[str] | set[str] | None = None) -> tuple[str, str]:
     """Inverse of :func:`node_id`: ``(atlas_id, path)``; any ``#fragment`` is dropped.
+
+    The path is decoded with :func:`decode_path` after the fragment is split off.
 
     The id is read with the identity grammar (:func:`identity.parse_pointer`),
     so every atlas id mesh validation accepts round-trips, whatever its host.
@@ -127,7 +162,7 @@ def parse_node_id(uri: str, hosts: frozenset[str] | set[str] | None = None) -> t
         parsed = parse_pointer(text)
     except IdentityError as e:
         raise MeshScopeError(f"{uri!r} is not a canonical node id: {e}") from e
-    path = _clean_in_store(parsed.in_store)
+    path = _clean_in_store(decode_path(parsed.in_store))
     if not path:
         raise MeshScopeError(f"{uri!r} has no store-relative path")
     return parsed.atlas_id, path
@@ -449,7 +484,7 @@ class Resolver:
             return self._edge(source, None, None, RESOLUTION_ATLAS_URI, REASON_NONCANONICAL, raw=text)
         # Canonical targets drop the fragment once, so every branch reports the same ``to``.
         bare = text.split("#", 1)[0]
-        path = _clean_in_store(parsed.in_store)
+        path = _clean_in_store(decode_path(parsed.in_store))
         target = self.by_key.get(meshfile.id_key(parsed.atlas_id))
         if target is None:
             return self._edge(source, None, None, RESOLUTION_ATLAS_URI, REASON_UNMOUNTED, raw=bare)
