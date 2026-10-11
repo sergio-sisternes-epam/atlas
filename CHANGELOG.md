@@ -44,8 +44,12 @@
   is reported as `error` with `complete: false` and exit 1; `--limit 0`
   returns every hit from every member, whatever its engine. `--profile` or
   `--allow-partial` with mesh scope, a negative `--limit` with mesh scope,
-  `--rrf-k` in store scope, a bad k or no mesh exits 2. Store
-  scope output is unchanged byte for byte.
+  `--rrf-k` in store scope, a bad k or no mesh exits 2. A listed excluded,
+  subpath or pathless root is still discovered, without reading that store,
+  so `recall.scope: mesh` federates and reports the member excluded instead
+  of falling back to store recall. Explicit `--scope store` still searches
+  that store alone: exclusion applies only in mesh scope, and the flag
+  overrides the project setting. Store scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
   as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
@@ -53,16 +57,18 @@
   `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
   that resolves outside the project is `invalid` with reason
   `outside_project`, and a row id with an empty host (such as `/acme/repo`)
-  is `invalid` with reason `invalid_atlas_id`. A row whose root equals or
+  is `invalid` with reason `invalid_atlas_id`. A row whose lexical or symlink-resolved root equals or
   contains another row's root is `invalid` with reason `overlapping_root`
-  (decided lexically, before any file access) when its own walks reach that
-  root; the contained row keeps its status. Nothing under it is read, and
-  links into it stay unresolved as `outside_mesh`. A root below a directory
-  every walk skips (`.atlas`, `.atlas-index`, `templates`, `mesh`, `schema.d`
-  or `.git`, but not `staging`), outside the index directories read by name,
-  does not count, so a store at the project root stays `ok` beside stores
-  under `.atlas/<host>/<org>/<repo>/`; the grep walk now prunes those
-  directories instead of listing them. The module names pages
+  when its own walks reach that root (resolving a row root's path components
+  is not a read of member contents); the contained row keeps its status, and
+  two aliases of the same directory are both overlapping. Nothing under an
+  overlapping root is read, and links into it stay unresolved as
+  `outside_mesh`. A root below a directory every walk skips (`.atlas`,
+  `.atlas-index`, `templates`, `mesh`, `schema.d` or `.git`, but not
+  `staging`), outside the index directories read by name, does not count, on
+  the lexical relative path or the real one, so a store at the project root
+  stays `ok` beside stores under `.atlas/<host>/<org>/<repo>/`; the grep walk
+  now prunes those directories instead of listing them. The module names pages
   `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
   non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
   builds an in-memory, structure-only view of nodes and edges. Its strict
