@@ -43,9 +43,10 @@ import json
 import os
 import re
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterator
 
 from . import gitops, meshfile
 from .identity import IdentityError, normalise
@@ -69,6 +70,7 @@ _SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 _cache: dict[tuple[str, str], "IndexLocation"] = {}
+_pinned: dict[str, "IndexLocation"] = {}
 _warned_relative = False
 
 
@@ -263,10 +265,37 @@ def _override_root() -> Path | None:
     return path.resolve()
 
 
+@contextmanager
+def pinned(location: IndexLocation) -> Iterator[IndexLocation]:
+    """Within the block, :func:`resolve` returns ``location`` for its store without any lookup.
+
+    For callers that already know the store's mesh row (mesh scope), so no
+    walk-up, ``git`` subprocess or standalone id is involved.
+    ``ATLAS_INDEX_ROOT`` still replaces the project root, as in :func:`resolve`.
+    """
+    store_r = Path(location.store).expanduser().resolve()
+    loc = IndexLocation(store_r, location.project_root, location.atlas_id, location.id_source, location.mode)
+    key = str(store_r)
+    previous = _pinned.get(key)
+    _pinned[key] = loc
+    try:
+        yield loc
+    finally:
+        if previous is None:
+            _pinned.pop(key, None)
+        else:
+            _pinned[key] = previous
+
+
 def resolve(store: Path) -> IndexLocation:
     """Resolve the project root and atlas id that own this store's indexes."""
     store_r = Path(store).expanduser().resolve()
     override = _override_root()
+    pin = _pinned.get(str(store_r))
+    if pin is not None:
+        if override is not None:
+            return IndexLocation(store_r, override, pin.atlas_id, pin.id_source, pin.mode)
+        return pin
     key = (str(store_r), str(override or ""))
     hit = _cache.get(key)
     if hit is not None:

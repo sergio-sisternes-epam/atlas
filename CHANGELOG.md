@@ -31,7 +31,8 @@
   read, and nothing is mounted, fetched or run through git). A row whose
   `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
   that resolves outside the project is `invalid` with reason
-  `outside_project`. Nothing under it is read, and links into it stay
+  `outside_project`, and a row id with an empty host (such as `/acme/repo`)
+  is `invalid` with reason `invalid_atlas_id`. Nothing under it is read, and links into it stay
   unresolved as `outside_mesh`. The module names pages
   `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
   non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and

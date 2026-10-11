@@ -13,9 +13,21 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   (an absolute ``path`` or ``subpath``, a ``..`` segment, or a symlink that
   resolves outside the project) is ``invalid`` with reason
   ``outside_project``; nothing under it is read either, and a link into it
-  is unresolved with reason ``outside_mesh``. A row whose root is not a
-  directory holding a contract file is ``unmounted``; it is never mounted,
-  and no git or network call is made for it.
+  is unresolved with reason ``outside_mesh``. A row whose id is not a
+  canonical ``<host>/<org>/<repo>`` with a non-empty host
+  (:func:`is_member_id`; ``/acme/repo`` passes ``atlas-mesh.json``
+  validation but has no host) is ``invalid`` with reason
+  ``invalid_atlas_id``, decided before any filesystem access; it is treated
+  like an ``outside_project`` row (never read, links into it are
+  ``outside_mesh``). A row whose root is not a directory holding a contract
+  file is ``unmounted``; it is never mounted, and no git or network call is
+  made for it. Invariant: every ``ok`` member's id round-trips through
+  :func:`node_id` / :func:`parse_node_id` and resolves as ``atlas_uri``.
+- Loading (M2): an ``ok`` member is read through its mesh location (the
+  project and the row id, as :func:`index_location.mesh_match` gives for a
+  ``path`` row), also for ``subpath`` and pathless rows, so its own
+  ``.atlas/indexes/<type>/<row id>/`` index is used and no git subprocess
+  runs.
 - Node ids (M3): ``atlas://<atlas-id>/<store-relative path>``. Path
   segments are percent-encoded by :func:`encode_path` (``%``, ``#``, ``?``,
   whitespace and non-printable characters only; ``/`` stays the separator,
@@ -47,6 +59,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -66,6 +79,7 @@ STATUS_EXCLUDED = "excluded"
 STATUS_INVALID = "invalid"
 
 MEMBER_OUTSIDE_PROJECT = "outside_project"
+MEMBER_INVALID_ID = "invalid_atlas_id"
 
 RESOLUTION_LOCAL = "local"
 RESOLUTION_ATLAS_URI = "atlas_uri"
@@ -210,6 +224,41 @@ def _clean_in_store(path: str) -> str:
     return posixpath.normpath(text)
 
 
+# A non-empty host name or bracketed IP literal, with an optional numeric port.
+_HOST = re.compile(r"^(?:\[[^\[\]/]+\]|[^\[\]:/]+)(?::[0-9]+)?$")
+
+
+def is_member_id(atlas_id: Any) -> bool:
+    """A row id mesh scope accepts: canonical ``<host>/<org>/<repo>`` with a non-empty host.
+
+    The host is a non-empty name or a bracketed IP literal, with an optional
+    numeric ``:port`` (so ``/acme/repo`` and ``:8080/acme/repo`` are not).
+
+    Also checks that a node id built from it parses back to it and is read as
+    canonical by the resolver, whatever the other rows of the mesh are.
+    """
+    if not isinstance(atlas_id, str) or not atlas_id or atlas_id != atlas_id.strip():
+        return False
+    try:
+        parsed = parse_pointer(atlas_id)
+    except IdentityError:
+        return False
+    if parsed.atlas_id != atlas_id or parsed.in_store or parsed.fragment:
+        return False
+    host, _, rest = atlas_id.partition("/")
+    org, _, repo = rest.partition("/")
+    if not _HOST.match(host) or not org or not repo or "/" in repo:
+        return False
+    probe = node_id(atlas_id, "x.md")
+    hosts = mesh_hosts([atlas_id])
+    if normalise_target(probe) != probe or not is_canonical_host(probe, hosts):
+        return False
+    try:
+        return parse_node_id(probe, hosts) == (atlas_id, "x.md")
+    except MeshScopeError:
+        return False
+
+
 def repo_name(atlas_id: str) -> str:
     return atlas_id.rstrip("/").rsplit("/", 1)[-1]
 
@@ -263,7 +312,7 @@ def _member_root_match(start: Path) -> Path | None:
         except (meshfile.MeshFileError, OSError, ValueError):
             continue
         for i, row in enumerate(doc.get("stores") or []):
-            if not isinstance(row, dict) or not meshfile.is_mesh_member(row):
+            if not isinstance(row, dict) or not meshfile.is_mesh_member(row) or not is_member_id(row.get("id")):
                 continue
             candidate = _contained_row_root(directory, row, i)
             if candidate is None:
@@ -288,6 +337,15 @@ class Member:
     root: Path
     status: str
     reason: str | None = None
+    project: Path | None = None
+
+    def location(self) -> index_location.IndexLocation | None:
+        """The member's mesh index location (project and row id), as a ``mesh_match`` would give."""
+        if self.project is None:
+            return None
+        return index_location.IndexLocation(
+            self.root.resolve(), self.project.resolve(), self.atlas_id, "mesh", "mesh"
+        )
 
     def as_dict(self) -> dict[str, Any]:
         out = {"atlas_id": self.atlas_id, "path": self.mount, "subpath": self.subpath, "status": self.status}
@@ -328,15 +386,18 @@ def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
 def members(mesh: Mesh) -> list[Member]:
     """Every row in file order with its status.
 
-    Neither an excluded root nor a root that escapes the project is ever
-    touched: containment is checked before any stat of the root.
+    Neither an excluded root, a root that escapes the project nor the root
+    of a row with an invalid id is ever touched: the id and containment are
+    checked before any stat of the root.
     """
     out: list[Member] = []
     for i, row in enumerate(mesh.doc.get("stores") or []):
         sid = str(row["id"])
         root = _row_root(mesh.project, row, i)
         reason = None
-        if not meshfile.is_mesh_member(row):
+        if not is_member_id(row.get("id")):
+            status, reason = STATUS_INVALID, MEMBER_INVALID_ID
+        elif not meshfile.is_mesh_member(row):
             status = STATUS_EXCLUDED
         elif _contained_row_root(mesh.project, row, i) is None:
             status, reason = STATUS_INVALID, MEMBER_OUTSIDE_PROJECT
@@ -345,7 +406,7 @@ def members(mesh: Mesh) -> list[Member]:
         else:
             status = STATUS_UNMOUNTED
         label = _mount_label(mesh.project, row, sid)
-        out.append(Member(i, sid, label, str(row.get("subpath") or ""), root, status, reason))
+        out.append(Member(i, sid, label, str(row.get("subpath") or ""), root, status, reason, mesh.project))
     return out
 
 
@@ -369,7 +430,7 @@ def load_member(member: Member) -> MemberPages:
     if member.status != STATUS_OK:
         raise MeshScopeError(f"store {member.atlas_id} is {member.status}; its pages are not read")
     try:
-        source = graph.load_source(member.root)
+        source = graph.load_source(member.root, location=member.location())
     except graph.GraphError as e:
         raise MeshScopeError(f"store {member.atlas_id}: {e}") from e
     pages: dict[str, ProjectedPage] = {}
@@ -414,7 +475,7 @@ class Resolver:
         self.members = all_members
         self.loaded = loaded
         self.by_key = {meshfile.id_key(m.atlas_id): m for m in all_members}
-        self.hosts = mesh_hosts(m.atlas_id for m in all_members)
+        self.hosts = mesh_hosts(m.atlas_id for m in all_members if m.reason != MEMBER_INVALID_ID)
         # Longest root first, so a nested member root wins over its parent.
         self.by_root = sorted(all_members, key=lambda m: len(m.root.parts), reverse=True)
 
