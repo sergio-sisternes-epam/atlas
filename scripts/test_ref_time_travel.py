@@ -660,7 +660,7 @@ def main() -> int:
                 ),
                 encoding="utf-8",
             )
-            git(inline, ["add", "dead.md", "other.md", "living.md", "summary.md"])
+            git(inline, ["add", contract_file(inline).name, "dead.md", "other.md", "living.md", "summary.md"])
             git(inline, ["commit", "-m", "inline relations"])
             inline_prune = run(
                 [
@@ -1542,6 +1542,177 @@ def main() -> int:
                 failures.append(f"show should refuse fixed staging under a custom staging_dir: {fixed_staging.stdout}")
             else:
                 print("[PASS] show refuses fixed staging when staging_dir is custom")
+            renamed = tmp / "renamed-staging"
+            renamed_init = run(["init", "--root", str(renamed), "--json"])
+            if renamed_init.returncode != 0:
+                failures.append(f"renamed staging store init failed: {renamed_init.stdout}")
+            else:
+                git(renamed, ["init", "-b", "main"])
+                renamed_contract = contract_file(renamed)
+                renamed_schema = json.loads(renamed_contract.read_text(encoding="utf-8"))
+                renamed_schema.setdefault("structure", {})["staging_dir"] = "inbox"
+                renamed_contract.write_text(json.dumps(renamed_schema), encoding="utf-8")
+                (renamed / "inbox").mkdir()
+                secret = renamed / "inbox" / "secret.md"
+                secret.write_text(
+                    page("Secret", "relates_to: []\n", "Former staging must not answer."),
+                    encoding="utf-8",
+                )
+                (renamed / "note.md").write_text(
+                    page("Note", "relates_to: []\n", "A normal page still answers at that rev."),
+                    encoding="utf-8",
+                )
+                (renamed / "summary.md").write_text(
+                    page(
+                        "Summary",
+                        "relates_to: []\n",
+                        "Summary stays at the tip and carries enough prose to pass compile.",
+                    ),
+                    encoding="utf-8",
+                )
+                git(renamed, ["add", renamed_contract.name, "inbox", "note.md", "summary.md"])
+                git(renamed, ["commit", "-m", "inbox was staging"])
+                old = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=renamed,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                renamed_schema["structure"]["staging_dir"] = "staging"
+                renamed_contract.write_text(json.dumps(renamed_schema), encoding="utf-8")
+                git(renamed, ["add", renamed_contract.name])
+                git(renamed, ["commit", "-m", "staging renamed back"])
+                historical = run(
+                    ["ref", "show", "inbox/secret.md", "--ref", old, "--root", str(renamed), "--json"]
+                )
+                historical_prune = run(
+                    [
+                        "ref",
+                        "prune",
+                        "--summary",
+                        "summary.md",
+                        "--drop",
+                        "inbox/secret.md",
+                        "--ref",
+                        old,
+                        "--kind",
+                        "derived_from",
+                        "--root",
+                        str(renamed),
+                        "--json",
+                    ]
+                )
+                still_there = secret.read_text(encoding="utf-8")
+                live = run(
+                    ["ref", "show", "note.md", "--ref", old, "--root", str(renamed), "--json"]
+                )
+                if (
+                    historical.returncode == 0
+                    or "managed" not in historical.stdout
+                    or historical_prune.returncode == 0
+                    or "managed" not in historical_prune.stdout
+                    or "Former staging must not answer." not in still_there
+                    or live.returncode != 0
+                ):
+                    failures.append(
+                        "historical staging_dir should refuse show and prune: "
+                        f"show={historical.stdout} prune={historical_prune.stdout} live={live.stdout}"
+                    )
+                else:
+                    print("[PASS] show and prune use the selected commit's staging_dir")
+            unproven = tmp / "unproven-staging"
+            unproven_init = run(["init", "--root", str(unproven), "--json"])
+            if unproven_init.returncode != 0:
+                failures.append(f"unproven staging store init failed: {unproven_init.stdout}")
+            else:
+                git(unproven, ["init", "-b", "main"])
+                (unproven / "note.md").write_text(
+                    page("Note", "relates_to: []\n", "History without a contract must not answer."),
+                    encoding="utf-8",
+                )
+                (unproven / "summary.md").write_text(
+                    page(
+                        "Summary",
+                        "relates_to: []\n",
+                        "Summary stays at the tip and carries enough prose to pass compile.",
+                    ),
+                    encoding="utf-8",
+                )
+                git(unproven, ["add", "."])
+                git(unproven, ["commit", "-m", "store with a contract"])
+                good_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=unproven,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                unproven_contract = contract_file(unproven)
+                git(unproven, ["rm", unproven_contract.name])
+                git(unproven, ["commit", "-m", "contract removed"])
+                missing_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=unproven,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                git(unproven, ["checkout", good_sha, "--", unproven_contract.name])
+                git(unproven, ["commit", "-m", "contract restored"])
+                broken = json.loads(unproven_contract.read_text(encoding="utf-8"))
+                broken["structure"] = ["not", "a", "dict"]
+                unproven_contract.write_text(json.dumps(broken), encoding="utf-8")
+                git(unproven, ["add", unproven_contract.name])
+                git(unproven, ["commit", "-m", "structure is not an object"])
+                bad_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=unproven,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                git(unproven, ["checkout", good_sha, "--", unproven_contract.name])
+                git(unproven, ["commit", "-m", "contract restored again"])
+                missing_show = run(
+                    ["ref", "show", "note.md", "--ref", missing_sha, "--root", str(unproven), "--json"]
+                )
+                missing_prune = run(
+                    [
+                        "ref",
+                        "prune",
+                        "--summary",
+                        "summary.md",
+                        "--drop",
+                        "note.md",
+                        "--ref",
+                        missing_sha,
+                        "--kind",
+                        "derived_from",
+                        "--root",
+                        str(unproven),
+                        "--json",
+                    ]
+                )
+                bad_show = run(
+                    ["ref", "show", "note.md", "--ref", bad_sha, "--root", str(unproven), "--json"]
+                )
+                note_text = (unproven / "note.md").read_text(encoding="utf-8")
+                if (
+                    missing_show.returncode == 0
+                    or "cannot be proven" not in missing_show.stdout
+                    or missing_prune.returncode == 0
+                    or "cannot be proven" not in missing_prune.stdout
+                    or "History without a contract must not answer." not in note_text
+                    or bad_show.returncode == 0
+                    or "cannot be proven" not in bad_show.stdout
+                ):
+                    failures.append(
+                        "unreadable historical staging config should fail closed: "
+                        f"show={missing_show.stdout} prune={missing_prune.stdout} bad={bad_show.stdout}"
+                    )
+                else:
+                    print("[PASS] show and prune fail closed when historical staging cannot be proven")
             not_store = tmp / "not-a-store"
             not_store.mkdir()
             missing_store = run(
@@ -1690,7 +1861,7 @@ def main() -> int:
             (fifo_store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
             (fifo_store / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
             os.mkfifo(fifo_store / "noise.md")
-            git(fifo_store, ["add", "dead.md", "summary.md"])
+            git(fifo_store, ["add", contract_file(fifo_store).name, "dead.md", "summary.md"])
             git(fifo_store, ["commit", "-m", "fifo neighbor"])
             fifo_run = subprocess.run(
                 [

@@ -1647,6 +1647,42 @@ def _managed_top(store: Path, rel: str) -> str | None:
     return None
 
 
+def _historical_contract(repo: Path, store: Path, sha: str) -> dict:
+    """Return the contract at ``sha``. Missing or unreadable config fails closed."""
+    found: list[str] = []
+    for name in ("SCHEMA.json", "CONTRACT.json"):
+        gitpath = _git_path(store, repo, name)
+        mode = _historical_mode(repo, sha, gitpath)
+        if mode is None:
+            continue
+        if mode not in _REGULAR_BLOB_MODES:
+            raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven")
+        found.append(name)
+    if len(found) != 1:
+        raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven")
+    raw = _show_bytes(repo, sha, _git_path(store, repo, found[0]))
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven") from exc
+    if not isinstance(data, dict):
+        raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven")
+    structure = data.get("structure")
+    if structure is not None and not isinstance(structure, dict):
+        raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven")
+    return data
+
+
+def _historical_managed(repo: Path, store: Path, sha: str, rel: str) -> str | None:
+    """Refuse a path that was managed at ``sha``, not only in the worktree schema."""
+    schema = _historical_contract(repo, store, sha)
+    top = rel.split("/", 1)[0]
+    historical = staging_dir_name(schema)
+    if top in SKIP_TOP or top == historical or top == "staging":
+        return top
+    return None
+
+
 def _ancestor_managed(store: Path) -> str | None:
     """Return the managed directory name when root sits inside another store."""
     resolved = store.resolve()
@@ -1807,6 +1843,8 @@ def run_show(root: str | None, path: str, rev: str, as_json: bool) -> int:
             raise RefError(f"refusing Atlas-managed path {rel}")
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
+        if _historical_managed(repo, store, sha, rel):
+            raise RefError(f"refusing Atlas-managed path {rel}")
         gitpath = _git_path(store, repo, rel)
         _require_regular_blob(
             repo,
@@ -1867,6 +1905,9 @@ def run_prune(
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
         _require_tip_ancestor(repo, sha)
+        for rel in drop_rels:
+            if _historical_managed(repo, store, sha, rel):
+                raise RefError(f"refusing Atlas-managed path {rel}")
         warnings: list[str] = []
         for rel in drop_rels:
             gitpath = _git_path(store, repo, rel)
@@ -1949,6 +1990,9 @@ def run_prune(
             _lock_fd(root_fd, summary_rel)
             try:
                 _require_tip_ancestor(repo, sha)
+                for rel in drop_rels:
+                    if _historical_managed(repo, store, sha, rel):
+                        raise RefError(f"refusing Atlas-managed path {rel}")
                 before_warnings = _blocking_warnings(store)
                 for rel, updated, original_bytes, _mode, dev, ino in pending:
                     new_bytes = updated.encode("utf-8")
