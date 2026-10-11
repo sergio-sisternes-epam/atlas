@@ -9,7 +9,7 @@ description: When the user kills a frame during remember or query, load discuss 
 
 User says the current comparison, thesis, or branch is wrong. Examples: “wrong comparison”, “that is not what Atlas is”, “terminate this branch”, “KVA terminate”.
 
-A non-duplicate cancel in the atlas-tasks companion (its update path, step 8a) is an explicit trigger for the cancelled task's own pages: the task pointer and its body page are the `subject_node`; the page holding the standing answer is the `living_node`. A duplicate cancel or a task marked done is not a trigger.
+When the user explicitly asks in this turn to cancel an atlas-tasks task (not a duplicate) because its goal failed, was declined or is out of scope (atlas-tasks update path, step 8a), that request is the explicit trigger for the cancelled task's own pages. Run terminate once per subject: the task pointer, then its body page, each as the single `subject_node`, with the same `living_node` (the page holding the standing answer). The second run reuses the exit-reason node the first wrote. A duplicate cancel, a task marked done, or a cancel the user did not ask for is not a trigger.
 
 Model disagreement alone is not a trigger.
 
