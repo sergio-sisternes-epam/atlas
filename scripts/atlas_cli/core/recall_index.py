@@ -16,6 +16,7 @@ from typing import Any
 from . import index_location, index_publish
 from .ignore_guard import ensure_indexes_ignored
 from .index_location import IndexLocationError
+from .paths import is_symlink_entry, leading_symlink, mesh_symlink, note_skipped_symlink, skipping_symlinks
 from .projection import ProjectedPage, cheap_fingerprint, content_digest, eligible_paths, project_store
 from .recall_config import fts5_available, recall_enabled
 
@@ -60,6 +61,11 @@ def current_pointer(store: Path) -> Path:
 
 
 def _read_pointer(path: Path) -> dict[str, Any] | None:
+    if skipping_symlinks():
+        link = leading_symlink(path)
+        if link is not None:
+            note_skipped_symlink(link, "index pointer")
+            return None
     if not path.is_file():
         return None
     try:
@@ -78,17 +84,33 @@ def _new_pointer(store: Path) -> tuple[Path | None, dict[str, Any] | None]:
 
 
 def has_new_index(root: Path) -> bool:
-    """Any index at the new location: a ``current.json`` pointer or a published generation directory."""
+    """Any index at the new location: a ``current.json`` pointer or a published generation directory.
+
+    Mesh scope skips a symlinked pointer or generation (warning, no follow)
+    and reports no index, so recall projects the tree instead.
+    """
     pointer = root / CURRENT_NAME
+    if mesh_symlink(pointer):
+        note_skipped_symlink(pointer, "index pointer")
+        return False
     if pointer.exists() or pointer.is_symlink():
         return True
     gens = root / "generations"
+    if skipping_symlinks() and is_symlink_entry(gens):
+        note_skipped_symlink(gens, "index generations")
+        return False
     if not gens.is_dir():
         return False
-    return any(
-        not child.name.startswith(index_publish.TMP_PREFIX) and (child.is_dir() or child.is_symlink())
-        for child in gens.iterdir()
-    )
+    found = False
+    for child in gens.iterdir():
+        if child.name.startswith(index_publish.TMP_PREFIX):
+            continue
+        if mesh_symlink(child):
+            note_skipped_symlink(child, "index generation")
+            continue
+        if child.is_dir() or child.is_symlink():
+            found = True
+    return found
 
 
 def _candidates(store: Path) -> list[Generation]:
@@ -426,8 +448,12 @@ def _pointer_db(root: Path, raw: object) -> Path | None:
     rel = _relative_pointer(raw)
     if rel is None or not rel.parts or rel.parts[0] != "generations":
         return None
+    candidate_lexical = root / rel
+    if skipping_symlinks() and is_symlink_entry(candidate_lexical):
+        note_skipped_symlink(candidate_lexical, "index database")
+        return None
     try:
-        _reject_symlink_escape(root, root / rel)
+        _reject_symlink_escape(root, candidate_lexical)
     except IndexLocationError:
         return None
     candidate = (root / rel).resolve()
@@ -447,7 +473,11 @@ def _legacy_pointer_db(store: Path, raw: object) -> Path | None:
         rel.relative_to(Path(INDEX_DIR) / index_location.LEGACY_NAMES[DRIVER_TYPE])
     except ValueError:
         return None
-    candidate = (store / rel).resolve()
+    lexical = store / rel
+    if mesh_symlink(lexical):
+        note_skipped_symlink(lexical, "index database")
+        return None
+    candidate = lexical.resolve()
     try:
         candidate.relative_to(store.resolve())
     except ValueError:
@@ -543,6 +573,9 @@ def pages_from_db(db_path: Path) -> list[ProjectedPage]:
 
 
 def open_db(path: Path) -> sqlite3.Connection:
+    if mesh_symlink(path):
+        note_skipped_symlink(path, "index database")
+        raise sqlite3.OperationalError(f"mesh scope skipped symlink index database: {path}")
     uri = f"{path.resolve().as_uri()}?mode=ro"
     return sqlite3.connect(uri, uri=True)
 

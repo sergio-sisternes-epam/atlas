@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .paths import is_symlink_entry, note_skipped_symlink, skipping_symlinks
+
 MAX_FRONTMATTER_BYTES = 1_000_000
 MAX_YAML_EVENTS = 20_000
 MAX_YAML_DEPTH = 32
@@ -198,6 +200,9 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
 
 
 def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
+    if skipping_symlinks() and is_symlink_entry(path):
+        note_skipped_symlink(path, "page")
+        raise OSError(f"mesh scope skipped symlink page: {path}")
     text = path.read_text(encoding="utf-8", errors="replace")
     if str(schema_version).strip() == "2.0":
         return split_fm_v2(text)

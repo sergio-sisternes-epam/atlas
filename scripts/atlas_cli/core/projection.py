@@ -5,10 +5,10 @@ corpus digest equals :func:`content_digest` of the store, which covers every
 eligible Markdown file (relative path plus sha256) *and* the projection inputs
 (:func:`projection_inputs`): the bytes of SCHEMA.json / CONTRACT.json and the
 ``schema.d/*.json`` overlays that ``merge_overlays`` reads (the same
-enumeration, symlinks followed), which decide how pages are parsed (schema
+enumeration; store scope follows symlinks, mesh scope skips them), which decide how pages are parsed (schema
 version, relation vocabulary, recall field config), plus
 :data:`PROJECTION_VERSION`. :func:`project_store` records the same digest, and
-:func:`cheap_fingerprint` covers the same files by stat (of a link's target), so every caller
+:func:`cheap_fingerprint` covers the same files by stat (of a link's target in store scope), so every caller
 (fts5, nanograph, the graph fast path, legacy reuse, ``index show/status``)
 agrees.
 """
@@ -24,7 +24,15 @@ from typing import Any
 
 from .frontmatter import FrontmatterError, read_page
 from .overlay import overlay_files
-from .paths import CONTRACT_NAME, SCHEMA_NAME, is_symlink_entry, rel, skipping_symlinks, store_root
+from .paths import (
+    CONTRACT_NAME,
+    SCHEMA_NAME,
+    is_symlink_entry,
+    note_skipped_symlink,
+    rel,
+    skipping_symlinks,
+    store_root,
+)
 from .recall_config import schema_version
 from .schema import staging_dir_name
 
@@ -106,12 +114,20 @@ def projection_inputs(root: Path) -> list[Path]:
     """Store files besides pages that decide how pages are projected (sorted, existing only).
 
     SCHEMA.json / CONTRACT.json and the overlays :func:`overlay.overlay_files`
-    lists (the very list :func:`overlay.merge_overlays` reads, so a symlinked
-    ``schema.d`` or overlay file is included): they carry the schema version,
-    relation vocabulary and recall field config that :func:`project_store`
-    and its callers read.
+    lists (the very list :func:`overlay.merge_overlays` reads). Store scope
+    includes a symlinked ``schema.d`` or overlay file. Mesh scope skips those
+    symlinks with a warning and does not open them. They carry the schema
+    version, relation vocabulary and recall field config that
+    :func:`project_store` and its callers read.
     """
-    out = [root / name for name in (CONTRACT_NAME, SCHEMA_NAME) if os.path.lexists(root / name)]
+    out: list[Path] = []
+    for name in (CONTRACT_NAME, SCHEMA_NAME):
+        path = root / name
+        if skipping_symlinks() and is_symlink_entry(path):
+            note_skipped_symlink(path, name)
+            continue
+        if os.path.lexists(path):
+            out.append(path)
     out.extend(overlay_files(root))
     return out
 
@@ -125,11 +141,15 @@ def _input_key(root: Path, path: Path) -> str:
 
 
 def _input_digest(path: Path) -> str:
-    """sha256 of the bytes a reader gets (symlinks followed).
+    """sha256 of the bytes a reader gets (store scope follows symlinks).
 
+    Mesh scope does not open a symlink; the marker is not a hex digest.
     A dangling or unreadable input gets a marker that is never a hex digest,
     keyed by the link text for a symlink so retargeting it still counts.
     """
+    if skipping_symlinks() and is_symlink_entry(path):
+        note_skipped_symlink(path, "projection input")
+        return "skipped-symlink"
     try:
         return _sha256_bytes(path.read_bytes())
     except OSError:
@@ -165,6 +185,10 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None, paths: list[Pat
     pages = [(rel(root, p), p) for p in (eligible_paths(root, schema) if paths is None else paths)]
     for key, path in [*inputs, *pages]:
         # stat() follows symlinks, so an edited link target changes the fingerprint.
+        # Mesh scope skips the link instead of stating the target.
+        if skipping_symlinks() and is_symlink_entry(path):
+            note_skipped_symlink(path, "projection input")
+            continue
         try:
             st = path.stat()
         except OSError:
@@ -204,6 +228,9 @@ def content_digest(root: Path, schema: dict[str, Any] | None, paths: list[Path] 
     """
     entries: list[tuple[str, str]] = _input_entries(root)
     for path in eligible_paths(root, schema) if paths is None else paths:
+        if skipping_symlinks() and is_symlink_entry(path):
+            note_skipped_symlink(path, "page")
+            continue
         if not _contained(root, path):
             return None
         try:
@@ -249,6 +276,9 @@ def project_store(
     entries: list[tuple[str, str]] = _input_entries(root)
     paths = eligible_paths(root, schema)
     for path in paths:
+        if skipping_symlinks() and is_symlink_entry(path):
+            note_skipped_symlink(path, "page")
+            continue
         if not _contained(root, path):
             omitted.append({"path": rel(root, path), "reason": "root_escape"})
             continue

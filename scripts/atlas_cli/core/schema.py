@@ -5,7 +5,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .paths import CONTRACT_NAME, SCHEMA_NAME
+from .paths import (
+    CONTRACT_NAME,
+    SCHEMA_NAME,
+    is_symlink_entry,
+    note_skipped_symlink,
+    regular_file,
+    skipping_symlinks,
+)
 
 # Re-export for commands that import SCHEMA_NAME from schema.
 
@@ -47,12 +54,27 @@ def find_contract_path(root: Path) -> tuple[Path | None, str | None]:
     # root, before anyone noticed). Reject either filename as a symlink
     # before ever treating it as the contract file — this must happen
     # before the is_file() checks below so a broken symlink is also caught.
-    if schema_path.is_symlink():
-        return None, f"{SCHEMA_NAME} is a symlink; refusing to use it as the contract file"
-    if contract_path.is_symlink():
-        return None, f"{CONTRACT_NAME} is a symlink; refusing to use it as the contract file"
-    has_schema = schema_path.is_file()
-    has_contract = contract_path.is_file()
+    # Store scope refuses either name. Mesh scope still refuses a symlinked
+    # SCHEMA.json (the member is invalid), but a symlinked CONTRACT.json is
+    # optional: skipped with a warning, and SCHEMA.json is used when it is a
+    # regular file. Decided with lstat, before any following stat.
+    if skipping_symlinks():
+        if is_symlink_entry(schema_path):
+            return None, f"{SCHEMA_NAME} is a symlink; refusing to use it as the contract file"
+        if is_symlink_entry(contract_path):
+            note_skipped_symlink(contract_path, CONTRACT_NAME)
+            if regular_file(schema_path):
+                return schema_path, None
+            return None, f"missing {SCHEMA_NAME} or {CONTRACT_NAME}"
+        has_schema = regular_file(schema_path)
+        has_contract = regular_file(contract_path)
+    else:
+        if schema_path.is_symlink():
+            return None, f"{SCHEMA_NAME} is a symlink; refusing to use it as the contract file"
+        if contract_path.is_symlink():
+            return None, f"{CONTRACT_NAME} is a symlink; refusing to use it as the contract file"
+        has_schema = schema_path.is_file()
+        has_contract = contract_path.is_file()
     if has_schema and has_contract:
         return None, (
             f"both {SCHEMA_NAME} and {CONTRACT_NAME} present; a store must have "
@@ -74,6 +96,9 @@ def load_schema(root: Path) -> tuple[dict[str, Any] | None, str | None]:
     if err:
         return None, err
     assert path is not None
+    if skipping_symlinks() and is_symlink_entry(path):
+        note_skipped_symlink(path, path.name)
+        return None, f"{path.name} is a symlink; refusing to use it as the contract file"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:

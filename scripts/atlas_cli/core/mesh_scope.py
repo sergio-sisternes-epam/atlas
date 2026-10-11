@@ -91,7 +91,18 @@ from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import SKIP_DIRS, contained_root, has_contract_file, has_symlink_component, join_under, mesh_walks
+from .paths import (
+    CONTRACT_NAME,
+    SCHEMA_NAME,
+    SKIP_DIRS,
+    contained_root,
+    has_symlink_component,
+    is_symlink_entry,
+    join_under,
+    mesh_walks,
+    note_skipped_symlink,
+    regular_file,
+)
 from .projection import SKIP_TOP, ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
@@ -325,17 +336,40 @@ class Mesh:
         return self.project / meshfile.MESH_NAME
 
 
+def _listing(directory: Path) -> Path:
+    return directory / meshfile.MESH_NAME
+
+
+def _refuse_listing_symlink(path: Path) -> None:
+    """``atlas-mesh.json`` is the project listing. A symlink is not followed."""
+    if not is_symlink_entry(path):
+        return
+    note_skipped_symlink(path, "atlas-mesh.json")
+    raise MeshScopeError(f"{path} is a symlink; mesh scope does not follow it")
+
+
 def discover(root: Path | str) -> Mesh:
-    """The mesh for ``root``: a project directory with atlas-mesh.json, or a store one of its rows lists."""
+    """The mesh for ``root``: a project directory with atlas-mesh.json, or a store one of its rows lists.
+
+    A symlinked ``atlas-mesh.json`` is not followed (discovery fails closed).
+    The file is project-level: it is read once here, and a pinned member does
+    not read it again.
+    """
     start = Path(root).expanduser().resolve()
-    if (start / meshfile.MESH_NAME).is_file():
+    listing = _listing(start)
+    _refuse_listing_symlink(listing)
+    if listing.is_file():
         return _load_mesh(start)
     # Lexical match first, so an invalid-id row is found without resolving
     # its root. mesh_match remains for a path row reached through a symlink,
-    # and for the duplicate-id error.
+    # and for the duplicate-id error. A symlink listing on that walk is not
+    # followed.
     project = _member_root_match(start)
     if project is not None:
         return _load_mesh(project)
+    blocked = _symlink_listing_before_file(start)
+    if blocked is not None:
+        _refuse_listing_symlink(blocked)
     try:
         match = index_location.mesh_match(start)
     except index_location.IndexLocationError as e:
@@ -345,12 +379,29 @@ def discover(root: Path | str) -> Mesh:
     raise MeshScopeError(f"no atlas-mesh.json lists this store: {start}")
 
 
+def _symlink_listing_before_file(start: Path) -> Path | None:
+    """A symlink listing mesh_match would follow before it reached a regular file."""
+    for directory in [start, start.parent, *start.parent.parents]:
+        listing = _listing(directory)
+        if is_symlink_entry(listing):
+            return listing
+        try:
+            if listing.is_file():
+                return None
+        except OSError:
+            continue
+    return None
+
+
 def _load_mesh(project: Path) -> Mesh:
     # Strict load: a malformed mesh_member must never include a store by accident.
+    # A symlink listing is not opened. meshfile.load follows, so refuse first.
+    listing = _listing(project)
+    _refuse_listing_symlink(listing)
     try:
         doc = meshfile.load(project)
     except (meshfile.MeshFileError, OSError) as e:
-        raise MeshScopeError(f"{project / meshfile.MESH_NAME}: {e}") from e
+        raise MeshScopeError(f"{listing}: {e}") from e
     return Mesh(project, doc)
 
 
@@ -377,7 +428,11 @@ def _member_root_match(start: Path) -> Path | None:
     followed for an invalid id.
     """
     for directory in [start.parent, *start.parent.parents]:
-        if not (directory / meshfile.MESH_NAME).is_file():
+        listing = _listing(directory)
+        if is_symlink_entry(listing):
+            note_skipped_symlink(listing, "atlas-mesh.json")
+            continue
+        if not listing.is_file():
             continue
         try:
             doc = meshfile.load_for_location(directory)
@@ -501,6 +556,23 @@ def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
     return out
 
 
+def _included_has_contract(root: Path) -> bool:
+    """True when an included root has a regular contract file. Never follows a symlink.
+
+    A symlinked ``CONTRACT.json`` is optional: skipped with a warning. When it
+    is the only contract file the member stays unmounted. A symlinked
+    ``SCHEMA.json`` is classified before this runs.
+    """
+    contract = root / CONTRACT_NAME
+    if is_symlink_entry(contract):
+        note_skipped_symlink(contract, CONTRACT_NAME)
+    if regular_file(root / SCHEMA_NAME):
+        return True
+    if is_symlink_entry(contract):
+        return False
+    return regular_file(contract)
+
+
 def members(mesh: Mesh) -> list[Member]:
     """Every row in file order with its status.
 
@@ -527,7 +599,10 @@ def members(mesh: Mesh) -> list[Member]:
             status = STATUS_EXCLUDED
         elif _contained_row_root(mesh.project, row, i) is None:
             status, reason = STATUS_INVALID, MEMBER_OUTSIDE_PROJECT
-        elif root.is_dir() and has_contract_file(root):
+        elif is_symlink_entry(root / SCHEMA_NAME):
+            # Required contract file. lstat only: do not follow into an excluded store.
+            status, reason = STATUS_INVALID, MEMBER_SYMLINKED_ROOT
+        elif root.is_dir() and _included_has_contract(root):
             status = STATUS_OK
         else:
             status = STATUS_UNMOUNTED

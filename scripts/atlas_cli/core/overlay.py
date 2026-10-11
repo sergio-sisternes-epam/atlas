@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+
+from .paths import is_symlink_entry, note_skipped_symlink, regular_dir, regular_file, skipping_symlinks
 
 SCHEMA_D = "schema.d"
 KEBAB = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -94,6 +97,12 @@ def validate_type_name(tname: str) -> str | None:
 
 
 def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    # Mesh scope must not follow a symlinked overlay. Returning no error keeps
+    # a skip from becoming a critical member failure; :func:`overlay_files`
+    # already omits the path so merge does not load it.
+    if skipping_symlinks() and is_symlink_entry(path):
+        note_skipped_symlink(path, "overlay")
+        return None, None
     if not path.is_file():
         return None, f"missing {path.name}"
     try:
@@ -105,13 +114,40 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
+def _mesh_overlay_files(directory: Path) -> list[Path]:
+    """Overlay files in mesh scope. A symlinked directory or entry is skipped, not opened."""
+    if is_symlink_entry(directory):
+        note_skipped_symlink(directory, "schema.d")
+        return []
+    if not regular_dir(directory):
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    out: list[Path] = []
+    for name in names:
+        if not name.endswith(".json") or name.endswith(".receipt.json"):
+            continue
+        path = directory / name
+        if is_symlink_entry(path):
+            note_skipped_symlink(path, "overlay")
+            continue
+        if regular_file(path):
+            out.append(path)
+    return out
+
+
 def overlay_files(root: Path) -> list[Path]:
     """Overlay files :func:`merge_overlays` reads, in order (receipts excluded).
 
-    Follows a symlinked ``schema.d`` and lists symlinked (even dangling)
-    ``*.json`` entries. The projection freshness inputs use this same list.
+    Store scope follows a symlinked ``schema.d`` and lists symlinked (even
+    dangling) ``*.json`` entries. Mesh scope skips either with a warning and
+    does not open it. The projection freshness inputs use this same list.
     """
     d = overlay_dir(root)
+    if skipping_symlinks():
+        return _mesh_overlay_files(d)
     if not d.is_dir():
         return []
     return [p for p in sorted(d.glob("*.json")) if not p.name.endswith(".receipt.json")]

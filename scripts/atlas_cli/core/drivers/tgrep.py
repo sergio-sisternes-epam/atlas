@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable
 from .scan import tokenise
 from .subprocess_env import external_driver_env
 from .. import index_location
+from ..paths import mesh_symlink, note_skipped_symlink
 from ..ignore_guard import ensure_indexes_ignored
 from ..index_location import IndexLocationError
 from ..projection import ProjectedPage, SKIP_TOP
@@ -124,6 +125,9 @@ def run_argv(
 
 def _detect_serve(store: Path, dest: Path) -> None:
     for path in (store / ".tgrep" / "serve.json", dest / "serve.json"):
+        if mesh_symlink(path):
+            note_skipped_symlink(path, "tgrep serve")
+            continue
         if path.is_file():
             raise TgrepError(SERVE_DETECTED)
 
@@ -138,6 +142,9 @@ def _excludes(schema: dict[str, Any] | None) -> list[str]:
 
 def _load_digest(dest: Path) -> str | None:
     meta = dest / DIGEST_NAME
+    if mesh_symlink(meta):
+        note_skipped_symlink(meta, "tgrep digest")
+        return None
     if not meta.is_file():
         return None
     try:

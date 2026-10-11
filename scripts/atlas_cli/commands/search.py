@@ -17,7 +17,17 @@ from ..core import mesh_recall, recall_index
 from ..core import graph as graph_core
 from ..core.driver_overlay import DriverError, get_driver
 from ..core.drivers import fts5 as fts5_driver
-from ..core.paths import RESERVED, is_symlink_entry, iter_concept_md, rel, skipping_symlinks, store_root, walk_tops
+from ..core.paths import (
+    RESERVED,
+    is_symlink_entry,
+    iter_concept_md,
+    leading_symlink,
+    note_skipped_symlink,
+    rel,
+    skipping_symlinks,
+    store_root,
+    walk_tops,
+)
 from ..core.projection import ProjectedPage, ProjectionError, project_store
 from ..core.recall import run_recall
 from ..core.engine_preference import (
@@ -144,6 +154,12 @@ def _present(meta: dict, key: str):
 def _path_constraint(root: Path, raw: str | None) -> tuple[Path | None, str | None]:
     if not raw:
         return None, None
+    if skipping_symlinks():
+        candidate_link = Path(raw) if Path(raw).is_absolute() else root / raw
+        link = leading_symlink(candidate_link)
+        if link is not None:
+            note_skipped_symlink(link, "path filter")
+            return None, f"path: is a symlink; mesh scope does not follow it ({raw})"
     candidate = Path(raw)
     if candidate.is_absolute():
         resolved = candidate.resolve()
@@ -219,6 +235,9 @@ def _grep_search(
             rg_paths = []
             for line in proc.stdout.splitlines():
                 p = Path(line.strip())
+                if skipping_symlinks() and is_symlink_entry(p):
+                    note_skipped_symlink(p, "page")
+                    continue
                 if p.is_file():
                     rg_paths.append(p)
             if rg_paths:

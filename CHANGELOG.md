@@ -50,7 +50,7 @@
   excluded or invalid (`invalid_atlas_id`) instead of falling back to store
   recall. Explicit `--scope store` still searches
   that store alone: exclusion applies only in mesh scope, and the flag
-  overrides the project setting. Mesh scope never follows a symlink: ripgrep is not passed `--follow` or `-L` and is not given a symlink path, and page walks (grep, FTS5, nanograph and the mesh view) skip symlinked files and directories. A member whose root, or any in-project component of that root, is a symlink is `invalid` with reason `symlinked_root` and is not read. Store scope output is unchanged byte for byte.
+  overrides the project setting. Mesh scope never follows a symlink: ripgrep is not passed `--follow` or `-L` and is not given a symlink path, and page walks (grep, FTS5, nanograph and the mesh view) skip symlinked files and directories. A member whose root, or any in-project component of that root, is a symlink is `invalid` with reason `symlinked_root` and is not read. Schema and overlay loading honours the same rule, decided with `lstat` before any open or following `stat`: a symlinked `schema.d` or overlay file is skipped with a warning and is not opened; a symlinked `SCHEMA.json` makes the member `invalid` / `symlinked_root`; a symlinked `CONTRACT.json`, index pointer, index database, nanograph or tgrep index file, page (`log.md` included) or `path:` filter is skipped with a warning. `atlas-mesh.json` is project-level, read once at discovery and not re-read for a pinned member; a symlink listing is not followed and discovery fails closed. Frontmatter does not open includes. `staging/` and `templates/` stay pruned by name. Store scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
   as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
@@ -116,11 +116,12 @@
   bytes once per command. It also covers the projection inputs: the bytes
   of `SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and a
   `PROJECTION_VERSION`. The overlay list is the one overlay merging reads
-  (receipts excluded), including a symlinked `schema.d` and symlinked
+  (receipts excluded). Store scope includes a symlinked `schema.d` and symlinked
   overlay files, and each input is hashed from the bytes behind any symlink
   (a dangling or unreadable link gets a fixed marker), so editing an
   external overlay or `SCHEMA.json` target makes the index stale; the
-  fingerprint stats the link target too. So a schema-only change (for example SCHEMA 1.0 to
+  fingerprint stats the link target too. Mesh scope skips those symlinks
+  with a warning and does not open or hash the target. So a schema-only change (for example SCHEMA 1.0 to
   2.0, a new relation vocabulary or recall field config) makes the index
   stale and recall, graph and nanograph rebuild with the new parse, while
   files outside the projection inputs do not. The fts5 pointer now records

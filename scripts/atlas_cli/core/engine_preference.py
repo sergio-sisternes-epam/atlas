@@ -227,12 +227,18 @@ def _nanograph_freshness(store: Path) -> dict[str, Any]:
     out: dict[str, Any] = {"corpus_digest": _short(digest)}
     det = driver.detect()
     base = driver.index_base(store)
+    from .paths import mesh_symlink, note_skipped_symlink
+
     pointer: dict[str, Any] = {}
-    try:
-        raw = json.loads((base / "current.json").read_text(encoding="utf-8"))
-        pointer = raw if isinstance(raw, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        pointer = {}
+    pointer_path = base / "current.json"
+    if mesh_symlink(pointer_path):
+        note_skipped_symlink(pointer_path, "nanograph index pointer")
+    else:
+        try:
+            raw = json.loads(pointer_path.read_text(encoding="utf-8"))
+            pointer = raw if isinstance(raw, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            pointer = {}
     if det.available and digest:
         gen = driver._current(base, digest, det.version)
         if gen is not None:
@@ -246,7 +252,9 @@ def _nanograph_freshness(store: Path) -> dict[str, Any]:
             "digest": _short(pointer.get("corpus_digest")),
         }
     legacy = driver.legacy_base(store)
-    if legacy.is_dir() and any(c.is_dir() for c in legacy.iterdir()):
+    if mesh_symlink(legacy):
+        note_skipped_symlink(legacy, "nanograph index")
+    elif legacy.is_dir() and any(c.is_dir() for c in legacy.iterdir()):
         return {**out, "freshness": "legacy-only", "generation": None, "digest": None}
     return {**out, "freshness": "missing", "generation": None, "digest": None}
 

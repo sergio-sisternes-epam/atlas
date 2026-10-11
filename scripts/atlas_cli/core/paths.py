@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextvars
 import os
+import stat
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,16 +49,27 @@ def skipping_symlinks() -> bool:
     return _MESH_WALKS.get()
 
 
+# Warnings recorded while :func:`mesh_walks` is active. ``None`` outside it.
+_MESH_SKIPPED: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "atlas_mesh_skipped_symlinks", default=None
+)
+
+
 @contextmanager
 def mesh_walks():
     """Do not follow symlinks for the duration of a mesh-scope page walk.
 
-    Store scope never enters this context, so its walks are unchanged.
+    Yields the warnings emitted by :func:`note_skipped_symlink` in this
+    context. Store scope never enters it, so its walks are unchanged.
+    ``with mesh_walks():`` still works when the list is not needed.
     """
     token = _MESH_WALKS.set(True)
+    skipped: list[str] = []
+    skip_token = _MESH_SKIPPED.set(skipped)
     try:
-        yield
+        yield skipped
     finally:
+        _MESH_SKIPPED.reset(skip_token)
         _MESH_WALKS.reset(token)
 
 
@@ -66,6 +79,76 @@ def is_symlink_entry(path: Path) -> bool:
         return Path(path).is_symlink()
     except OSError:
         return False
+
+
+def mesh_symlink(path: Path) -> bool:
+    """True when mesh scope must not follow ``path`` (``lstat`` only)."""
+    return skipping_symlinks() and is_symlink_entry(path)
+
+
+def regular_file(path: Path) -> bool:
+    """True when ``path`` is a regular file. Never follows a symlink."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def regular_dir(path: Path) -> bool:
+    """True when ``path`` is a real directory. Never follows a symlink."""
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def leading_symlink(path: Path) -> Path | None:
+    """First symlink component of ``path``, via ``lstat``. None if none exists.
+
+    The walk stops at the first link, so the target is not stat-ed or opened.
+    A missing component is not a symlink.
+    """
+    raw = Path(path)
+    if raw.is_absolute():
+        acc = Path(raw.anchor)
+        parts = raw.parts[1:]
+    else:
+        acc = Path()
+        parts = raw.parts
+    for part in parts:
+        acc = acc / part
+        if is_symlink_entry(acc):
+            return acc
+    return None
+
+
+def note_skipped_symlink(path: Path, kind: str) -> None:
+    """Warn that mesh scope skipped a symlink instead of following it.
+
+    Printed to stderr, and recorded on the active :func:`mesh_walks` list
+    when one is open. Safe outside that context (discovery and member
+    classification): the warning is still printed.
+    """
+    message = f"warning: mesh scope skipped symlink {kind}: {path}"
+    print(message, file=sys.stderr)
+    skipped = _MESH_SKIPPED.get()
+    if skipped is not None:
+        skipped.append(message)
+
+
+def skip_mesh_symlink(path: Path, kind: str) -> bool:
+    """True when mesh scope must skip ``path`` (and has noted it). Never follows.
+
+    A symlink component anywhere on ``path`` counts. Store scope always
+    returns False.
+    """
+    if not skipping_symlinks():
+        return False
+    link = leading_symlink(path)
+    if link is None:
+        return False
+    note_skipped_symlink(link, kind)
+    return True
 
 
 def has_symlink_component(base: Path, *relatives: str) -> bool:
