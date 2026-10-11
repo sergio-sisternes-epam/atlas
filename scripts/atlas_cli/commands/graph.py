@@ -112,7 +112,7 @@ def _run_mesh(
     try:
         mg = mesh_graph.ensure(scope.mesh)
         extra, lines = body(mesh_graph.Query(mg, r), mg)
-    except (mesh_scope.MeshScopeError, core.GraphError) as e:
+    except (mesh_scope.MeshScopeError, core.GraphError, OSError) as e:
         return _fail(r, verb, str(e), as_json, scope="mesh")
     payload: dict[str, Any] = {
         "ok": True,

@@ -33,7 +33,7 @@
   generation directories, recall sqlite databases, nanograph query and ready
   files, git `info/exclude` appends and owner-token lock files are created
   or replaced without following a symlink, fifo or other non-regular entry.
-  A non-regular destination is refused with a clear error and left in place.
+  A non-regular destination is refused with a clear error and left in place; mesh graph commands report such a refusal as the structured exit-2 failure.
   A regular `graph.json` is not replaced when the receipt path is a symlink.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
