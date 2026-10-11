@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Compile resolves a markdown link that starts with `/` against the store, not the host filesystem. A protocol-relative `//` link is not an internal store link.
 - SCHEMA 2.0 YAML load treats a nesting recursion failure as a frontmatter error. A value deeper than the nesting limit does not escape as `RecursionError`.
 - `atlas ref show` and `atlas ref prune` treat `.atlas` as an Atlas-managed path. They do not walk, read, rewrite, or delete project index and mount pages.
 - Optimise treats a quoted `path` key as the relation path. A live edge is retargeted on a move. A ref-bearing item keeps its path.

@@ -36,7 +36,11 @@ from atlas_cli.commands.refcmd import (  # noqa: E402
 from atlas_cli.core.projection import ProjectedPage, cheap_fingerprint, content_digest  # noqa: E402
 from atlas_cli.core import recall_index  # noqa: E402
 from atlas_cli.commands.search import _relates_preview  # noqa: E402
-from atlas_cli.commands.validate import _bad_relation_ref, _relation_path_escapes  # noqa: E402
+from atlas_cli.commands.validate import (  # noqa: E402
+    _bad_relation_ref,
+    _check_internal_links,
+    _relation_path_escapes,
+)
 from atlas_cli.commands.memory_migrate import _converted_frame_text  # noqa: E402
 from test_memory_layers import init_legacy, write_index, write_page  # noqa: E402
 from atlas_cli.core.projection import _edges_from_meta  # noqa: E402
@@ -720,7 +724,7 @@ def main() -> int:
                 alias_drop.returncode == 0
                 or not (inline / "victim.md").is_file()
                 or (inline / "victim.md").read_text(encoding="utf-8") != before_victim
-                or "symlink" not in alias_drop.stdout
+                or "refusing to follow symlink" not in alias_drop.stdout
             ):
                 failures.append(f"in-store symlink drop should be refused: {alias_drop.stdout}")
             else:
@@ -3645,6 +3649,20 @@ def main() -> int:
                 failures.append(f"protocol-relative link must stay unchanged:\n{rewritten}")
             else:
                 print("[PASS] protocol-relative link is not a store-root path")
+            link_issues = _check_internal_links(
+                rooted,
+                rooted / "living.md",
+                "See [host](/tmp) and [store](/dead.md) and [remote](//example.invalid/dead.md).",
+            )
+            link_msgs = [item.get("msg", "") for item in link_issues]
+            if (
+                not any("/tmp" in msg for msg in link_msgs)
+                or any("/dead.md" in msg for msg in link_msgs)
+                or any("//" in msg for msg in link_msgs)
+            ):
+                failures.append(f"compile link check disagreed with prune: {link_msgs}")
+            else:
+                print("[PASS] compile resolves a store-root link inside the store")
             git(rooted, ["init", "-b", "main"])
             git(rooted, ["add", "."])
             git(rooted, ["commit", "-m", "rooted"])

@@ -119,7 +119,24 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
             idx = path_part.find(sep)
             if idx != -1:
                 path_part = path_part[:idx]
-        if not path_part:
+        if not path_part or path_part.startswith("//"):
+            continue
+        if path_part.startswith("/"):
+            suffix = path_part.lstrip("/")
+            cand = (root / suffix).resolve() if suffix else None
+            try:
+                if cand is not None:
+                    cand.relative_to(root.resolve())
+            except ValueError:
+                cand = None
+            if cand is None or not cand.exists():
+                issues.append(
+                    {
+                        "id": "internal_links",
+                        "path": rel(root, path),
+                        "msg": f"broken link: {target}",
+                    }
+                )
             continue
         cand = (parent / path_part).resolve()
         if not cand.exists():
