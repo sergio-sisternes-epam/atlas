@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from atlas_cli.commands import refcmd  # noqa: E402
+from atlas_cli.commands import refcmd as ref_mod  # noqa: E402
 from atlas_cli.commands.refcmd import (  # noqa: E402
     RefError,
     _open_store_parent,
@@ -1527,6 +1527,21 @@ def main() -> int:
                 failures.append(f"show should refuse a custom staging root: {custom.stdout}")
             else:
                 print("[PASS] show refuses a custom staging directory used as root")
+            (shown / "staging" / "secret.md").write_text(
+                page("Secret", "relates_to: []\n", "Fixed staging must not answer."),
+                encoding="utf-8",
+            )
+            fixed_staging = run(
+                ["ref", "show", "staging/secret.md", "--ref", "HEAD", "--root", str(shown), "--json"]
+            )
+            if (
+                fixed_staging.returncode == 0
+                or "managed" not in fixed_staging.stdout
+                or ref_commands._managed_top(shown, "staging/secret.md") != "staging"
+            ):
+                failures.append(f"show should refuse fixed staging under a custom staging_dir: {fixed_staging.stdout}")
+            else:
+                print("[PASS] show refuses fixed staging when staging_dir is custom")
             not_store = tmp / "not-a-store"
             not_store.mkdir()
             missing_store = run(
@@ -1818,20 +1833,19 @@ def main() -> int:
             capture_output=True,
             check=False,
         ).stdout.strip()
-        real_rename = os.rename
+        real_claim = ref_mod._rename_noreplace
         swapped = {"done": False}
 
-        def swapping_rename(src, dst, *args, **kwargs):
+        def swapping_claim(dirfd, src, dst):
             if not swapped["done"] and src == "dead.md":
                 swapped["done"] = True
-                dirfd = kwargs.get("src_dir_fd")
                 os.unlink(src, dir_fd=dirfd)
                 fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
                 os.write(fd, b"same\n")
                 os.close(fd)
-            return real_rename(src, dst, *args, **kwargs)
+            return real_claim(dirfd, src, dst)
 
-        os.rename = swapping_rename
+        ref_mod._rename_noreplace = swapping_claim
         try:
             _unlink_store(replaced, "dead.md", replaced, blob)
         except RefError:
@@ -1839,7 +1853,7 @@ def main() -> int:
         else:
             refused_inode = False
         finally:
-            os.rename = real_rename
+            ref_mod._rename_noreplace = real_claim
         survivor = replaced / "dead.md"
         if (
             not refused_inode
@@ -1958,20 +1972,19 @@ def main() -> int:
             capture_output=True,
             check=False,
         ).stdout.strip()
-        real_rename = os.rename
+        real_claim = ref_mod._rename_noreplace
         edited_once = {"done": False}
 
-        def editing_rename(src, dst, *args, **kwargs):
+        def editing_claim(dirfd, src, dst):
             if not edited_once["done"] and src == "dead.md":
                 edited_once["done"] = True
-                dirfd = kwargs.get("src_dir_fd")
                 fd = os.open(src, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=dirfd)
                 os.ftruncate(fd, 0)
                 os.write(fd, b"changed-after-hash\n")
                 os.close(fd)
-            return real_rename(src, dst, *args, **kwargs)
+            return real_claim(dirfd, src, dst)
 
-        os.rename = editing_rename
+        ref_mod._rename_noreplace = editing_claim
         try:
             _unlink_store(edited, "dead.md", edited, edited_blob)
         except RefError as exc:
@@ -1979,7 +1992,7 @@ def main() -> int:
         else:
             refused_edit = False
         finally:
-            os.rename = real_rename
+            ref_mod._rename_noreplace = real_claim
         edited_page = edited / "dead.md"
         if (
             not refused_edit
@@ -3066,20 +3079,19 @@ def main() -> int:
             git(raced_drop, ["add", "."])
             git(raced_drop, ["commit", "-m", "trial"])
             before_living = (raced_drop / "living.md").read_text(encoding="utf-8")
-            real_rename = os.rename
+            real_claim = refcmd._rename_noreplace
             replaced = {"done": False}
 
-            def replace_before_drop_rename(src, dst, *args, **kwargs):
-                src_dir = kwargs.get("src_dir_fd")
-                if not replaced["done"] and src == "dead.md" and src_dir is not None:
+            def replace_before_drop_claim(dirfd, src, dst):
+                if not replaced["done"] and src == "dead.md":
                     replaced["done"] = True
-                    os.unlink(src, dir_fd=src_dir)
-                    fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=src_dir)
+                    os.unlink(src, dir_fd=dirfd)
+                    fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644, dir_fd=dirfd)
                     os.write(fd, b"racer-drop\n")
                     os.close(fd)
-                return real_rename(src, dst, *args, **kwargs)
+                return real_claim(dirfd, src, dst)
 
-            os.rename = replace_before_drop_rename
+            refcmd._rename_noreplace = replace_before_drop_claim
             try:
                 raced = run_prune(
                     str(raced_drop),
@@ -3090,7 +3102,7 @@ def main() -> int:
                     True,
                 )
             finally:
-                os.rename = real_rename
+                refcmd._rename_noreplace = real_claim
             recovered = [
                 path
                 for path in raced_drop.glob(".atlas-prune-recover-*")
@@ -3107,6 +3119,54 @@ def main() -> int:
                 failures.append("drop rename of a replacement lost the checked page")
             else:
                 print("[PASS] drop rename of a replacement keeps the checked page")
+
+        occupied_drop = tmp / "occupied-drop"
+        occupied_drop.mkdir()
+        git(occupied_drop, ["init", "-b", "main"])
+        (occupied_drop / "dead.md").write_text("same\n", encoding="utf-8")
+        git(occupied_drop, ["add", "dead.md"])
+        git(occupied_drop, ["commit", "-m", "blob"])
+        occupied_blob = subprocess.run(
+            ["git", "rev-parse", "HEAD:dead.md"],
+            cwd=occupied_drop,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+        real_claim = ref_mod._rename_noreplace
+        occupied = {"dst": ""}
+
+        def colliding_claim(dirfd, src, dst):
+            occupied["dst"] = dst
+            os.unlink(src, dir_fd=dirfd)
+            fd = os.open(src, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644, dir_fd=dirfd)
+            os.write(fd, b"reappeared\n")
+            os.close(fd)
+            fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644, dir_fd=dirfd)
+            os.write(fd, b"only-copy\n")
+            os.close(fd)
+            return real_claim(dirfd, src, dst)
+
+        ref_mod._rename_noreplace = colliding_claim
+        try:
+            _unlink_store(occupied_drop, "dead.md", occupied_drop, occupied_blob)
+        except RefError:
+            refused_collision = True
+        else:
+            refused_collision = False
+        finally:
+            ref_mod._rename_noreplace = real_claim
+        parked = occupied_drop / occupied["dst"] if occupied["dst"] else None
+        if (
+            not refused_collision
+            or (occupied_drop / "dead.md").read_bytes() != b"reappeared\n"
+            or parked is None
+            or not parked.is_file()
+            or parked.read_bytes() != b"only-copy\n"
+        ):
+            failures.append("drop claim overwrote a destination that already existed")
+        else:
+            print("[PASS] drop claim refuses an occupied destination")
 
         scalar = tmp / "scalar-drop"
         scalar_init = run(["init", "--root", str(scalar), "--json"])

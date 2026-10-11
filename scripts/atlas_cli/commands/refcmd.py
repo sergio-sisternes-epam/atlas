@@ -24,7 +24,7 @@ from .validate import concept_page_errors
 from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
 
-SKIP_TOP = frozenset({"templates", ".atlas", ".atlas-index", "mesh", "schema.d", ".git"})
+SKIP_TOP = frozenset({"templates", ".atlas", ".atlas-index", "mesh", "schema.d", ".git", "staging"})
 _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 TOP_KEY = re.compile(
@@ -1563,7 +1563,10 @@ def _unlink_store(root: Path, rel: str, repo: Path, expected: str) -> tuple[byte
                 raise RefError(f"refusing to drop replaced page {rel}")
             mode = stat.S_IMODE(info.st_mode)
             tmp = f".atlas-prune-drop-{os.getpid()}-{os.urandom(4).hex()}.tmp"
-            os.rename(name, tmp, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            try:
+                _rename_noreplace(dirfd, name, tmp)
+            except OSError as exc:
+                raise RefError(f"refusing to drop replaced page {rel}") from exc
             moved = os.lstat(tmp, dir_fd=dirfd)
             if moved.st_dev != info.st_dev or moved.st_ino != info.st_ino:
                 _restore_wrong_rename(dirfd, name, tmp, data, mode, rel)
