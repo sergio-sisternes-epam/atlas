@@ -2,6 +2,47 @@
 
 ## Unreleased (targets 0.14.0)
 
+### Added
+
+- Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
+- `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
+- Runtime modules **history**, **version-hint**, and **prune**. Recall, remember, and terminate hand off to those cards. Claim A grain stays deferred.
+
+### Fixed
+
+- Compile resolves a markdown link that starts with `/` against the store, not the host filesystem. A relative link that leaves the store is broken even when that file exists outside it. A protocol-relative `//` link is not an internal store link.
+- SCHEMA 2.0 YAML load treats a nesting recursion failure as a frontmatter error. A value deeper than the nesting limit does not escape as `RecursionError`.
+- `atlas ref show` and `atlas ref prune` treat `.atlas` as an Atlas-managed path. They do not walk, read, rewrite, or delete project index and mount pages.
+- Optimise treats a quoted `path` key as the relation path. A live edge is retargeted on a move. A ref-bearing item keeps its path.
+- `atlas ref prune` treats a quoted `relates_to` key as the same list, and leaves an indented `- path:` bullet inside a block scalar untouched. A history scan uses that same item indentation, so prose is not a second edge.
+- Optimise treats a quoted `relates_to` key as that list. A ref-bearing item under it stays history and is not rewritten when a live page moves.
+- Optimise treats `relates_to:` with a trailing YAML comment as that list, so a ref-bearing item under it stays history. Removing a dead schema member drops the live item and leaves a history item with the same path.
+- `atlas ref prune` leaves a protocol-relative markdown link (`//host/path`) unchanged. It is not a store-root path.
+- `atlas ref show` and `atlas ref prune` refuse the fixed `staging/` directory even when `staging_dir` is a different name.
+- `atlas ref prune` claims a drop with a no-replace rename. A destination that already exists aborts the drop and is not overwritten.
+- `atlas ref prune` rechecks that the resolved rev is still an ancestor of HEAD after the mutation lock is held, before rewriting or dropping pages. A tip that moved to an unrelated commit is refused even when the drop bytes match.
+- `atlas ref show` and `atlas ref prune` refuse a path that was under `staging` or the `staging_dir` recorded on the selected commit, even when the worktree schema has renamed that directory. A commit that cannot prove its staging name is refused. A `staging_dir` that is not a single directory name, such as a list, is not coerced into one.
+- `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself, and the worktree bytes match that blob and the HEAD blob. A later or unrelated commit, or a dirty worktree that only matches the older rev, is not the pre-prune snapshot.
+- Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
+- A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
+- After an atomic rewrite or drop rename, prune rechecks the destination name and bytes. A page whose bytes changed, including one that reused the installed inode number, is not reported as a successful retarget. That destination is left in place, and the displaced page is kept for recovery.
+- A drop rename that moves a different inode keeps the checked page bytes and mode in a recovery file, then puts the other file back. The checked page is not closed away as the only remaining copy.
+- A restore link whose destination is replaced before the identity check keeps the checked temp instead of unlinking the last copy.
+- Optimise ignores `relates_to` items that carry `ref` when deciding gist coverage, gist parents, schema members, and cluster joins. A history edge does not suppress `uncovered-gist`.
+- `atlas ref prune` rechecks the tip with a dry-run compile after deletion. Any remaining critical finding rolls back only the pages prune wrote or deleted. A concurrent edit on another page is left in place.
+- `atlas ref prune` keeps one lock file for the mutation window and does not replace that inode between runs. It opens that lock without following a symlink.
+- A failed prune keeps rolling back every page it wrote or deleted. A page that cannot be restored is left for recovery, and the command reports that aggregate failure.
+- Optimise referrer discovery and rewriting leave ref-bearing `relates_to` items unchanged. A history edge still names the pre-move path.
+- `atlas ref prune` treats a markdown link that starts with `/` as store-root relative. It does not consult that path on the filesystem root, so an inbound `/dead.md` link is retargeted before the page is deleted.
+- A quoted SCHEMA 2.0 `ref` key is still a history edge. Prune and optimise leave that item's path unchanged.
+- Optimise and prune treat history as a parsed top-level `relates_to` `ref`. Nested prose or a nested mapping that contains `ref:` does not freeze a live path.
+- Optimise and prune rewrite only a relation item's top-level `path`. A `path:` line inside a block scalar is prose. An item that cannot be parsed is left unchanged.
+- `atlas ref prune` rolls back when the post-mutation compile gains a blocking warning. A warning already present, and the non-blocking unmounted-atlas warning, do not by themselves undo the prune. Critical findings still fail the gate.
+- `atlas ref show` and `atlas ref prune` load without `fcntl`, so other commands still start where file locking is unavailable. Prune refuses there instead of failing at import.
+- `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
+- `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
+- `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
+
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a
