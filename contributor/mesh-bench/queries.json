@@ -1,0 +1,390 @@
+{
+  "version": 1,
+  "mesh": "fixtures/mesh",
+  "labelling": "Each query's relevant pages were chosen by reading the fixture pages under fixtures/mesh/stores, before bench.py was run on them; labels were not tuned to any arm's output.",
+  "queries": [
+    {
+      "id": "m01",
+      "query": "tide cache stampede jitter",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/lessons/cache-stampede.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-03-timetable-outage.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/cache-ttl-study.md"
+      ]
+    },
+    {
+      "id": "m02",
+      "query": "ferry queue backlog consumers",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/ferry-queue.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-07-queue-backlog.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/queue-batching-benchmark.md"
+      ]
+    },
+    {
+      "id": "m03",
+      "query": "coinpurse retry idempotency",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/payment-gateway.md",
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/idempotency-keys.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-05-double-charge.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/payment-retry-backoff.md"
+      ]
+    },
+    {
+      "id": "m04",
+      "query": "heron sms reminders",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/notification-hub.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/notification-backlog.md",
+        "atlas://example.invalid/larkspur/ops-atlas/slos/notification-latency.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/reminder-channels.md"
+      ]
+    },
+    {
+      "id": "m05",
+      "query": "retry-after backpressure booking",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/backpressure.md",
+        "atlas://example.invalid/larkspur/ops-atlas/slos/booking-availability.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md",
+        "atlas://example.invalid/larkspur/research-atlas/analytics/booking-funnel.md"
+      ]
+    },
+    {
+      "id": "m06",
+      "query": "sailing identifier timetable release",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/sailing-identifiers.md",
+        "atlas://example.invalid/larkspur/platform-atlas/services/timetable-service.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-03-timetable-outage.md",
+        "atlas://example.invalid/larkspur/research-atlas/lessons/forecast-drift.md"
+      ]
+    },
+    {
+      "id": "m07",
+      "query": "poison message dead-letter queue",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/lessons/poison-message.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/queue-batching-benchmark.md"
+      ]
+    },
+    {
+      "id": "m08",
+      "query": "timetable release cache hit ratio",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/lessons/cache-stampede.md",
+        "atlas://example.invalid/larkspur/ops-atlas/alerts/cache-hit-ratio.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/cache-ttl-study.md"
+      ]
+    },
+    {
+      "id": "m09",
+      "query": "storm rebooking ferry queue commands",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/ferry-queue.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-07-queue-backlog.md",
+        "atlas://example.invalid/larkspur/research-atlas/analytics/cancellation-patterns.md"
+      ]
+    },
+    {
+      "id": "d01",
+      "query": "beacon feature flag switch off",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/feature-flags.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/payment-gateway-failover.md",
+        "atlas://example.invalid/larkspur/ops-atlas/process/change-freeze.md"
+      ]
+    },
+    {
+      "id": "d02",
+      "query": "lantern queue depth panel",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/observability-stack.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md",
+        "atlas://example.invalid/larkspur/ops-atlas/alerts/queue-depth.md"
+      ]
+    },
+    {
+      "id": "d03",
+      "query": "coinpurse secondary acquirer failover",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/payment-gateway.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/payment-gateway-failover.md"
+      ]
+    },
+    {
+      "id": "d04",
+      "query": "postgres failover bookings table",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/bookings-partitioning.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/database-failover.md"
+      ]
+    },
+    {
+      "id": "d05",
+      "query": "flush tide cache",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/tide-cache.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/tide-cache-flush.md"
+      ]
+    },
+    {
+      "id": "d06",
+      "query": "booking api availability slo",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/booking-api.md",
+        "atlas://example.invalid/larkspur/ops-atlas/slos/booking-availability.md"
+      ]
+    },
+    {
+      "id": "d07",
+      "query": "cancellation alerts latency notification hub",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/notification-hub.md",
+        "atlas://example.invalid/larkspur/ops-atlas/slos/notification-latency.md"
+      ]
+    },
+    {
+      "id": "d08",
+      "query": "ferry queue batching throughput",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/ferry-queue.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/queue-batching-benchmark.md"
+      ]
+    },
+    {
+      "id": "d09",
+      "query": "tide cache ttl 90 seconds",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/tide-cache.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/cache-ttl-study.md"
+      ]
+    },
+    {
+      "id": "d10",
+      "query": "exponential backoff coinpurse",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/payment-gateway.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/payment-retry-backoff.md"
+      ]
+    },
+    {
+      "id": "d11",
+      "query": "sms email reminder channel",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/notification-hub.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/reminder-channels.md"
+      ]
+    },
+    {
+      "id": "d12",
+      "query": "storm cancellations queue backlog",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-07-queue-backlog.md",
+        "atlas://example.invalid/larkspur/research-atlas/analytics/cancellation-patterns.md"
+      ]
+    },
+    {
+      "id": "d13",
+      "query": "double charge payment retries",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-05-double-charge.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/payment-retry-backoff.md"
+      ]
+    },
+    {
+      "id": "d14",
+      "query": "retry storms load shedding",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/backpressure.md",
+        "atlas://example.invalid/larkspur/research-atlas/reading/retry-storms.md"
+      ]
+    },
+    {
+      "id": "d15",
+      "query": "sailing identifier demand forecast",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/sailing-identifiers.md",
+        "atlas://example.invalid/larkspur/research-atlas/analytics/demand-forecast.md",
+        "atlas://example.invalid/larkspur/research-atlas/lessons/forecast-drift.md"
+      ]
+    },
+    {
+      "id": "d16",
+      "query": "booking funnel retry-after",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/backpressure.md",
+        "atlas://example.invalid/larkspur/research-atlas/analytics/booking-funnel.md"
+      ]
+    },
+    {
+      "id": "d17",
+      "query": "missed sailings boarding reminder",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/notification-hub.md",
+        "atlas://example.invalid/larkspur/research-atlas/experiments/reminder-channels.md",
+        "atlas://example.invalid/larkspur/research-atlas/methods/metric-definitions.md"
+      ]
+    },
+    {
+      "id": "d18",
+      "query": "dead-letter queue inspect",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/lessons/poison-message.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/ferry-queue-drain.md"
+      ]
+    },
+    {
+      "id": "d19",
+      "query": "timetable service database connections",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/timetable-service.md",
+        "atlas://example.invalid/larkspur/platform-atlas/lessons/cache-stampede.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-03-timetable-outage.md"
+      ]
+    },
+    {
+      "id": "d20",
+      "query": "heron sms rate limit",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/notification-hub.md",
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/notification-backlog.md"
+      ]
+    },
+    {
+      "id": "d21",
+      "query": "idempotency keys duplicate charge",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/concepts/idempotency-keys.md",
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-05-double-charge.md"
+      ]
+    },
+    {
+      "id": "d22",
+      "query": "vessel lift status accessibility",
+      "kind": "multi",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/services/timetable-service.md",
+        "atlas://example.invalid/larkspur/research-atlas/user-research/accessibility-interviews.md"
+      ]
+    },
+    {
+      "id": "c01",
+      "query": "keelhaul migration monthly partition",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/guides/schema-migrations.md",
+        "atlas://example.invalid/larkspur/platform-atlas/decisions/bookings-partitioning.md"
+      ]
+    },
+    {
+      "id": "c02",
+      "query": "timetable outage severity",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/incidents/2026-03-timetable-outage.md",
+        "atlas://example.invalid/larkspur/ops-atlas/oncall/severity-levels.md"
+      ]
+    },
+    {
+      "id": "c03",
+      "query": "gull paging escalation",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/oncall/rotation.md",
+        "atlas://example.invalid/larkspur/ops-atlas/alerts/queue-depth.md"
+      ]
+    },
+    {
+      "id": "c04",
+      "query": "dynamic pricing revenue per sailing",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/research-atlas/experiments/dynamic-pricing-trial.md",
+        "atlas://example.invalid/larkspur/research-atlas/methods/metric-definitions.md"
+      ]
+    },
+    {
+      "id": "c05",
+      "query": "qr code mobile check-in",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/research-atlas/user-research/mobile-check-in.md"
+      ]
+    },
+    {
+      "id": "c06",
+      "query": "experiment sample size pre-register",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/research-atlas/methods/ab-testing.md"
+      ]
+    },
+    {
+      "id": "c07",
+      "query": "local development seed sailings",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/platform-atlas/guides/local-development.md"
+      ]
+    },
+    {
+      "id": "c08",
+      "query": "summer change freeze",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/process/change-freeze.md"
+      ]
+    },
+    {
+      "id": "c09",
+      "query": "promote postgres standby",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/ops-atlas/runbooks/database-failover.md"
+      ]
+    },
+    {
+      "id": "c10",
+      "query": "wheelchair boarding assistance",
+      "kind": "control",
+      "relevant": [
+        "atlas://example.invalid/larkspur/research-atlas/user-research/accessibility-interviews.md"
+      ]
+    }
+  ]
+}

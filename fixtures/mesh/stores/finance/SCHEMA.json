@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "atlas_id": "example.invalid/larkspur/finance-atlas",
+  "title": "Larkspur finance Atlas (excluded from the mesh)",
+  "description": "Synthetic benchmark fixture store. All content is invented."
+}

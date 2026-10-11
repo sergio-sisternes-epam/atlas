@@ -66,6 +66,14 @@
   a mesh row nor a store, so `atlas recall status` on such a directory no
   longer shows a synthetic index path either; real standalone stores keep
   their origin or `local/` id.
+- Contributor-only mesh benchmark kit (nothing shipped): `fixtures/mesh` is a
+  synthetic three-store mesh (plus an excluded and an unmounted row, a
+  restricted page and one unresolved cross-store link per reason) and
+  `contributor/mesh-bench/` scores best single store, plain RRF, tiered RRF
+  (k = 10, 60, 100), raw BM25 score merge and a scratch single FTS5 index on
+  41 labelled queries (Recall@10, MRR), reports federated latency at 2, 5 and
+  10 members and unresolved links by reason, and specifies the multi-Atlas
+  answer benchmark with its pre-registered M17 criteria (`MAC-HARNESS.md`).
 - Federated recall: `atlas recall run "<q>" --scope mesh [--rrf-k N]` searches
   every included member of the project's `atlas-mesh.json` in process, each
   with its own engine, profile, exclusions and per-store index (no shared
