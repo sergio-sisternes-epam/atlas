@@ -24,7 +24,7 @@ from .validate import concept_page_errors
 from ..core.paths import RESERVED, store_root
 from ..core.schema import load_schema, staging_dir_name
 
-SKIP_TOP = frozenset({"templates", ".atlas-index", "mesh", "schema.d", ".git"})
+SKIP_TOP = frozenset({"templates", ".atlas", ".atlas-index", "mesh", "schema.d", ".git"})
 _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
 MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 TOP_KEY = re.compile(

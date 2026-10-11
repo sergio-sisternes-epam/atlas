@@ -469,6 +469,56 @@ created: 2026-10-05
         self.assertIn("path: new.md", live)
         self.assertNotIn("path: old.md", live)
 
+    def test_quoted_path_key_is_a_live_relation_path(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "old.md",
+            "type: document\ntitle: Old\ncreated: 2026-10-05\nrelates_to: []",
+            "## Content\n\nOld page body has enough prose for a concept page.",
+        )
+        page(
+            root / "quoted-path-history.md",
+            """
+type: document
+title: Quoted path history
+created: 2026-10-05
+relates_to:
+  - 'path': old.md
+    kind: related
+    ref: abcdef1234567890
+""",
+            "## Content\n\nQuoted path history has enough prose and no live link.",
+        )
+        page(
+            root / "quoted-path-live.md",
+            '''
+type: document
+title: Quoted path live
+created: 2026-10-05
+relates_to:
+  - "path": "old.md"
+    kind: related
+''',
+            "## Content\n\nQuoted path live page has enough prose and no body link.",
+        )
+        store = opt.Store(root)
+        self.assertNotIn("quoted-path-history.md", opt._referrers(store, "old.md"))
+        self.assertIn("quoted-path-live.md", opt._referrers(store, "old.md"))
+        opt._rewrite_refs(
+            store,
+            "old.md",
+            "new.md",
+            ["quoted-path-history.md", "quoted-path-live.md"],
+        )
+        history = (root / "quoted-path-history.md").read_text(encoding="utf-8")
+        live = (root / "quoted-path-live.md").read_text(encoding="utf-8")
+        self.assertIn("'path': old.md", history)
+        self.assertNotIn("new.md", history)
+        self.assertIn('"path": "new.md"', live)
+        self.assertNotIn("old.md", live)
+
     def test_commented_relates_to_key_keeps_history_edge(self) -> None:
         import atlas_optimise as opt
 

@@ -332,7 +332,11 @@ _BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
 _FIELD_LINE = re.compile(
     r"""^(\s*(?:-\s*)?)(?:(['"])([A-Za-z_][\w-]*)\2|([A-Za-z_][\w-]*)):\s*(.*?)\s*$"""
 )
-_PATH_LINE = re.compile(r"^\s*-?\s*path:\s*\S")
+_PATH_FIELD = re.compile(
+    r"""^(\s*-?\s*)(?:path|(?P<kq>['"])path(?P=kq))(?P<colon>:\s*)"""
+    r"""(?:(?P<vq>['"])(?P<quoted>.*?)(?P=vq)|(?P<bare>[^\s#]+))(?P<tail>\s*(?:#.*)?)?$""",
+    re.M,
+)
 
 
 def _parsed_span(lines: list[str], span: tuple[int, int]) -> dict | None:
@@ -414,10 +418,10 @@ def _history_path_lines(text: str) -> set[int]:
             live_path = {
                 index
                 for index in _top_level_indexes(lines, span)
-                if _PATH_LINE.match(lines[index].rstrip("\r\n"))
+                if _PATH_FIELD.match(lines[index].rstrip("\r\n"))
             }
         for index in range(*span):
-            if _PATH_LINE.match(lines[index]) and index not in live_path:
+            if _PATH_FIELD.match(lines[index].rstrip("\r\n")) and index not in live_path:
                 found.add(index)
     return found
 
@@ -473,10 +477,11 @@ def _referrers(store: Store, key: str) -> list[str]:
             continue
         history_lines = _history_path_lines(text)
         hit = False
-        for m in re.finditer(r"^\s*-?\s*path:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", text, re.M):
+        for m in _PATH_FIELD.finditer(text):
             if text.count("\n", 0, m.start()) in history_lines:
                 continue
-            if store.canonical(m.group(1)) == key:
+            val = m.group("quoted") if m.group("vq") else m.group("bare")
+            if store.canonical(val) == key:
                 hit = True
                 break
         if not hit:
@@ -2178,12 +2183,17 @@ def _rewrite_refs(store: Store, old_key: str, new_key: str, referrers: list[str]
         def fm_sub(m: re.Match) -> str:
             if text.count("\n", 0, m.start()) in history_lines:
                 return m.group(0)
-            val = m.group(3)
-            if store.canonical(val) == old_key:
-                return m.group(1) + m.group(2) + new_key + m.group(4)
-            return m.group(0)
+            val = m.group("quoted") if m.group("vq") else m.group("bare")
+            if store.canonical(val) != old_key:
+                return m.group(0)
+            key_q = m.group("kq") or ""
+            val_q = m.group("vq") or ""
+            return (
+                f"{m.group(1)}{key_q}path{key_q}{m.group('colon')}"
+                f"{val_q}{new_key}{val_q}{m.group('tail') or ''}"
+            )
 
-        text = re.sub(r"^(\s*-?\s*path:\s*)([\"']?)([^\"'\n]+?)([\"']?\s*)$", fm_sub, text, flags=re.M)
+        text = _PATH_FIELD.sub(fm_sub, text)
 
         def link_sub(m: re.Match) -> str:
             target = m.group(2)

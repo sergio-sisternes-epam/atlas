@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- `atlas ref show` and `atlas ref prune` treat `.atlas` as an Atlas-managed path. They do not walk, read, rewrite, or delete project index and mount pages.
+- Optimise treats a quoted `path` key as the relation path. A live edge is retargeted on a move. A ref-bearing item keeps its path.
 - `atlas ref prune` treats a quoted `relates_to` key as the same list, and leaves an indented `- path:` bullet inside a block scalar untouched. A history scan uses that same item indentation, so prose is not a second edge.
 - Optimise treats a quoted `relates_to` key as that list. A ref-bearing item under it stays history and is not rewritten when a live page moves.
 - Optimise treats `relates_to:` with a trailing YAML comment as that list, so a ref-bearing item under it stays history. Removing a dead schema member drops the live item and leaves a history item with the same path.

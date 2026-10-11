@@ -144,7 +144,7 @@ not a refusal and does not fail the run.
      `--confirm`.
    - `layer-suffix` (opt-in): rename an unsuffixed `type: gist|schema|memory`
      page and rewrite every inbound `relates_to` path and relative link in the
-     store. Blocked when any `atlas://` text names the page or the page sits in
+     store. A quoted `path` key is the same relation path. A ref-bearing item is not rewritten. Blocked when any `atlas://` text names the page or the page sits in
      an overlay-claimed folder. Stores outside this root are not scanned.
 8. **Subject clustering.** The helper groups pages by naming only: the same
    filename stem in two or more folders, an operator-named

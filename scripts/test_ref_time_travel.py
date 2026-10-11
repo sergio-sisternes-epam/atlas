@@ -1467,6 +1467,31 @@ def main() -> int:
                 failures.append(f"show should refuse staging: {shown_run.stdout}")
             else:
                 print("[PASS] show refuses an Atlas-managed path")
+            atlas_note = shown / ".atlas" / "indexes" / "note.md"
+            atlas_note.parent.mkdir(parents=True)
+            atlas_note.write_text(
+                page("Note", "relates_to: []\n", "Project index must not answer."),
+                encoding="utf-8",
+            )
+            atlas_show = run(
+                ["ref", "show", ".atlas/indexes/note.md", "--ref", "HEAD", "--root", str(shown), "--json"]
+            )
+            from atlas_cli.commands import refcmd as ref_commands
+
+            walked = [
+                page.relative_to(shown).as_posix()
+                for page in ref_commands._iter_pages(shown)
+                if ".atlas" in page.relative_to(shown).parts
+            ]
+            if (
+                atlas_show.returncode == 0
+                or "managed" not in atlas_show.stdout
+                or ref_commands._managed_top(shown, ".atlas/indexes/note.md") != ".atlas"
+                or walked
+            ):
+                failures.append(f"show should refuse .atlas: {atlas_show.stdout} walked={walked}")
+            else:
+                print("[PASS] show refuses a .atlas path and does not walk it")
             shown_contract = contract_file(shown)
             (shown / "staging" / shown_contract.name).write_text(
                 shown_contract.read_text(encoding="utf-8"),
