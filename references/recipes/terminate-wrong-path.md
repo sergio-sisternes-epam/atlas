@@ -1,6 +1,6 @@
 ---
 name: atlas/recipes/terminate-wrong-path
-description: When the user kills a frame during remember or query, load discuss path terminate. Do not re-implement KVA here.
+description: When the user kills a frame during remember or query, or explicitly cancels an atlas-tasks task (not a duplicate), load discuss path terminate. Do not re-implement KVA here.
 ---
 
 # Recipe: terminate a wrong path
