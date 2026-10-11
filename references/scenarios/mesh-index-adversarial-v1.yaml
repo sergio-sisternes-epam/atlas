@@ -56,7 +56,7 @@ smokes:
     source: "Goodhart's law; BCAS (arXiv 2603.08877) gains plateau near three searches"
     expect: "Promotion criteria are committed before the benchmark runs and use a fixed tool and token budget."
     packet: MF
-    check: pending packet MF
+    check: "contributor/mesh-bench/MAC-HARNESS.md section 'Pre-registered success criteria (M17)' (fixed budget of 6 Atlas tool calls and 60k input tokens; a miss is a keep opt-in lesson), guarded by contributor/mesh-bench/test_bench.py test_mac_harness_preregisters_criteria"
   - id: id-collision
     source: "PR #61 id segment rule rejects a leading underscore"
     expect: "No mounted store id can map to .atlas/indexes/<type>/_mesh/."

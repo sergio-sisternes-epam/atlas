@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "atlas_id": "example.invalid/larkspur/ops-atlas",
+  "title": "Larkspur operations Atlas",
+  "description": "Synthetic benchmark fixture store. All content is invented."
+}

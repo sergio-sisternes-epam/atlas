@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "stores": [
+    {
+      "id": "example.invalid/larkspur/platform-atlas",
+      "path": "stores/platform"
+    },
+    {
+      "id": "example.invalid/larkspur/ops-atlas",
+      "path": "stores/ops"
+    },
+    {
+      "id": "example.invalid/larkspur/finance-atlas",
+      "path": "stores/finance",
+      "mesh_member": false
+    },
+    {
+      "id": "example.invalid/larkspur/research-atlas",
+      "path": "stores/research"
+    },
+    {
+      "id": "example.invalid/larkspur/archive-atlas",
+      "path": "stores/archive"
+    }
+  ]
+}
