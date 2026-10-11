@@ -2,6 +2,21 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed: `atlas index status` in mesh mode classifies every row before
+  probing. Excluded, invalid and unmounted rows are reported from the mesh
+  row and their status/reason only; their roots are never resolved, stat-ed
+  or read, including a `../` or absolute path outside the project. Only an
+  `ok` member is described. A directory that exists but has no contract is
+  `unmounted` (exit 0), not a schema error; `index show` of that store still
+  reports the error. Standalone status, and mesh status when every row is
+  `ok`, is unchanged.
+- Fixed: mesh and index writes no longer follow a destination symlink.
+  `graph.json`, `export-receipt.json`, mesh snapshot and pointer files,
+  generation directories, recall sqlite databases, nanograph query and ready
+  files, git `info/exclude` appends and owner-token lock files are created
+  or replaced without following a symlink, fifo or other non-regular entry.
+  A non-regular destination is refused with a clear error and left in place.
+  A regular `graph.json` is not replaced when the receipt path is a symlink.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a
@@ -59,6 +74,36 @@
   recall. Explicit `--scope store` still searches
   that store alone: exclusion applies only in mesh scope, and the flag
   overrides the project setting. Mesh scope never follows a symlink: ripgrep is not passed `--follow` or `-L` and is not given a symlink path, and page walks (grep, FTS5, nanograph and the mesh view) skip symlinked files and directories. A member whose root, or any in-project component of that root, is a symlink is `invalid` with reason `symlinked_root` and is not read. Schema and overlay loading honours the same rule, decided with `lstat` before any open or following `stat`: a symlinked `schema.d` or overlay file is skipped with a warning and is not opened; a symlinked `SCHEMA.json` makes the member `invalid` / `symlinked_root`; a symlinked `CONTRACT.json`, index pointer, index database, nanograph or tgrep index file or page (`log.md` included) is skipped with a warning. A `path:` filter that crosses a symlink is not followed and yields no hits for that member. `atlas-mesh.json` is project-level, read once at discovery and not re-read for a pinned member; a symlink listing is not followed and discovery fails closed. Frontmatter does not open includes. `staging/` and `templates/` stay pruned by name. Store scope output is unchanged byte for byte.
+- Native mesh graph: `atlas graph nodes|edges|neighbours|export` accept
+  `--scope store|mesh` (flag, then top-level `graph.scope`, then `store`),
+  and `nodes`/`edges` accept `--store <atlas-id>` in mesh scope. Mesh scope
+  answers across every member with `atlas://<atlas-id>/<path>` node ids,
+  cross-store edges and unresolved reasons, from a structure-only index at
+  `.atlas/indexes/graph/_mesh/` (no titles, descriptions, bodies or tags;
+  restricted pages, excluded stores and `invalid` rows absent) keyed by a
+  mesh digest and rebuilt under its own lock. An `invalid` row is never
+  read: `--store` or a page in it exits 2, the export receipt lists it
+  under `invalid`, and `index show --mesh` and the `index status` block list
+  it with its reason. Node ids are percent-encoded as in the mesh core, so a
+  path holding `#` round-trips. `atlas index build --mesh` builds the index
+(with `--all`, it first builds only `ok` members and reports excluded,
+`invalid` and unmounted rows as skipped without touching their roots),
+  `atlas index show --mesh` and a gated `index status` block report it, and
+  `atlas compile` of a member refreshes it once it exists (a failure is a
+  warning). Freshness is the mesh digest: each mesh read rehashes every
+  included member's corpus and covers every serialised member record
+  (path, subpath, status and reason, for excluded, unmounted and invalid
+  rows as well as ok rows), and reuses the index only when that digest
+  matches, so a same-length edit that keeps its mtime, or a metadata change
+  that leaves a row's status unchanged, is never missed (the cheap fingerprint
+  can only say stale). A rebuild loads each included member
+  once and publishes that load's view under that load's digest, so the two
+  cannot diverge. `pinned()` keeps each caller's store pin in a context
+  variable and restores it with a token, so overlapping pins of the same store
+  do not leak across threads. `--all` builds each member at its
+  own root (`path/subpath`, or `.atlas/<atlas-id>` for a pathless row) under
+  its row id, with no git lookup. `--driver nanograph` in mesh scope falls back to native.
+  Single-store output is unchanged.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
   as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
@@ -102,8 +147,9 @@
   and a row-level `mesh_member` (boolean, default true). `scope` or `rrf_k`
   in a store row's `recall` block is an error that names the row. All the
   keys are validated and kept by `atlas index set|unset` and mount;
-  `recall.scope`, `recall.rrf_k` and `mesh_member` drive federated recall
-  (above), while the `graph` block has no effect yet. `index_location.mesh_index_dir()` reserves
+  `recall.scope` and `recall.rrf_k` drive federated recall, `graph.scope`
+  and `graph.driver` drive the native mesh graph, and `mesh_member` drives
+  both. `index_location.mesh_index_dir()` reserves
   `.atlas/indexes/<graph|nanograph>/_mesh/`, which no valid atlas id can
   reach. Without the new keys, all existing output is byte-identical.
 - FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)

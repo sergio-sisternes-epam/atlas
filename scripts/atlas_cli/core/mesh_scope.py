@@ -817,6 +817,22 @@ def build_view(mesh: Mesh) -> dict[str, Any]:
     """
     all_members = members(mesh)
     loaded = {m.index: load_member(m) for m in all_members if m.status == STATUS_OK}
+    return assemble_view(mesh, all_members, loaded)
+
+
+def member_records(all_members: list[Member]) -> list[dict[str, Any]]:
+    """The member records a snapshot persists, in file order.
+
+    Every row, including excluded, unmounted and invalid. Freshness hashes
+    these same dicts, so a field added here cannot be left out of the digest.
+    Built from the row already read out of ``atlas-mesh.json``; it does not
+    open any store.
+    """
+    return [member.as_dict() for member in all_members]
+
+
+def assemble_view(mesh: Mesh, all_members: list[Member], loaded: dict[int, MemberPages]) -> dict[str, Any]:
+    """View from pages already loaded. Does not read member files."""
     resolver = Resolver(mesh, all_members, loaded)
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -861,7 +877,7 @@ def build_view(mesh: Mesh) -> dict[str, Any]:
     edges.sort(key=lambda e: (e["from"], e["to"], e["kind"]))
     warnings.sort(key=lambda w: (w["from"], w["target"]))
     return {
-        "members": [m.as_dict() for m in all_members],
+        "members": member_records(all_members),
         "nodes": nodes,
         "edges": edges,
         "warnings": warnings,

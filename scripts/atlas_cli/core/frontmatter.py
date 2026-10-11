@@ -199,14 +199,19 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     return _jsonish(data), body
 
 
+def parse_page(text: str, schema_version: str = "1.0") -> tuple[dict, str]:
+    """Split frontmatter from text already loaded, so the caller need not reread the file."""
+    if str(schema_version).strip() == "2.0":
+        return split_fm_v2(text)
+    return split_fm(text)
+
+
 def read_page(path: Path, schema_version: str = "1.0") -> tuple[dict, str]:
     if skipping_symlinks() and is_symlink_entry(path):
         note_skipped_symlink(path, "page")
         raise OSError(f"mesh scope skipped symlink page: {path}")
     text = path.read_text(encoding="utf-8", errors="replace")
-    if str(schema_version).strip() == "2.0":
-        return split_fm_v2(text)
-    return split_fm(text)
+    return parse_page(text, schema_version)
 
 
 def leftover_prose(body: str) -> str:

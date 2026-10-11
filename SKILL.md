@@ -196,14 +196,15 @@ python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|acti
 # index verbs all take [--root <dir>] [--json]; `index build` replaces deprecated `recall index build`
 python3 <atlas-skill>/scripts/atlas.py index set <grep|bm25|nanograph> [--store <id> | --default] [--build]
 python3 <atlas-skill>/scripts/atlas.py index unset [--store <id> | --default]
-python3 <atlas-skill>/scripts/atlas.py index show [--store <id>]   # at a project root of 2+ stores: --store required (exit 2, store_required)
+python3 <atlas-skill>/scripts/atlas.py index show [--store <id> | --mesh]   # at a project root of 2+ stores: --store or --mesh required (exit 2, store_required)
 python3 <atlas-skill>/scripts/atlas.py index status
-python3 <atlas-skill>/scripts/atlas.py index build [--store <id> | --all] [--force]
-python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N]
-python3 <atlas-skill>/scripts/atlas.py graph edges --root <atlas> (--from <page> | --to <page> | --all) [--kind K]... [--include-exits]
-python3 <atlas-skill>/scripts/atlas.py graph neighbours <page> --root <atlas> [--kind K]... [--direction in|out|both] [--hops 1..3] [--where field=value]... [--driver native|nanograph]
+python3 <atlas-skill>/scripts/atlas.py index build [--store <id> | --all] [--mesh] [--force]
+python3 <atlas-skill>/scripts/atlas.py graph nodes --root <atlas> [--where field=value]... [--path <prefix>] [--include-exits] [--limit N] [--scope store|mesh] [--store <atlas-id>]...
+python3 <atlas-skill>/scripts/atlas.py graph edges --root <atlas> (--from <page> | --to <page> | --all) [--kind K]... [--include-exits] [--scope store|mesh] [--store <atlas-id>]...
+python3 <atlas-skill>/scripts/atlas.py graph neighbours <page> --root <atlas> [--kind K]... [--direction in|out|both] [--hops 1..3] [--where field=value]... [--driver native|nanograph] [--scope store|mesh]
 python3 <atlas-skill>/scripts/atlas.py graph drivers --root <atlas> [--json]
-python3 <atlas-skill>/scripts/atlas.py graph export --root <atlas> --format json|nanograph --out <dir-outside-store>
+python3 <atlas-skill>/scripts/atlas.py graph export --root <atlas> --format json|nanograph --out <dir-outside-store> [--scope store|mesh]
+# --scope mesh: every member of atlas-mesh.json; pages are atlas://<atlas-id>/<path> or a --root path; --store needs mesh scope
 python3 <atlas-skill>/scripts/atlas.py id <pointer>
 python3 <atlas-skill>/scripts/atlas.py auth [--host github.com] [--ssh]
 python3 <atlas-skill>/scripts/atlas.py mount <source> [--ref <branch>] [--target <path>] [--ssh]

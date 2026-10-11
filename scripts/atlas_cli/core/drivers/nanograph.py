@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from .. import driver_overlay, graph, index_location, index_publish
+from .. import driver_overlay, graph, index_location, index_publish, paths
 from ..paths import is_symlink_entry, mesh_symlink, note_skipped_symlink, skipping_symlinks
 from ..driver_overlay import BaseDriver, Detection, DriverError
 from ..ignore_guard import ensure_indexes_ignored
@@ -318,8 +318,17 @@ class NanographDriver(BaseDriver):
         page_types = sorted(
             m.group(1) for m in re.finditer(r"^edge (\w+): Page -> Page$", schema_text, re.M)
         )
-        (index_dir / QUERIES_NAME).write_text(generate_queries(page_types), encoding="utf-8")
-        db = os.path.abspath(index_dir / DB_NAME)
+        queries = index_dir / QUERIES_NAME
+        db_path = index_dir / DB_NAME
+        ready_path = index_dir / READY_NAME
+        try:
+            paths.refuse_non_regular(queries)
+            paths.refuse_non_regular(db_path)
+            paths.refuse_non_regular(ready_path)
+            paths.atomic_write_text(queries, generate_queries(page_types))
+        except paths.UnsafeDestination as e:
+            raise DriverError(str(e)) from e
+        db = os.path.abspath(db_path)
         with private_cwd() as cwd:
             # init reads a private schema copy, so the db/schema common ancestor is never the generation.
             schema = cwd / "schema.pg"
@@ -351,9 +360,10 @@ class NanographDriver(BaseDriver):
             "corpus_digest": receipt.get("corpus_digest"),
             "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        tmp = index_dir / (READY_NAME + ".tmp")
-        tmp.write_text(json.dumps(ready, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp, index_dir / READY_NAME)
+        try:
+            paths.atomic_write_text(ready_path, json.dumps(ready, indent=2, sort_keys=True) + "\n")
+        except paths.UnsafeDestination as e:
+            raise DriverError(str(e)) from e
         return {"built": True, **ready}
 
     @staticmethod

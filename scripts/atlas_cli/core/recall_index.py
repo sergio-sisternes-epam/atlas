@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import index_location, index_publish
+from . import index_location, index_publish, paths
 from .ignore_guard import ensure_indexes_ignored
 from .index_location import IndexLocationError
 from .paths import is_symlink_entry, leading_symlink, mesh_symlink, note_skipped_symlink, skipping_symlinks
@@ -145,6 +145,12 @@ def active_generation(store: Path) -> Generation | None:
 
 
 def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
+    paths.refuse_non_regular(path)
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        fd = paths.create_exclusive(path)
+        os.close(fd)
     conn = sqlite3.connect(str(path))
     inserted = 0
     try:

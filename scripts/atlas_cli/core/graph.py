@@ -15,7 +15,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from . import index_location, recall_index
+from . import index_location, paths, recall_index
 from .overlay import merge_overlays
 from .projection import ProjectedPage, ProjectionError, normalise_target, project_store
 from .retrieve import EXIT_FIELDS, adjacent, build_incoming, is_exit_page, is_exit_value, is_visible
@@ -526,8 +526,13 @@ def export_json(source: dict[str, Any], out_dir: Path) -> list[str]:
         "nodes": [{**node_record(p), "description": p.description} for p in pages],
         "edges": all_edges(pages),
     }
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "graph.json").write_text(_dump_doc(doc), encoding="utf-8")
+    graph_path = out_dir / "graph.json"
+    try:
+        paths.ensure_directory(out_dir)
+        paths.refuse_non_regular(graph_path)
+        paths.atomic_write_text(graph_path, _dump_doc(doc))
+    except paths.UnsafeDestination as e:
+        raise GraphError(str(e)) from e
     return ["graph.json"]
 
 
@@ -616,8 +621,18 @@ def export_nanograph(source: dict[str, Any], out_dir: Path) -> tuple[list[str], 
         "unresolved": unresolved,
         "files": ["export-receipt.json", "schema.pg", "seed.jsonl"],
     }
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "schema.pg").write_text(nanograph_schema(edge_types), encoding="utf-8")
-    (out_dir / "seed.jsonl").write_text("\n".join(seed) + "\n", encoding="utf-8")
-    (out_dir / "export-receipt.json").write_text(_dump_doc(receipt), encoding="utf-8")
+    files = {
+        "schema.pg": nanograph_schema(edge_types),
+        "seed.jsonl": "\n".join(seed) + "\n",
+        "export-receipt.json": _dump_doc(receipt),
+    }
+    try:
+        paths.ensure_directory(out_dir)
+        targets = [out_dir / name for name in files]
+        for target in targets:
+            paths.refuse_non_regular(target)
+        for target in targets:
+            paths.atomic_write_text(target, files[target.name])
+    except paths.UnsafeDestination as e:
+        raise GraphError(str(e)) from e
     return receipt["files"], receipt

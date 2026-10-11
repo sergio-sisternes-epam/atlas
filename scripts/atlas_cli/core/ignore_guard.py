@@ -9,12 +9,16 @@ edited; committed ``.gitignore`` files are never touched.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from . import paths
 
 INDEX_DIR = ".atlas-index"
 MESH_LOCK_CODE = "atlas_mesh_lock_ignore_failed"
@@ -115,6 +119,32 @@ def _os_reason(e: OSError) -> str:
     return e.strerror or str(e)
 
 
+def _exclude_file(anchor: Path, raw: str) -> Path:
+    """The exclude path git reported, without resolving a destination symlink."""
+    exclude = Path(raw.strip())
+    if not exclude.is_absolute():
+        exclude = anchor / exclude
+    return exclude
+
+
+def _read_exclude(exclude: Path) -> str:
+    """Read a regular exclude file. A symlink or other non-regular entry is refused."""
+    try:
+        st = os.lstat(exclude)
+    except FileNotFoundError:
+        return ""
+    if not stat.S_ISREG(st.st_mode):
+        kind = "symlink" if stat.S_ISLNK(st.st_mode) else "non-regular file"
+        raise paths.UnsafeDestination(exclude, kind)
+    return exclude.read_text(encoding="utf-8", errors="replace")
+
+
+def _append_exclude(exclude: Path, text: str) -> None:
+    """Append without following a symlinked exclude file or a symlinked parent leaf."""
+    paths.ensure_directory(exclude.parent)
+    paths.append_text(exclude, text)
+
+
 def _normalise(line: str) -> str:
     text = line.strip()
     if text.startswith("**/"):
@@ -191,24 +221,18 @@ def _guard(
     rel_posix = rel_path.as_posix()
     if rel_posix == ".":
         rel_posix = ""
-    exclude = Path(path_proc.stdout.strip())
-    if not exclude.is_absolute():
-        exclude = (anchor / exclude).resolve()
+    exclude = _exclude_file(anchor, path_proc.stdout.strip())
     escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
     line = f"/{escaped}/{subdir}/" if escaped else pattern
-    existing = ""
     try:
-        if exclude.exists() or exclude.is_symlink():
-            existing = exclude.read_text(encoding="utf-8", errors="replace")
+        existing = _read_exclude(exclude)
     except OSError as e:
         return failed(f"cannot read it ({_os_reason(e)})", exclude, line)
     if covered(existing.splitlines(), rel_posix):
         return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line, note=note)
     prefix = "" if not existing or existing.endswith("\n") else "\n"
     try:
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        with exclude.open("a", encoding="utf-8") as fh:
-            fh.write(f"{prefix}{line}\n")
+        _append_exclude(exclude, f"{prefix}{line}\n")
     except OSError as e:
         # Unwritable exclude: fine only when git already ignores the directory another way.
         if _check_ignored(anchor, anchor / subdir / ".atlas-probe") == 0:
@@ -283,21 +307,17 @@ def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
             return GuardResult(FAILED, code, pattern, reason="git rev-parse failed")
         rel_posix = project.resolve().relative_to(Path(top).resolve()).as_posix()
         rel_posix = "" if rel_posix == "." else rel_posix
-        exclude = Path(exclude_raw)
-        if not exclude.is_absolute():
-            exclude = (project / exclude).resolve()
+        exclude = _exclude_file(project, exclude_raw)
         escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
         prefix_dir = f"/{escaped}/" if escaped else "/"
         wanted = [prefix_dir + name for name in MESH_PATTERNS]
-        existing = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
+        existing = _read_exclude(exclude)
         have = {line.strip() for line in existing.splitlines()}
         missing = [line for line in wanted if line not in have]
         if not missing:
             return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude))
-        exclude.parent.mkdir(parents=True, exist_ok=True)
         lead = "" if not existing or existing.endswith("\n") else "\n"
-        with exclude.open("a", encoding="utf-8") as fh:
-            fh.write(lead + "".join(f"{line}\n" for line in missing))
+        _append_exclude(exclude, lead + "".join(f"{line}\n" for line in missing))
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), missing[0])
     except OSError as e:
         return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))

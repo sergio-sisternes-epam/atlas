@@ -63,7 +63,8 @@ querying an index.
 ### nodes
 
 ```text
-atlas graph nodes --root R [--where field=value]... [--path PREFIX] [--include-exits] [--limit N] [--json]
+atlas graph nodes --root R [--where field=value]... [--path PREFIX] [--include-exits] [--limit N]
+                  [--scope store|mesh] [--store ATLAS_ID]... [--json]
 ```
 
 `--where` matches any top-level scalar frontmatter field on normalised text:
@@ -89,7 +90,8 @@ on schema 1.0 and 2.0 stores.
 ### edges
 
 ```text
-atlas graph edges --root R (--from PAGE | --to PAGE | --all) [--kind K]... [--include-exits] [--json]
+atlas graph edges --root R (--from PAGE | --to PAGE | --all) [--kind K]... [--include-exits]
+                  [--scope store|mesh] [--store ATLAS_ID]... [--json]
 ```
 
 Edges keep authored direction: the page holding `relates_to` is `from`.
@@ -112,7 +114,8 @@ reported, never dropped.
 
 ```text
 atlas graph neighbours PAGE --root R [--kind K]... [--direction in|out|both] [--hops 1..3]
-                       [--where field=value]... [--max-nodes N] [--max-edges N] [--include-exits] [--json]
+                       [--where field=value]... [--max-nodes N] [--max-edges N] [--include-exits]
+                       [--driver native|nanograph] [--scope store|mesh] [--json]
 ```
 
 Breadth-first and cycle-safe from the seed PAGE (unknown PAGE exits 2).
@@ -152,12 +155,17 @@ platform matrix, the current platform and each driver's detection result.
 ### export
 
 ```text
-atlas graph export --root R --format json|nanograph --out DIR [--allow-partial] [--json]
+atlas graph export --root R --format json|nanograph --out DIR [--allow-partial] [--scope store|mesh] [--json]
 ```
 
 DIR is created when missing and must be outside the store root (otherwise
-exit 2). Output is byte-identical across runs on the same tree; there are
-no timestamps.
+exit 2). A symlinked DIR leaf is refused rather than followed. Output files
+are written atomically: a pre-existing symlink, directory or other
+non-regular entry (for `graph.json`, `schema.pg`, `seed.jsonl` or
+`export-receipt.json`) is refused (exit 2) and left in place, so a link
+into a member page cannot be overwritten. A regular file is replaced only
+after the new bytes are fsynced. Output is byte-identical across runs on
+the same tree; there are no timestamps.
 
 - `json` writes `DIR/graph.json`:
   `{"version": 1, "corpus_digest", "nodes": [node record + "description"], "edges": [edge records, unresolved included]}`.
@@ -198,6 +206,53 @@ per-kind edge counts, page count, `corpus_digest`, `format`,
 `nanograph_schema_grammar: "1.3.0"` and the edge type map as
 `edge_types: [{"kind", "external", "edge_type"}]`, sorted by (kind,
 external).
+
+## Mesh scope
+
+`export --scope mesh` refuses those same non-regular output entries before
+writing either file, so a regular `graph.json` is not replaced when
+`export-receipt.json` is a symlink. `index status` in mesh mode classifies
+rows first and describes only `ok` members; excluded, invalid and unmounted
+rows are listed from the mesh file (status and reason) and are never read.
+
+`--scope mesh` answers over every member of the project's `atlas-mesh.json`
+(precedence: the flag, then top-level `graph.scope`, then `store`; store
+scope is unchanged). A standalone store exits 2 (`no atlas-mesh.json lists
+this store`). Pages are `atlas://<atlas-id>/<path>` URIs or paths in the
+`--root` store. `nodes` and `edges` take `--store <atlas-id>` (repeatable;
+in store scope it exits 2). Restricted pages, `mesh_member: false`
+stores and `invalid` rows (`outside_project` or `invalid_atlas_id`) never
+appear; an `invalid` row is never read, `--store` or a page in it exits 2,
+and it is listed under `invalid` in the export receipt and `index show
+--mesh`. Node ids percent-encode `%`, `#`, `?` and whitespace in the path
+(`notes/a#b.md` is `atlas://<atlas-id>/notes/a%23b.md`). Payloads add `scope: "mesh"` and `mesh_digest`; edges
+add `cross`, `resolved`, `resolution`, `reason` and `suggest`, with
+`unresolved_by_reason` counts. `--driver nanograph` falls back to native
+with a `driver_note` (the nanograph mesh graph is packet MD). `export
+--scope mesh --format json` writes structure only and refuses an `--out`
+inside any member or under `.atlas/indexes/`, including one that reaches a
+member through a symlink (an excluded or `invalid` root is compared as
+written and never resolved).
+
+The answers come from a structure-only index at
+`<project>/.atlas/indexes/graph/_mesh/` (`generations/<gen>/mesh-graph.json`
+plus `current.json`): no titles, descriptions, bodies or tags. Titles and
+other `--where` fields are read from each member's own source at query
+time. Freshness is the mesh digest: every mesh-scope read hashes each
+included member's corpus (sha256 of its bytes) and covers every serialised
+member record the snapshot writes (atlas id, path, subpath, status, reason
+and any other field, for ok, excluded, unmounted and invalid rows alike).
+It reuses the index only when that digest matches; otherwise it rebuilds
+before answering. The recorded path/size/mtime fingerprint can never make the
+index count as fresh, so a same-length edit that keeps its mtime is still
+seen, as is a path, subpath or reason change that leaves a row's status
+unchanged. `atlas index build --mesh [--all] [--force]` builds it (`--all` first
+builds each `ok` member's own index at its own root, `path/subpath` or
+`.atlas/<atlas-id>` for a row with no `path`, under its row id, and reports
+every other row as skipped without touching its root), and `atlas compile` of a member refreshes it
+only once it exists. A reader that finds the build lock held for 5 s, or
+loses it mid-build, answers from memory with `driver_note: mesh_index_busy`.
+`atlas index show --mesh` prints members, scopes and index freshness.
 
 ## Determinism
 
