@@ -27,7 +27,13 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   whatever that other row's status, is ``invalid`` with reason
   ``overlapping_root``, because reading it would also read the other row's
   pages. It is never read, and a link into it is ``outside_mesh``; the
-  contained row keeps its own status. Invariant: every ``ok`` member's id round-trips through
+  contained row keeps its own status. A contained root its walks never
+  reach does not count: its path below the containing root starts in a
+  directory every walk skips (:data:`WALK_SKIPPED`, from ``paths.SKIP_DIRS``
+  and ``projection.SKIP_TOP``; ``staging`` is not in it) and neither holds
+  nor lies in an index directory read by name (:data:`DIRECT_READS`). So a
+  store at the project root stays ``ok`` beside stores mounted under
+  ``.atlas/<host>/<org>/<repo>/``. Invariant: every ``ok`` member's id round-trips through
   :func:`node_id` / :func:`parse_node_id` and resolves as ``atlas_uri``.
 - Loading (M2): an ``ok`` member is read through its mesh location (the
   project and the row id, as :func:`index_location.mesh_match` gives for a
@@ -73,8 +79,8 @@ from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import contained_root, has_contract_file, join_under
-from .projection import ProjectedPage, normalise_target
+from .paths import SKIP_DIRS, contained_root, has_contract_file, join_under
+from .projection import SKIP_TOP, ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
 RESOLVER_VERSION = 1
@@ -121,6 +127,19 @@ NODE_SCALARS = (
     "origin",
 )
 PROJECT_MOUNT_PREFIX = ".atlas/"
+
+# Top-level directories that every walk of a store prunes by name before
+# listing them: the grep walk (paths.SKIP_DIRS) and the projection behind
+# bm25/fts5, nanograph and build_view (projection.SKIP_TOP). ``staging`` is
+# not in it: the projection skips the schema's staging name, which may differ.
+WALK_SKIPPED = SKIP_DIRS & SKIP_TOP
+# Paths below a store root that its engines open by name, not by a walk: the
+# project's index tree (for a store at the project root) and the legacy
+# in-store index directories.
+DIRECT_READS = (
+    index_location.INDEXES_REL.parts,
+    *((index_location.LEGACY_DIR, name) for name in index_location.LEGACY_NAMES.values()),
+)
 
 
 class MeshScopeError(ValueError):
@@ -390,12 +409,25 @@ def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
     return (PurePosixPath(".atlas") / PurePosixPath(*sid.split("/"))).as_posix()
 
 
+def _reached(parts: tuple[str, ...]) -> bool:
+    """Whether a store's own reads can reach a root at these parts below it (lexical).
+
+    Unreached only when the first part is in :data:`WALK_SKIPPED` and the
+    root neither holds nor lies in one of :data:`DIRECT_READS`.
+    """
+    if not parts or parts[0] not in WALK_SKIPPED:
+        return True
+    return any(parts[: len(read)] == read or read[: len(parts)] == parts for read in DIRECT_READS)
+
+
 def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
-    """Indexes of rows whose lexical root equals or contains another row's lexical root.
+    """Indexes of rows whose lexical root equals or contains a root its own reads reach.
 
     Purely lexical (no filesystem access). Only a row whose root has no
     absolute part or ``..`` segment can contain another; every other row's
     normalised lexical root counts as a contained root, whatever its status.
+    A contained root below a directory the walks skip (:func:`_reached`) is
+    never read through the containing row, so it does not count.
     """
     lexical = [_row_root(project, row, i) for i, row in enumerate(rows)]
     out: set[int] = set()
@@ -403,7 +435,10 @@ def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
         if join_under(project, *_row_parts(row, i)) is None:
             continue
         mine = lexical[i]
-        if any(j != i and _lexically_under(other, mine) for j, other in enumerate(lexical)):
+        if any(
+            j != i and _lexically_under(other, mine) and _reached(other.relative_to(mine).parts)
+            for j, other in enumerate(lexical)
+        ):
             out.add(i)
     return out
 

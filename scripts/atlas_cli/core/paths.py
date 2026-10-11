@@ -100,10 +100,33 @@ def _contained(root: Path, path: Path) -> bool:
         return False
 
 
+def walk_tops(root: Path, staging_dir: str = DEFAULT_STAGING) -> list[Path]:
+    """Top-level entries of ``root`` a walk enters: skipped directories are dropped by name, unlisted."""
+    skip = set(SKIP_DIRS) | {staging_dir}
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    return [root / name for name in names if name not in skip]
+
+
 def iter_concept_md(root: Path, staging_dir: str = DEFAULT_STAGING):
-    """Yield concept markdown files (skip staging, templates, mesh, index artifacts)."""
+    """Yield concept markdown files (skip staging, templates, mesh, index artifacts).
+
+    Skipped top-level directories are pruned by name, so nothing inside them
+    is listed or stat'ed. Symlinked directories are not followed.
+    """
     root_res = root.resolve()
-    for path in sorted(root.rglob("*.md")):
+    skip = set(SKIP_DIRS) | {staging_dir}
+    found: list[Path] = []
+    top = True
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if top:
+            dirnames[:] = [d for d in dirnames if d not in skip]
+            top = False
+        here = Path(dirpath)
+        found.extend(here / name for name in filenames if name.endswith(".md"))
+    for path in sorted(found):
         if not path.is_file():
             continue
         if not _contained(root_res, path):

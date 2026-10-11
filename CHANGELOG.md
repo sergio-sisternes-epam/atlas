@@ -55,9 +55,14 @@
   `outside_project`, and a row id with an empty host (such as `/acme/repo`)
   is `invalid` with reason `invalid_atlas_id`. A row whose root equals or
   contains another row's root is `invalid` with reason `overlapping_root`
-  (decided lexically, before any file access); the contained row keeps its
-  status. Nothing under it is read, and links into it stay
-  unresolved as `outside_mesh`. The module names pages
+  (decided lexically, before any file access) when its own walks reach that
+  root; the contained row keeps its status. Nothing under it is read, and
+  links into it stay unresolved as `outside_mesh`. A root below a directory
+  every walk skips (`.atlas`, `.atlas-index`, `templates`, `mesh`, `schema.d`
+  or `.git`, but not `staging`), outside the index directories read by name,
+  does not count, so a store at the project root stays `ok` beside stores
+  under `.atlas/<host>/<org>/<repo>/`; the grep walk now prunes those
+  directories instead of listing them. The module names pages
   `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
   non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
   builds an in-memory, structure-only view of nodes and edges. Its strict

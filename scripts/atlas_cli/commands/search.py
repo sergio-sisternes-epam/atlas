@@ -17,7 +17,7 @@ from ..core import mesh_recall, recall_index
 from ..core import graph as graph_core
 from ..core.driver_overlay import DriverError, get_driver
 from ..core.drivers import fts5 as fts5_driver
-from ..core.paths import RESERVED, iter_concept_md, rel, store_root
+from ..core.paths import RESERVED, iter_concept_md, rel, store_root, walk_tops
 from ..core.projection import ProjectedPage, ProjectionError, project_store
 from ..core.recall import run_recall
 from ..core.engine_preference import (
@@ -191,7 +191,8 @@ def _grep_search(
     if prefix is not None:
         paths = [p for p in paths if _under_prefix(p, prefix)]
 
-    use_rg = shutil.which("rg") is not None and len(tokens) == 1
+    rg_targets = [str(p) for p in walk_tops(root, staging_dir)]
+    use_rg = shutil.which("rg") is not None and len(tokens) == 1 and bool(rg_targets)
     if use_rg:
         try:
             proc = subprocess.run(
@@ -204,7 +205,7 @@ def _grep_search(
                     "--glob",
                     f"!{staging_dir}/**",
                     tokens[0],
-                    str(root),
+                    *rg_targets,
                 ],
                 capture_output=True,
                 text=True,
