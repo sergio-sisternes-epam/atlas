@@ -119,6 +119,14 @@ class StatusGuard:
         def wrapped(*args: object, **kwargs: object) -> object:
             target = args[0] if args else kwargs.get("path", kwargs.get("file"))
             text = guard._text(target)
+            # Classification lstats an in-project non-ok root and does not follow it.
+            if (
+                name == "lstat"
+                and text is not None
+                and guard._inside_project(text)
+                and any(text == root for forms in guard.forbidden for root in forms)
+            ):
+                return original(*args, **kwargs)
             if text is not None and (
                 guard._forbidden(text) or (not guard._inside_project(text) and not guard._allowed_outside(text))
             ):

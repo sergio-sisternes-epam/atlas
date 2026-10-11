@@ -78,8 +78,10 @@ class AccessGuard:
     """Record and refuse filesystem calls under non-ok roots.
 
     An unmounted root may be stat-ed (and its contract filenames stat-ed) so
-    status can stay ``unmounted``. Nothing is opened or listed, and an
-    excluded or invalid root is not touched at all.
+    status can stay ``unmounted``. Nothing is opened or listed. An excluded
+    or invalid root is not opened, listed or followed. Classification may
+    ``lstat`` that root itself, and only that root, to decide
+    ``symlinked_root`` without following the link.
     """
 
     def __init__(self, unread: list[Path], classify: list[Path]) -> None:
@@ -112,6 +114,13 @@ class AccessGuard:
             return "classify"
         return None
 
+    def _exact(self, path: object, groups: list[frozenset[str]]) -> bool:
+        try:
+            text = os.path.normpath(os.path.abspath(os.fsdecode(os.fspath(path))))
+        except (TypeError, ValueError):
+            return False
+        return any(text == root for forms in groups for root in forms)
+
     def _allowed(self, name: str, path: object) -> bool:
         if name not in _STAT:
             return False
@@ -133,6 +142,8 @@ class AccessGuard:
         def wrapped(*args: object, **kwargs: object) -> object:
             target = args[0] if args else kwargs.get("path")
             kind = guard._kind(target)
+            if name == "lstat" and kind == "unread" and guard._exact(target, guard.unread):
+                return original(*args, **kwargs)
             if kind == "unread" or (kind == "classify" and not guard._allowed(name, target)):
                 guard.hits.append(f"{name}({target})")
                 raise PermissionError(f"non-ok root touched: {name} {target}")

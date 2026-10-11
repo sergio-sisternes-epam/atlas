@@ -75,9 +75,14 @@ def mesh_walks():
 
 
 def is_symlink_entry(path: Path) -> bool:
-    """``lstat`` symlink check. Never follows. False when the path cannot be stat-ed."""
+    """``lstat`` symlink check. Never follows. False when the path cannot be stat-ed.
+
+    Uses ``os.lstat`` directly. ``Path.is_symlink`` reaches ``os.stat`` on
+    Python 3.13, which is a following stat to a caller that cannot see
+    ``follow_symlinks=False``.
+    """
     try:
-        return Path(path).is_symlink()
+        return stat.S_ISLNK(os.lstat(path).st_mode)
     except OSError:
         return False
 

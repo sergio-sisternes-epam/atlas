@@ -2,8 +2,10 @@
 """Copilot review CR1 for packet MB (native mesh graph).
 
 1. ``atlas index build --mesh --all`` builds only ``ok`` members. Excluded,
-   ``invalid`` (absolute, ``..`` or symlink escape) and unmounted rows are
-   reported as skipped, and their roots are never resolved or built.
+   ``invalid`` (absolute or ``..`` is ``outside_project``; an in-project
+   symlink component is ``symlinked_root``, even when the target is outside
+   or the row is ``mesh_member: false``) and unmounted rows are reported as
+   skipped, and their roots are never resolved or built.
 2. ``graph export --scope mesh`` refuses an ``--out`` that reaches an excluded
    or ``invalid`` member through a symlinked root (or a link into one),
    without resolving that root.
@@ -100,8 +102,10 @@ def run_build_all(tmp: Path) -> None:
         s = stores.get(sid) or {}
         check(f"all-skipped-{status}-{sid.rsplit('/', 1)[-1]}", s.get("status") == "skipped" and s.get("member_status") == status, s)
         check(f"all-no-root-{sid.rsplit('/', 1)[-1]}", "root" not in s and "generation" not in s, s)
-    for sid in (EXT, ABS, LINKED):
+    for sid in (EXT, ABS):
         check(f"all-invalid-reason-{sid.rsplit('/', 1)[-1]}", (stores.get(sid) or {}).get("reason") == "outside_project", stores.get(sid))
+    # An in-project symlink is not resolved, so it is symlinked_root rather than outside_project.
+    check("all-invalid-reason-linked", (stores.get(LINKED) or {}).get("reason") == "symlinked_root", stores.get(LINKED))
     for label, root in (("ext", base / "ext"), ("abs", outside), ("linked", linked), ("secret", project / "atlas" / "secret")):
         check(f"all-nothing-written-{label}", not (root / ".atlas").exists(), sorted(p.name for p in root.iterdir()))
     leaked = sorted(p.name for p in (project / ".atlas" / "indexes").rglob("*") if SECRET.rsplit("/", 1)[-1] in p.name or "ext" == p.name)
@@ -124,7 +128,11 @@ def run_export_symlink(tmp: Path) -> None:
     (base / "link-to-secret").symlink_to(secret, target_is_directory=True)
     mesh = discover(project)
     statuses = {m.atlas_id: (m.status, m.reason) for m in mesh_scope.members(mesh)}
-    check("export-fixture", statuses.get(SECRET) == ("excluded", None) and statuses.get(EXT) == ("invalid", "outside_project"), statuses)
+    check(
+        "export-fixture",
+        statuses.get(SECRET) == ("invalid", "symlinked_root") and statuses.get(EXT) == ("invalid", "symlinked_root"),
+        statuses,
+    )
 
     resolved: list[str] = []
     original_resolve = Path.resolve
