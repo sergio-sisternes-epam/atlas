@@ -1673,11 +1673,30 @@ def _historical_contract(repo: Path, store: Path, sha: str) -> dict:
     return data
 
 
+def _proven_staging_name(schema: dict, sha: str) -> str:
+    """Return the staging directory recorded at ``sha``, or fail closed."""
+    structure = schema.get("structure") or {}
+    if "staging_dir" not in structure or structure.get("staging_dir") is None:
+        return "staging"
+    name = structure.get("staging_dir")
+    if (
+        not isinstance(name, str)
+        or not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+        or any(ch.isspace() for ch in name)
+    ):
+        raise RefError(f"refusing rev {sha}; historical staging configuration cannot be proven")
+    return name
+
+
 def _historical_managed(repo: Path, store: Path, sha: str, rel: str) -> str | None:
     """Refuse a path that was managed at ``sha``, not only in the worktree schema."""
     schema = _historical_contract(repo, store, sha)
     top = rel.split("/", 1)[0]
-    historical = staging_dir_name(schema)
+    historical = _proven_staging_name(schema, sha)
     if top in SKIP_TOP or top == historical or top == "staging":
         return top
     return None

@@ -1713,6 +1713,99 @@ def main() -> int:
                     )
                 else:
                     print("[PASS] show and prune fail closed when historical staging cannot be proven")
+            malformed = tmp / "malformed-staging"
+            malformed_init = run(["init", "--root", str(malformed), "--json"])
+            if malformed_init.returncode != 0:
+                failures.append(f"malformed staging store init failed: {malformed_init.stdout}")
+            else:
+                git(malformed, ["init", "-b", "main"])
+                malformed_contract = contract_file(malformed)
+                malformed_schema = json.loads(malformed_contract.read_text(encoding="utf-8"))
+                malformed_schema.setdefault("structure", {})["staging_dir"] = ["inbox"]
+                malformed_contract.write_text(json.dumps(malformed_schema), encoding="utf-8")
+                (malformed / "inbox").mkdir()
+                listed = malformed / "inbox" / "secret.md"
+                listed.write_text(
+                    page("Secret", "relates_to: []\n", "A listed staging_dir must not answer."),
+                    encoding="utf-8",
+                )
+                (malformed / "note.md").write_text(
+                    page("Note", "relates_to: []\n", "An unproven staging name blocks every path."),
+                    encoding="utf-8",
+                )
+                (malformed / "summary.md").write_text(
+                    page(
+                        "Summary",
+                        "relates_to: []\n",
+                        "Summary stays at the tip and carries enough prose to pass compile.",
+                    ),
+                    encoding="utf-8",
+                )
+                git(malformed, ["add", malformed_contract.name, "inbox", "note.md", "summary.md"])
+                git(malformed, ["commit", "-m", "staging_dir is a list"])
+                listed_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=malformed,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                malformed_schema["structure"]["staging_dir"] = "inbox/nested"
+                malformed_contract.write_text(json.dumps(malformed_schema), encoding="utf-8")
+                git(malformed, ["add", malformed_contract.name])
+                git(malformed, ["commit", "-m", "staging_dir is not one component"])
+                nested_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=malformed,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                listed_show = run(
+                    ["ref", "show", "inbox/secret.md", "--ref", listed_sha, "--root", str(malformed), "--json"]
+                )
+                listed_note = run(
+                    ["ref", "show", "note.md", "--ref", listed_sha, "--root", str(malformed), "--json"]
+                )
+                listed_prune = run(
+                    [
+                        "ref",
+                        "prune",
+                        "--summary",
+                        "summary.md",
+                        "--drop",
+                        "inbox/secret.md",
+                        "--ref",
+                        listed_sha,
+                        "--kind",
+                        "derived_from",
+                        "--root",
+                        str(malformed),
+                        "--json",
+                    ]
+                )
+                nested_show = run(
+                    ["ref", "show", "inbox/secret.md", "--ref", nested_sha, "--root", str(malformed), "--json"]
+                )
+                kept = listed.read_text(encoding="utf-8")
+                if (
+                    listed_show.returncode == 0
+                    or "cannot be proven" not in listed_show.stdout
+                    or listed_note.returncode == 0
+                    or "cannot be proven" not in listed_note.stdout
+                    or listed_prune.returncode == 0
+                    or "cannot be proven" not in listed_prune.stdout
+                    or "A listed staging_dir must not answer." not in kept
+                    or nested_show.returncode == 0
+                    or "cannot be proven" not in nested_show.stdout
+                ):
+                    failures.append(
+                        "malformed historical staging_dir should fail closed: "
+                        f"list={listed_show.stdout} note={listed_note.stdout} "
+                        f"prune={listed_prune.stdout} nested={nested_show.stdout}"
+                    )
+                else:
+                    print("[PASS] show and prune refuse a staging_dir that is not one directory name")
             not_store = tmp / "not-a-store"
             not_store.mkdir()
             missing_store = run(
