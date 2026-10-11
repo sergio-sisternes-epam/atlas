@@ -9,16 +9,21 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   :class:`MeshScopeError`.
 - Members (M2): the rows in file order. A row with ``mesh_member: false`` is
   ``excluded`` and nothing inside its root is ever read (no stat, open,
-  listdir or projection). A row whose root is not a directory holding a
-  contract file is ``unmounted``; it is never mounted, and no git or network
-  call is made for it.
+  listdir or projection). A row whose root is not contained in the project
+  (an absolute ``path`` or ``subpath``, a ``..`` segment, or a symlink that
+  resolves outside the project) is ``invalid`` with reason
+  ``outside_project``; nothing under it is read either, and a link into it
+  is unresolved with reason ``outside_mesh``. A row whose root is not a
+  directory holding a contract file is ``unmounted``; it is never mounted,
+  and no git or network call is made for it.
 - Node ids (M3): ``atlas://<atlas-id>/<store-relative path>``.
 - Privacy (M7, M20): ``sensitivity: restricted`` pages are dropped from the
   view and remembered only as a set of withheld paths. Node records carry
   structure only (M6): no title, description, body, tags or other text.
 - Resolver (M4, M21): every ``relates_to`` target of every included page is
   classified exactly once, in this order: local edge; canonical
-  ``atlas://<atlas-id>/<path>[#fragment]``; mesh-relative path; otherwise
+  ``atlas://<atlas-id>/<path>[#fragment]`` (the fragment is always dropped,
+  so one page always gets one ``to``); mesh-relative path; otherwise
   unresolved with one reason. The first segment after ``atlas://`` is a
   host when it is host-shaped (a dot, a ``:port``, an IP literal or
   ``localhost``) or is the host of a mesh row id (:func:`is_canonical_host`);
@@ -42,7 +47,7 @@ from typing import Any
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import has_contract_file
+from .paths import contained_root, has_contract_file
 from .projection import ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
@@ -51,6 +56,9 @@ RESOLVER_VERSION = 1
 STATUS_OK = "ok"
 STATUS_UNMOUNTED = "unmounted"
 STATUS_EXCLUDED = "excluded"
+STATUS_INVALID = "invalid"
+
+MEMBER_OUTSIDE_PROJECT = "outside_project"
 
 RESOLUTION_LOCAL = "local"
 RESOLUTION_ATLAS_URI = "atlas_uri"
@@ -222,11 +230,13 @@ def _member_root_match(start: Path) -> Path | None:
         for i, row in enumerate(doc.get("stores") or []):
             if not isinstance(row, dict) or not meshfile.is_mesh_member(row):
                 continue
+            candidate = _contained_row_root(directory, row, i)
+            if candidate is None:
+                continue
             try:
-                candidate = _row_root(directory, row, i)
                 if candidate.resolve() == start:
                     return directory
-            except (MeshScopeError, OSError, RuntimeError):
+            except (OSError, RuntimeError):
                 continue
     return None
 
@@ -242,22 +252,35 @@ class Member:
     subpath: str
     root: Path
     status: str
+    reason: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"atlas_id": self.atlas_id, "path": self.mount, "subpath": self.subpath, "status": self.status}
+        out = {"atlas_id": self.atlas_id, "path": self.mount, "subpath": self.subpath, "status": self.status}
+        if self.reason is not None:
+            out["reason"] = self.reason
+        return out
+
+
+def _row_parts(row: dict[str, Any], index: int) -> tuple[str, str]:
+    """``(path, subpath)`` as authored; a row with no ``path`` uses ``.atlas/<atlas-id>``."""
+    sid = str(row.get("id") or f"stores[{index}]")
+    raw = row.get("path")
+    mount = raw if isinstance(raw, str) and raw.strip() else PurePosixPath(".atlas", *sid.split("/")).as_posix()
+    return mount, str(row.get("subpath") or "")
 
 
 def _row_root(project: Path, row: dict[str, Any], index: int) -> Path:
-    """Lexical member root ``project / path / subpath``; never touches the filesystem."""
-    from ..commands.resolve import _join_under, default_mount
+    """Lexical member root ``project / path / subpath``; never touches the filesystem.
 
-    sid = str(row.get("id") or f"stores[{index}]")
-    raw = row.get("path")
-    mount = project / raw if isinstance(raw, str) and raw.strip() else default_mount(project, sid)
-    root = _join_under(mount, str(row.get("subpath") or ""))
-    if root is None:
-        raise MeshScopeError(f"store {sid}: subpath {row.get('subpath')!r} must stay under its mount")
-    return Path(os.path.normpath(root))
+    Not a containment check: an escaping row still gets a lexical root here.
+    """
+    mount, subpath = _row_parts(row, index)
+    return Path(os.path.normpath(project.joinpath(mount, subpath)))
+
+
+def _contained_row_root(project: Path, row: dict[str, Any], index: int) -> Path | None:
+    """The member root when it stays inside ``project`` (no absolute part, ``..`` or escaping symlink)."""
+    return contained_root(project, *_row_parts(row, index))
 
 
 def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
@@ -268,18 +291,26 @@ def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
 
 
 def members(mesh: Mesh) -> list[Member]:
-    """Every row in file order with its status; an excluded row's root is never touched."""
+    """Every row in file order with its status.
+
+    Neither an excluded root nor a root that escapes the project is ever
+    touched: containment is checked before any stat of the root.
+    """
     out: list[Member] = []
     for i, row in enumerate(mesh.doc.get("stores") or []):
         sid = str(row["id"])
         root = _row_root(mesh.project, row, i)
+        reason = None
         if not meshfile.is_mesh_member(row):
             status = STATUS_EXCLUDED
+        elif _contained_row_root(mesh.project, row, i) is None:
+            status, reason = STATUS_INVALID, MEMBER_OUTSIDE_PROJECT
         elif root.is_dir() and has_contract_file(root):
             status = STATUS_OK
         else:
             status = STATUS_UNMOUNTED
-        out.append(Member(i, sid, _mount_label(mesh.project, row, sid), str(row.get("subpath") or ""), root, status))
+        label = _mount_label(mesh.project, row, sid)
+        out.append(Member(i, sid, label, str(row.get("subpath") or ""), root, status, reason))
     return out
 
 
@@ -396,6 +427,8 @@ class Resolver:
     def _lookup(self, source: Member, target: Member, path: str, resolution: str, raw: str) -> dict[str, Any]:
         if target.status == STATUS_EXCLUDED:
             return self._edge(source, target, None, resolution, REASON_EXCLUDED, raw=raw)
+        if target.status == STATUS_INVALID:
+            return self._edge(source, target, None, resolution, REASON_OUTSIDE, raw=raw)
         if target.status != STATUS_OK:
             return self._edge(source, target, None, resolution, REASON_UNMOUNTED, raw=raw)
         pages = self.loaded[target.index]
@@ -414,15 +447,17 @@ class Resolver:
             parsed = parse_pointer(text)
         except IdentityError:
             return self._edge(source, None, None, RESOLUTION_ATLAS_URI, REASON_NONCANONICAL, raw=text)
+        # Canonical targets drop the fragment once, so every branch reports the same ``to``.
+        bare = text.split("#", 1)[0]
         path = _clean_in_store(parsed.in_store)
         target = self.by_key.get(meshfile.id_key(parsed.atlas_id))
         if target is None:
-            return self._edge(source, None, None, RESOLUTION_ATLAS_URI, REASON_UNMOUNTED, raw=text)
+            return self._edge(source, None, None, RESOLUTION_ATLAS_URI, REASON_UNMOUNTED, raw=bare)
         if not path:
-            return self._edge(source, target, None, RESOLUTION_ATLAS_URI, REASON_MISSING, raw=text)
+            return self._edge(source, target, None, RESOLUTION_ATLAS_URI, REASON_MISSING, raw=bare)
         if path == ".." or path.startswith("../"):
-            return self._edge(source, target, None, RESOLUTION_ATLAS_URI, REASON_OUTSIDE, raw=text)
-        return self._lookup(source, target, path, RESOLUTION_ATLAS_URI, text)
+            return self._edge(source, target, None, RESOLUTION_ATLAS_URI, REASON_OUTSIDE, raw=bare)
+        return self._lookup(source, target, path, RESOLUTION_ATLAS_URI, bare)
 
     def _short_form(self, source: Member, text: str, name: str, body: str) -> dict[str, Any]:
         """``atlas://<name>/<path>``: never an alias; suggest only on a unique repo-name match."""

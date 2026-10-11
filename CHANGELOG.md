@@ -27,8 +27,12 @@
   their origin or `local/` id.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
-  as `ok`, `unmounted` or `excluded` (an excluded store is never read, and
-  nothing is mounted, fetched or run through git), names pages
+  as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
+  read, and nothing is mounted, fetched or run through git). A row whose
+  `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
+  that resolves outside the project is `invalid` with reason
+  `outside_project`. Nothing under it is read, and links into it stay
+  unresolved as `outside_mesh`. The module names pages
   `atlas://<atlas-id>/<path>`, withholds `sensitivity: restricted` pages and
   builds an in-memory, structure-only view of nodes and edges. Its strict
   cross-store resolver classifies every `relates_to` target exactly once as
