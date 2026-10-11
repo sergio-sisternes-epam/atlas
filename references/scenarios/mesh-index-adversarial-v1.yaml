@@ -11,17 +11,17 @@ smokes:
     source: "Probe 2026-10-10: plain RRF placed cartograph any-word hits at ranks 2, 4, 6 for 'graph export nanograph'; jammi-ai rrf.rs disjoint-list tie test"
     expect: "A member's any-word retry hits never outrank another member's all-words hits."
     packet: MC
-    check: pending packet MC
+    check: "scripts/test_mesh_recall.py probe-every-tier-1-before-tier-2, probe-alpha-is-tier-1, probe-beta-is-tier-2 and probe-plain-rrf-would-interleave; scripts/test_mesh_rrf.py k*-tier-beats-score and k*-tier-1-before-tier-2"
   - id: no-shared-text-index
     source: "CWE-612 Improper Authorization of Index Containing Sensitive Information; Elastic: cross-index scoring needs one index"
     expect: "No file under .atlas/indexes/*/_mesh/ contains a canary from any title, description or body."
     packet: MA
-    check: "scripts/test_mesh_members.py canary-absent and no-text-fields (MA: the in-memory build_view carries no canary); the _mesh index files are pending packet MB"
+    check: "scripts/test_mesh_members.py canary-absent and no-text-fields (MA: the in-memory build_view carries no canary); MC: scripts/test_mesh_recall.py no-mesh-dir, only-per-store-index-files and no-canary-outside-own-index after five federated queries); the _mesh index files are pending packet MB"
   - id: restricted-prefilter
     source: "eworks.cloud: post-filtering leaks counts; NIST SP 800-53 AC-21(2) via Daydream"
     expect: "Restricted pages are absent from federated hits and from members[].hits counts."
     packet: MC
-    check: pending packet MC
+    check: "scripts/test_mesh_recall.py restricted-absent-from-hits, alpha-count-excludes-restricted, beta-count-excludes-restricted, grep-restricted-absent and restricted-and-excluded-canaries-never-output (restricted-ranks-first-in-store-scope proves the page would rank first)"
   - id: excluded-member-unread
     source: "Brief 2026-10-10: honour per-store exclusion"
     expect: "With mesh_member false, no file of that store is opened in mesh scope (open() monkeypatch)."
@@ -55,8 +55,8 @@ smokes:
   - id: benchmark-goodhart
     source: "Goodhart's law; BCAS (arXiv 2603.08877) gains plateau near three searches"
     expect: "Promotion criteria are committed before the benchmark runs and use a fixed tool and token budget."
-    packet: MC
-    check: pending packet MC
+    packet: MF
+    check: pending packet MF
   - id: id-collision
     source: "PR #61 id segment rule rejects a leading underscore"
     expect: "No mounted store id can map to .atlas/indexes/<type>/_mesh/."

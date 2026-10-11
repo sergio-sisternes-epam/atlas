@@ -2,13 +2,15 @@
 """Review R4: invalid ids are invalid members; members load through their mesh location.
 
 1. Every id form ``atlas-mesh.json`` validation accepts is checked against
-   mesh scope. A row id without a non-empty host (``/acme/repo``,
-   ``:8080/acme/repo``) is an ``invalid`` member with reason
-   ``invalid_atlas_id``: decided before any filesystem access of its root,
-   never read or projected, and a link into it is unresolved
-   (``outside_mesh``). Invariant: every ``ok`` member's id round-trips
-   through ``node_id`` / ``parse_node_id`` and a link to its page resolves as
-   ``atlas_uri``. Global validation is unchanged.
+   mesh scope. A row id that ``index_location.safe_id_path`` rejects is an
+   ``invalid`` member with reason ``invalid_atlas_id``: an empty host
+   (``/acme/repo``, ``:8080/acme/repo``), a host with a port
+   (``git.example.com:8443/acme/repo``) or an IPv6 literal
+   (``[::1]/acme/repo``, ``[fe80::1]:8080/acme/repo``). Decided before any
+   filesystem access of its root, never read or projected, and a link into
+   it is unresolved (``outside_mesh``). Invariant: every ``ok`` member's id
+   round-trips through ``node_id`` / ``parse_node_id`` and a link to its
+   page resolves as ``atlas_uri``. Global validation is unchanged.
 2. A ``subpath`` row and a pathless row (which ``index_location.mesh_match``
    cannot match) load through their mesh location: their own
    ``.atlas/indexes/fts5/<row id>/`` index is used, no ``local/...`` id is
@@ -41,10 +43,10 @@ SRC = "github.com/acme/src"
 ID_FORMS: list[tuple[str, str, bool]] = [
     ("dotted-host", "github.com/acme/repo", True),
     ("localhost", "localhost/acme/repo", True),
-    ("host-port", "git.example.com:8443/acme/repo", True),
+    ("host-port", "git.example.com:8443/acme/repo", False),
     ("ipv4", "10.0.0.5/acme/repo", True),
-    ("ipv6", "[::1]/acme/repo", True),
-    ("ipv6-port", "[fe80::1]:8080/acme/repo", True),
+    ("ipv6", "[::1]/acme/repo", False),
+    ("ipv6-port", "[fe80::1]:8080/acme/repo", False),
     ("intranet-host", "intranet/acme/repo", True),
     ("empty-host", "/acme/repo", False),
     ("empty-host-port", ":8080/acme/repo", False),

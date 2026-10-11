@@ -2,10 +2,12 @@
 """Review R2: mesh rows are contained to the project, and canonical
 ``atlas://`` targets drop their fragment on every branch.
 
-1. A row whose ``path`` or ``subpath`` is absolute, has a ``..`` segment or
-   crosses a symlink that resolves outside the project is ``invalid`` with
-   reason ``outside_project``. Nothing under the outside target is stat-ed,
-   opened or projected, and links into it are unresolved ``outside_mesh``.
+1. A row whose ``path`` or ``subpath`` is absolute or has a ``..`` segment is
+   ``invalid`` with reason ``outside_project``. A row whose root is a symlink,
+   or has a symlink component inside the project, is ``invalid`` with reason
+   ``symlinked_root`` and is not resolved. Nothing under an outside target is
+   stat-ed, opened or projected, and links into an invalid row are unresolved
+   ``outside_mesh``.
 2. ``atlas://<id>/<path>#h`` reports ``to`` without ``#h`` whether the id is
    unknown, unmounted, excluded, invalid or a member with a missing page.
 
@@ -176,7 +178,8 @@ def main() -> int:
             got, hits, error = guarded(targets, lambda: mesh_scope.members(mesh))
             check(f"members-untouched {sid}", not hits and not error, f"{hits[:3]} {error}")
             status = {m.atlas_id: (m.status, m.reason) for m in got or []}
-            check(f"member-invalid {sid}", status.get(sid) == ("invalid", "outside_project"), str(status.get(sid)))
+            expected = ("invalid", "symlinked_root" if sid in (LINK, LINKMID) else "outside_project")
+            check(f"member-invalid {sid}", status.get(sid) == expected, str(status.get(sid)))
             # Index location (index_location.mesh_match, outside mesh scope) realpath-resolves each
             # row path while locating the valid member's index; for the mid-path link that lstats
             # the literal row path only. Nothing under it is stat-ed, opened or projected.
@@ -185,7 +188,7 @@ def main() -> int:
             check(f"view-untouched {sid}", not hits and not error, f"{hits[:3]} {error}")
             view = view or {}
             row = next((m for m in view.get("members", []) if m["atlas_id"] == sid), {})
-            check(f"view-member-reason {sid}", row.get("status") == "invalid" and row.get("reason") == "outside_project", str(row))
+            check(f"view-member-reason {sid}", row.get("status") == "invalid" and row.get("reason") == expected[1], str(row))
             check(f"no-outside-nodes {sid}", [n["id"] for n in view.get("nodes", [])] == [src_node])
             link = next((e for e in view.get("edges", []) if e["to"] == f"atlas://{sid}/x.md"), {})
             check(f"link-outside-mesh {sid}", link.get("reason") == "outside_mesh" and link.get("resolved") is False, str(link))
@@ -200,14 +203,15 @@ def main() -> int:
         statuses = {m["atlas_id"]: (m["status"], m.get("reason")) for m in (view or {}).get("members", [])}
         check(
             "all-rows-statuses",
-            all(statuses.get(sid) == ("invalid", "outside_project") for sid in ESCAPING)
-            and statuses.get(INLINK) == ("ok", None)
+            all(statuses.get(sid) == ("invalid", "outside_project") for sid in (ABS, DOTDOT, SUB))
+            and all(statuses.get(sid) == ("invalid", "symlinked_root") for sid in (LINK, LINKMID, INLINK))
             and statuses.get(SRC) == ("ok", None)
             and statuses.get(GONE) == ("unmounted", None)
             and statuses.get(SECRET) == ("excluded", None),
             json.dumps(statuses),
         )
-        check("inside-symlink-resolves", any(e["to"] == f"atlas://{INLINK}/x.md" and e["resolved"] for e in (view or {}).get("edges", [])))
+        inlink = next((e for e in (view or {}).get("edges", []) if e.get("to") == f"atlas://{INLINK}/x.md"), {})
+        check("inside-symlink-unresolved", inlink.get("reason") == "outside_mesh" and inlink.get("resolved") is False, str(inlink))
         check("canary-absent", CANARY not in json.dumps(view))
         index_location.clear_cache()
         check("discover-inside-store", mesh_scope.discover(project / "atlas" / "src").project == project.resolve())

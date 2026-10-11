@@ -65,15 +65,56 @@
   a mesh row nor a store, so `atlas recall status` on such a directory no
   longer shows a synthetic index path either; real standalone stores keep
   their origin or `local/` id.
+- Federated recall: `atlas recall run "<q>" --scope mesh [--rrf-k N]` searches
+  every included member of the project's `atlas-mesh.json` in process, each
+  with its own engine, profile, exclusions and per-store index (no shared
+  text index is built). `sensitivity: restricted` pages are removed from each
+  member's eligible set before ranking, so neither hits nor `members[].hits`
+  counts reveal them; excluded and `invalid` members (a row outside the
+  project or with an invalid atlas id) are never read and are reported with
+  their `reason`, and unmounted ones are reported, never mounted. Each member
+  is searched through its own mesh index location (project and row id), so a
+  subpath row uses `.atlas/indexes/<type>/<row id>/`, and its own mesh row,
+  so a `subpath` or pathless row honours its row and project `recall.engine`. Hits are fused by tier (all-words before any-word
+  retry), then reciprocal rank fusion `sum(1/(k + rank))`, then mesh row
+  order and path, and carry `atlas_id`, `uri` (a node id whose path is
+  percent-encoded as in mesh core, so a path with `#` round-trips), `tier`, `rrf_score` and
+  `engine_used`. Precedence: `--scope` > `recall.scope` > `store`, and
+  `--rrf-k` > `recall.rrf_k` > 60, with the sources reported. A failing member
+  is reported as `error` with `complete: false` and exit 1; `--limit 0`
+  returns every hit from every member, whatever its engine. `--profile` or
+  `--allow-partial` with mesh scope, a negative `--limit` with mesh scope,
+  `--rrf-k` in store scope, a bad k or no mesh exits 2. A listed excluded,
+  invalid-id, subpath or pathless root is still discovered, without reading
+  that store, so `recall.scope: mesh` federates and reports the member
+  excluded or invalid (`invalid_atlas_id`) instead of falling back to store
+  recall. Explicit `--scope store` still searches
+  that store alone: exclusion applies only in mesh scope, and the flag
+  overrides the project setting. Mesh scope never follows a symlink: ripgrep is not passed `--follow` or `-L` and is not given a symlink path, and page walks (grep, FTS5, nanograph and the mesh view) skip symlinked files and directories. A member whose root, or any in-project component of that root, is a symlink is `invalid` with reason `symlinked_root` and is not read. Schema and overlay loading honours the same rule, decided with `lstat` before any open or following `stat`: a symlinked `schema.d` or overlay file is skipped with a warning and is not opened; a symlinked `SCHEMA.json` makes the member `invalid` / `symlinked_root`; a symlinked `CONTRACT.json`, index pointer, index database, nanograph or tgrep index file or page (`log.md` included) is skipped with a warning. A `path:` filter that crosses a symlink is not followed and yields no hits for that member. `atlas-mesh.json` is project-level, read once at discovery and not re-read for a pinned member; a symlink listing is not followed and discovery fails closed. Frontmatter does not open includes. `staging/` and `templates/` stay pruned by name. Store scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
   as `ok`, `unmounted`, `excluded` or `invalid` (an excluded store is never
   read, and nothing is mounted, fetched or run through git). A row whose
-  `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
-  that resolves outside the project is `invalid` with reason
-  `outside_project`, and a row id with an empty host (such as `/acme/repo`)
-  is `invalid` with reason `invalid_atlas_id`. Nothing under it is read, and links into it stay
-  unresolved as `outside_mesh`. The module names pages
+  `path` or `subpath` is absolute or has a `..` segment is `invalid` with
+  reason `outside_project`. A row whose root stays inside the project but is
+  a symlink, or has a symlink component inside the project, is `invalid`
+  with reason `symlinked_root` (decided with `lstat`, without resolving the
+  link or reading its target). A row id that is not a filesystem-safe
+  index path (the same rule as the per-store index directory) is `invalid`
+  with reason `invalid_atlas_id`: an empty host such as `/acme/repo`, a
+  host with a port such as `git.example.com:8443/acme/repo`, or an IPv6
+  literal such as `[::1]/acme/repo`. `atlas-mesh.json` validation is
+  unchanged and still accepts those ids. A row whose
+  lexical root equals or contains another row's lexical root is `invalid`
+  with reason `overlapping_root` when its own walks reach that root; the
+  contained row keeps its status. Nothing under an
+  overlapping root is read, and links into it stay unresolved as
+  `outside_mesh`. A root below a directory every walk skips (`.atlas`,
+  `.atlas-index`, `templates`, `mesh`, `schema.d` or `.git`, but not
+  `staging`), outside the index directories read by name, does not count on
+  the lexical relative path, so a store at the project root
+  stays `ok` beside stores under `.atlas/<host>/<org>/<repo>/`; the grep walk
+  now prunes those directories instead of listing them. The module names pages
   `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
   non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
   builds an in-memory, structure-only view of nodes and edges. Its strict
@@ -91,9 +132,10 @@
   (`store`|`mesh`) and `recall.rrf_k` (integer 1-1000), a top-level `graph`
   block with `scope` (`store`|`mesh`) and `driver` (`native`|`nanograph`),
   and a row-level `mesh_member` (boolean, default true). `scope` or `rrf_k`
-  in a store row's `recall` block is an error that names the row. The keys
-  are validated and kept by `atlas index set|unset` and mount, but have no
-  effect yet. `index_location.mesh_index_dir()` reserves
+  in a store row's `recall` block is an error that names the row. All the
+  keys are validated and kept by `atlas index set|unset` and mount;
+  `recall.scope`, `recall.rrf_k` and `mesh_member` drive federated recall
+  (above), while the `graph` block has no effect yet. `index_location.mesh_index_dir()` reserves
   `.atlas/indexes/<graph|nanograph>/_mesh/`, which no valid atlas id can
   reach. Without the new keys, all existing output is byte-identical.
 - FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)
@@ -114,11 +156,12 @@
   bytes once per command. It also covers the projection inputs: the bytes
   of `SCHEMA.json` / `CONTRACT.json`, the `schema.d/*.json` overlays and a
   `PROJECTION_VERSION`. The overlay list is the one overlay merging reads
-  (receipts excluded), including a symlinked `schema.d` and symlinked
+  (receipts excluded). Store scope includes a symlinked `schema.d` and symlinked
   overlay files, and each input is hashed from the bytes behind any symlink
   (a dangling or unreadable link gets a fixed marker), so editing an
   external overlay or `SCHEMA.json` target makes the index stale; the
-  fingerprint stats the link target too. So a schema-only change (for example SCHEMA 1.0 to
+  fingerprint stats the link target too. Mesh scope skips those symlinks
+  with a warning and does not open or hash the target. So a schema-only change (for example SCHEMA 1.0 to
   2.0, a new relation vocabulary or recall field config) makes the index
   stale and recall, graph and nanograph rebuild with the new parse, while
   files outside the projection inputs do not. The fts5 pointer now records

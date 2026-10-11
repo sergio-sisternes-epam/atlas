@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import recall_index
 from .drivers import fts5 as fts5_driver
@@ -47,10 +47,17 @@ def _effective(root: Path) -> tuple[dict[str, Any] | None, str | None, dict[str,
     return merged, None, merged
 
 
-def _eligible(page: ProjectedPage, filters: dict[str, str], include_exits: bool) -> bool:
+def _eligible(
+    page: ProjectedPage,
+    filters: dict[str, str],
+    include_exits: bool,
+    withhold: Callable[[dict], bool] | None = None,
+) -> bool:
     if page.role == "log":
         return False
     meta = page.meta
+    if withhold is not None and withhold(meta):
+        return False
     if filters.get("type") and str(meta.get("type") or "").strip() != filters["type"]:
         return False
     if filters.get("kva") and str(meta.get("kva") or "").strip() != filters["kva"]:
@@ -83,7 +90,9 @@ def run_recall(
     allow_partial: bool = False,
     include_exits: bool = False,
     limit: int | None = None,
+    withhold: Callable[[dict], bool] | None = None,
 ) -> tuple[dict[str, Any], int]:
+    """``withhold`` (mesh scope): pages whose frontmatter matches are not eligible, before ranking."""
     schema, err, effective = _effective(root)
     if schema is None:
         return {"ok": False, "error": err or "missing schema"}, 2
@@ -155,7 +164,7 @@ def run_recall(
                 extra_warnings += [w for w in fresh.warnings if is_warning(w) and w.get("code")]
 
     pages: list[ProjectedPage] = [
-        p for p in projection_pages if _eligible(p, filters, include_exits)
+        p for p in projection_pages if _eligible(p, filters, include_exits, withhold)
     ]
     if not rest and filters:
         hits = [
@@ -257,7 +266,7 @@ def run_recall(
         hits = scan_driver.search(pages, rest or query, max_hits)
         engine_used = "scan"
 
-    by_id = {p.page_id: p for p in projection_pages}
+    by_id = {p.page_id: p for p in projection_pages if withhold is None or not withhold(p.meta)}
     for hit in hits:
         page = by_id.get(hit["path"])
         if page:

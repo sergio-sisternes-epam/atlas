@@ -4,24 +4,48 @@ Pure library (no CLI surface yet). Later packets persist :func:`build_view`
 as the structure-only mesh graph and use :func:`members` for federated recall.
 
 - Discovery (M2): ``--root`` is a project directory holding
-  ``atlas-mesh.json`` or a store listed by one of its rows
-  (:func:`index_location.mesh_match`). A standalone store raises
-  :class:`MeshScopeError`.
+  ``atlas-mesh.json`` or any listed row root, including an excluded row, a
+  row whose id is not an index path, a ``subpath`` root and a pathless row.
+  :func:`_member_root_match` names the project by a lexical match of every
+  listed row location, whatever the row's id validity, membership or status.
+  Nothing under that root is read. :func:`index_location.mesh_match` still
+  covers a ``path`` row reached through a symlink component, and raises on
+  duplicate store ids. A standalone store raises :class:`MeshScopeError`.
 - Members (M2): the rows in file order. A row with ``mesh_member: false`` is
   ``excluded`` and nothing inside its root is ever read (no stat, open,
   listdir or projection). A row whose root is not contained in the project
-  (an absolute ``path`` or ``subpath``, a ``..`` segment, or a symlink that
-  resolves outside the project) is ``invalid`` with reason
-  ``outside_project``; nothing under it is read either, and a link into it
-  is unresolved with reason ``outside_mesh``. A row whose id is not a
-  canonical ``<host>/<org>/<repo>`` with a non-empty host
-  (:func:`is_member_id`; ``/acme/repo`` passes ``atlas-mesh.json``
-  validation but has no host) is ``invalid`` with reason
-  ``invalid_atlas_id``, decided before any filesystem access; it is treated
-  like an ``outside_project`` row (never read, links into it are
-  ``outside_mesh``). A row whose root is not a directory holding a contract
+  (an absolute ``path`` or ``subpath``, or a ``..`` segment) is ``invalid``
+  with reason ``outside_project``; nothing under it is read either, and a
+  link into it is unresolved with reason ``outside_mesh``. A row whose
+  lexical root stays inside the project but has a symlink component (the
+  root itself, or any parent component) is ``invalid`` with reason
+  ``symlinked_root``, decided with ``lstat`` per component and stopping at
+  the first link, before any contents are read and without resolving the
+  link. It is never read, and a link into it is ``outside_mesh``. A row
+  whose id is not both a canonical ``<host>/<org>/<repo>`` with a non-empty
+  host and an index path :func:`index_location.safe_id_path` accepts
+  (:func:`is_member_id` calls that predicate, the one
+  :func:`index_location.index_dir` uses, rather than copying its rules).
+  ``/acme/repo`` passes ``atlas-mesh.json`` validation but has no host; a
+  host with a port (``git.example.com:8443/acme/repo``) or an IPv6 literal
+  (``[::1]/acme/repo``) passes validation but is not a filesystem-safe
+  index path. Such a row is ``invalid`` with reason ``invalid_atlas_id``,
+  decided before any filesystem access; it is treated like an
+  ``outside_project`` row (never read, links into it are ``outside_mesh``).
+  A row whose root is not a directory holding a contract
   file is ``unmounted``; it is never mounted, and no git or network call is
-  made for it. Invariant: every ``ok`` member's id round-trips through
+  made for it. Overlap compares lexical roots only. A row whose lexical root
+  equals or contains another row's lexical root, whatever that other row's
+  status, is ``invalid`` with reason ``overlapping_root``, because reading
+  it would also read the other row's pages. It is never read, and a link
+  into it is ``outside_mesh``; the contained row keeps its own status. A
+  contained root its walks never reach does not count: its lexical path
+  below the containing root starts in a directory every walk skips
+  (:data:`WALK_SKIPPED`, from ``paths.SKIP_DIRS`` and
+  ``projection.SKIP_TOP``; ``staging`` is not in it) and neither holds nor
+  lies in an index directory read by name (:data:`DIRECT_READS`). So a
+  store at the project root stays ``ok`` beside stores mounted under
+  ``.atlas/<host>/<org>/<repo>/``. Invariant: every ``ok`` member's id round-trips through
   :func:`node_id` / :func:`parse_node_id` and resolves as ``atlas_uri``.
 - Loading (M2): an ``ok`` member is read through its mesh location (the
   project and the row id, as :func:`index_location.mesh_match` gives for a
@@ -67,8 +91,19 @@ from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import contained_root, has_contract_file
-from .projection import ProjectedPage, normalise_target
+from .paths import (
+    CONTRACT_NAME,
+    SCHEMA_NAME,
+    SKIP_DIRS,
+    contained_root,
+    has_symlink_component,
+    is_symlink_entry,
+    join_under,
+    mesh_walks,
+    note_skipped_symlink,
+    regular_file,
+)
+from .projection import SKIP_TOP, ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
 RESOLVER_VERSION = 1
@@ -80,6 +115,8 @@ STATUS_INVALID = "invalid"
 
 MEMBER_OUTSIDE_PROJECT = "outside_project"
 MEMBER_INVALID_ID = "invalid_atlas_id"
+MEMBER_OVERLAPPING = "overlapping_root"
+MEMBER_SYMLINKED_ROOT = "symlinked_root"
 
 RESOLUTION_LOCAL = "local"
 RESOLUTION_ATLAS_URI = "atlas_uri"
@@ -114,6 +151,19 @@ NODE_SCALARS = (
     "origin",
 )
 PROJECT_MOUNT_PREFIX = ".atlas/"
+
+# Top-level directories that every walk of a store prunes by name before
+# listing them: the grep walk (paths.SKIP_DIRS) and the projection behind
+# bm25/fts5, nanograph and build_view (projection.SKIP_TOP). ``staging`` is
+# not in it: the projection skips the schema's staging name, which may differ.
+WALK_SKIPPED = SKIP_DIRS & SKIP_TOP
+# Paths below a store root that its engines open by name, not by a walk: the
+# project's index tree (for a store at the project root) and the legacy
+# in-store index directories.
+DIRECT_READS = (
+    index_location.INDEXES_REL.parts,
+    *((index_location.LEGACY_DIR, name) for name in index_location.LEGACY_NAMES.values()),
+)
 
 
 class MeshScopeError(ValueError):
@@ -229,15 +279,25 @@ _HOST = re.compile(r"^(?:\[[^\[\]/]+\]|[^\[\]:/]+)(?::[0-9]+)?$")
 
 
 def is_member_id(atlas_id: Any) -> bool:
-    """A row id mesh scope accepts: canonical ``<host>/<org>/<repo>`` with a non-empty host.
+    """A row id mesh scope accepts: canonical ``<host>/<org>/<repo>`` that is an index path.
 
     The host is a non-empty name or a bracketed IP literal, with an optional
-    numeric ``:port`` (so ``/acme/repo`` and ``:8080/acme/repo`` are not).
+    numeric ``:port`` in the identity grammar (so ``/acme/repo`` and
+    ``:8080/acme/repo`` are not). The id must also pass
+    :func:`index_location.safe_id_path`, the same predicate
+    :func:`index_location.index_dir` uses, not a copied segment rule. A host
+    with a port or an IPv6 literal is therefore not a member id.
+    ``atlas-mesh.json`` validation is unchanged.
 
     Also checks that a node id built from it parses back to it and is read as
     canonical by the resolver, whatever the other rows of the mesh are.
     """
     if not isinstance(atlas_id, str) or not atlas_id or atlas_id != atlas_id.strip():
+        return False
+    # Same predicate index_dir uses; do not copy the segment rule.
+    try:
+        index_location.safe_id_path(atlas_id)
+    except index_location.IndexLocationError:
         return False
     try:
         parsed = parse_pointer(atlas_id)
@@ -276,43 +336,115 @@ class Mesh:
         return self.project / meshfile.MESH_NAME
 
 
+def _listing(directory: Path) -> Path:
+    return directory / meshfile.MESH_NAME
+
+
+def _refuse_listing_symlink(path: Path) -> None:
+    """``atlas-mesh.json`` is the project listing. A symlink is not followed."""
+    if not is_symlink_entry(path):
+        return
+    note_skipped_symlink(path, "atlas-mesh.json")
+    raise MeshScopeError(f"{path} is a symlink; mesh scope does not follow it")
+
+
 def discover(root: Path | str) -> Mesh:
-    """The mesh for ``root``: a project directory with atlas-mesh.json, or a store one of its rows lists."""
+    """The mesh for ``root``: a project directory with atlas-mesh.json, or a store one of its rows lists.
+
+    A symlinked ``atlas-mesh.json`` is not followed (discovery fails closed).
+    The file is project-level: it is read once here, and a pinned member does
+    not read it again.
+    """
     start = Path(root).expanduser().resolve()
-    if (start / meshfile.MESH_NAME).is_file():
+    listing = _listing(start)
+    _refuse_listing_symlink(listing)
+    if listing.is_file():
         return _load_mesh(start)
+    # Lexical match first, so an invalid-id row is found without resolving
+    # its root. mesh_match remains for a path row reached through a symlink,
+    # and for the duplicate-id error. A symlink listing on that walk is not
+    # followed.
+    project = _member_root_match(start)
+    if project is not None:
+        return _load_mesh(project)
+    blocked = _symlink_listing_before_file(start)
+    if blocked is not None:
+        _refuse_listing_symlink(blocked)
     try:
         match = index_location.mesh_match(start)
     except index_location.IndexLocationError as e:
         raise MeshScopeError(str(e)) from e
     if match is not None:
         return _load_mesh(match.directory)
-    project = _member_root_match(start)
-    if project is not None:
-        return _load_mesh(project)
     raise MeshScopeError(f"no atlas-mesh.json lists this store: {start}")
+
+
+def _symlink_listing_before_file(start: Path) -> Path | None:
+    """A symlink listing mesh_match would follow before it reached a regular file."""
+    for directory in [start, start.parent, *start.parent.parents]:
+        listing = _listing(directory)
+        if is_symlink_entry(listing):
+            return listing
+        try:
+            if listing.is_file():
+                return None
+        except OSError:
+            continue
+    return None
 
 
 def _load_mesh(project: Path) -> Mesh:
     # Strict load: a malformed mesh_member must never include a store by accident.
+    # A symlink listing is not opened. meshfile.load follows, so refuse first.
+    listing = _listing(project)
+    _refuse_listing_symlink(listing)
     try:
         doc = meshfile.load(project)
     except (meshfile.MeshFileError, OSError) as e:
-        raise MeshScopeError(f"{project / meshfile.MESH_NAME}: {e}") from e
+        raise MeshScopeError(f"{listing}: {e}") from e
     return Mesh(project, doc)
 
 
+def _lexically_at(candidate: Path, start: Path) -> bool:
+    """True when two paths are the same location with no filesystem access."""
+    return os.path.normpath(candidate) == os.path.normpath(start)
+
+
 def _member_root_match(start: Path) -> Path | None:
-    """Rows ``mesh_match`` does not cover: a ``subpath`` root or a row with no ``path``."""
+    """Every listed row location, including ones ``mesh_match`` does not cover.
+
+    A ``path`` row, a ``subpath`` root and a pathless row all count. Id
+    validity, membership and status do not: an excluded or invalid-id row is
+    still listed, so discovery must find its project or ``recall.scope: mesh``
+    would fall back to store recall and read that store. The match is lexical
+    (the normalised row root). Nothing under the row root is read, and an
+    invalid id is never resolved, so it never receives an index path.
+    :func:`members` classifies the id.
+
+    A member id whose root has a symlink component is still matched by
+    resolving that root's own path components. ``--root`` is already resolved
+    by the time discovery runs, and without this a direct root at a symlinked
+    member would miss the mesh and fall back to store recall. The link is not
+    followed for an invalid id.
+    """
     for directory in [start.parent, *start.parent.parents]:
-        if not (directory / meshfile.MESH_NAME).is_file():
+        listing = _listing(directory)
+        if is_symlink_entry(listing):
+            note_skipped_symlink(listing, "atlas-mesh.json")
+            continue
+        if not listing.is_file():
             continue
         try:
             doc = meshfile.load_for_location(directory)
         except (meshfile.MeshFileError, OSError, ValueError):
             continue
         for i, row in enumerate(doc.get("stores") or []):
-            if not isinstance(row, dict) or not meshfile.is_mesh_member(row) or not is_member_id(row.get("id")):
+            if not isinstance(row, dict):
+                continue
+            if _lexically_at(_row_root(directory, row, i), start):
+                return directory
+            # Invalid ids stay lexical: resolving them would touch the root.
+            if not is_member_id(row.get("id")):
                 continue
             candidate = _contained_row_root(directory, row, i)
             if candidate is None:
@@ -383,25 +515,94 @@ def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
     return (PurePosixPath(".atlas") / PurePosixPath(*sid.split("/"))).as_posix()
 
 
+def _reached(parts: tuple[str, ...]) -> bool:
+    """Whether a store's own reads can reach a root at these parts below it.
+
+    ``parts`` is the lexical or real relative path. Unreached only when the
+    first part is in :data:`WALK_SKIPPED` and the root neither holds nor lies
+    in one of :data:`DIRECT_READS`.
+    """
+    if not parts or parts[0] not in WALK_SKIPPED:
+        return True
+    return any(parts[: len(read)] == read or read[: len(parts)] == parts for read in DIRECT_READS)
+
+
+def _contains_reached(outer: Path, inner: Path) -> bool:
+    """True when ``inner`` is ``outer`` or inside it and walks of ``outer`` reach it."""
+    try:
+        rel = inner.relative_to(outer)
+    except ValueError:
+        return False
+    return _reached(rel.parts)
+
+
+def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
+    """Indexes of rows whose lexical root equals or contains a root its own reads reach.
+
+    Compares lexical roots only. A symlink root is not resolved: it is
+    ``symlinked_root`` and its lexical path still counts as a contained root.
+    Only a row whose root has no absolute part or ``..`` segment can contain
+    another; every other row's normalised lexical root counts as a contained
+    root, whatever its status. A contained root below a directory the walks
+    skip (:func:`_reached`) does not count, on the lexical relative path.
+    """
+    lexical = [_row_root(project, row, i) for i, row in enumerate(rows)]
+    out: set[int] = set()
+    for i, row in enumerate(rows):
+        if join_under(project, *_row_parts(row, i)) is None:
+            continue
+        if any(j != i and _contains_reached(lexical[i], other) for j, other in enumerate(lexical)):
+            out.add(i)
+    return out
+
+
+def _included_has_contract(root: Path) -> bool:
+    """True when an included root has a regular contract file. Never follows a symlink.
+
+    A symlinked ``CONTRACT.json`` is optional: skipped with a warning. When it
+    is the only contract file the member stays unmounted. A symlinked
+    ``SCHEMA.json`` is classified before this runs.
+    """
+    contract = root / CONTRACT_NAME
+    if is_symlink_entry(contract):
+        note_skipped_symlink(contract, CONTRACT_NAME)
+    if regular_file(root / SCHEMA_NAME):
+        return True
+    if is_symlink_entry(contract):
+        return False
+    return regular_file(contract)
+
+
 def members(mesh: Mesh) -> list[Member]:
     """Every row in file order with its status.
 
-    Neither an excluded root, a root that escapes the project nor the root
-    of a row with an invalid id is ever touched: the id and containment are
-    checked before any stat of the root.
+    Nothing inside an excluded root, a symlinked root, a root that escapes
+    the project, a root that overlaps another row's root or the root of a
+    row with an invalid id is listed or opened. A symlinked root is decided
+    with ``lstat`` per in-project component, stopping at the first link,
+    before any contents are read. Overlap is lexical only.
     """
     out: list[Member] = []
-    for i, row in enumerate(mesh.doc.get("stores") or []):
+    rows = list(mesh.doc.get("stores") or [])
+    overlapping = _overlapping_rows(mesh.project, rows)
+    for i, row in enumerate(rows):
         sid = str(row["id"])
         root = _row_root(mesh.project, row, i)
         reason = None
         if not is_member_id(row.get("id")):
             status, reason = STATUS_INVALID, MEMBER_INVALID_ID
+        elif has_symlink_component(mesh.project, *_row_parts(row, i)):
+            status, reason = STATUS_INVALID, MEMBER_SYMLINKED_ROOT
+        elif i in overlapping:
+            status, reason = STATUS_INVALID, MEMBER_OVERLAPPING
         elif not meshfile.is_mesh_member(row):
             status = STATUS_EXCLUDED
         elif _contained_row_root(mesh.project, row, i) is None:
             status, reason = STATUS_INVALID, MEMBER_OUTSIDE_PROJECT
-        elif root.is_dir() and has_contract_file(root):
+        elif is_symlink_entry(root / SCHEMA_NAME):
+            # Required contract file. lstat only: do not follow into an excluded store.
+            status, reason = STATUS_INVALID, MEMBER_SYMLINKED_ROOT
+        elif root.is_dir() and _included_has_contract(root):
             status = STATUS_OK
         else:
             status = STATUS_UNMOUNTED
@@ -430,7 +631,8 @@ def load_member(member: Member) -> MemberPages:
     if member.status != STATUS_OK:
         raise MeshScopeError(f"store {member.atlas_id} is {member.status}; its pages are not read")
     try:
-        source = graph.load_source(member.root, location=member.location())
+        with mesh_walks():
+            source = graph.load_source(member.root, location=member.location())
     except graph.GraphError as e:
         raise MeshScopeError(f"store {member.atlas_id}: {e}") from e
     pages: dict[str, ProjectedPage] = {}

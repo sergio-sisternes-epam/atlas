@@ -418,6 +418,19 @@ def recall_group() -> None:
     is_flag=True,
     help="SCHEMA 2.0: return incomplete corpus results (exit 1)",
 )
+@click.option(
+    "--scope",
+    type=click.Choice(["store", "mesh"], case_sensitive=False),
+    default=None,
+    help="store (default) or mesh: every Atlas in this project's atlas-mesh.json, fused with tiered RRF (atlas-mesh.json recall.scope)",
+)
+@click.option(
+    "--rrf-k",
+    "rrf_k",
+    default=None,
+    metavar="N",
+    help="mesh scope only: RRF k, an integer 1-1000 (atlas-mesh.json recall.rrf_k; default 60)",
+)
 def recall_run_cmd(
     query: str,
     root: str | None,
@@ -427,11 +440,13 @@ def recall_run_cmd(
     include_exits: bool,
     profile: str | None,
     allow_partial: bool,
+    scope: str | None,
+    rrf_k: str | None,
 ) -> None:
     """Discover concepts (tool). Agent protocol is path recall + B17 card."""
     raise SystemExit(
-        cmd_search.run(
-            root, query, limit, as_json, engine, include_exits, profile, allow_partial
+        cmd_search.run_scoped(
+            root, query, limit, as_json, engine, include_exits, profile, allow_partial, scope, rrf_k
         )
     )
 

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .. import driver_overlay, graph, index_location, index_publish
+from ..paths import is_symlink_entry, mesh_symlink, note_skipped_symlink, skipping_symlinks
 from ..driver_overlay import BaseDriver, Detection, DriverError
 from ..ignore_guard import ensure_indexes_ignored
 from ..index_location import IndexLocationError
@@ -374,29 +375,43 @@ class NanographDriver(BaseDriver):
 
     @staticmethod
     def _read_ready(gen_dir: Path) -> dict[str, Any] | None:
+        ready = gen_dir / READY_NAME
+        if mesh_symlink(ready):
+            note_skipped_symlink(ready, "nanograph ready")
+            return None
         try:
-            data = json.loads((gen_dir / READY_NAME).read_text(encoding="utf-8"))
+            data = json.loads(ready.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         return data if isinstance(data, dict) else None
 
     def _reusable(self, gen_dir: Path, digest: str, version: str | None) -> bool:
+        db = gen_dir / DB_NAME
+        queries = gen_dir / QUERIES_NAME
+        if mesh_symlink(db) or mesh_symlink(queries):
+            note_skipped_symlink(db if mesh_symlink(db) else queries, "nanograph index")
+            return False
         ready = self._read_ready(gen_dir)
         return bool(
             ready
             and ready.get("corpus_digest") == digest
             and ready.get("version") == version
             and ready.get("format") == INDEX_FORMAT
-            and (gen_dir / DB_NAME).exists()
-            and (gen_dir / QUERIES_NAME).is_file()
+            and db.exists()
+            and queries.is_file()
         )
 
     def _current(self, base: Path, digest: str, version: str | None) -> Path | None:
         """Resolve ``current.json`` once; fall back to a pre-pointer ``<digest16>`` generation."""
-        try:
-            pointer = json.loads((base / CURRENT_NAME).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        pointer_path = base / CURRENT_NAME
+        if mesh_symlink(pointer_path):
+            note_skipped_symlink(pointer_path, "nanograph index pointer")
             pointer = None
+        else:
+            try:
+                pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pointer = None
         names: list[str] = []
         if isinstance(pointer, dict) and isinstance(pointer.get("generation"), str):
             names.append(pointer["generation"])
@@ -426,14 +441,31 @@ class NanographDriver(BaseDriver):
 
     @staticmethod
     def has_new_index(base: Path) -> bool:
-        """Any index at the new location: a ``current.json`` pointer or a published generation directory."""
-        if (base / CURRENT_NAME).exists() or (base / CURRENT_NAME).is_symlink():
+        """Any index at the new location: a ``current.json`` pointer or a published generation directory.
+
+        Mesh scope skips a symlinked pointer or generation and reports no index.
+        """
+        pointer = base / CURRENT_NAME
+        if mesh_symlink(pointer):
+            note_skipped_symlink(pointer, "nanograph index pointer")
+            return False
+        if pointer.exists() or pointer.is_symlink():
             return True
+        if skipping_symlinks() and is_symlink_entry(base):
+            note_skipped_symlink(base, "nanograph index")
+            return False
         if not base.is_dir():
             return False
-        return any(
-            _GEN_NAME.fullmatch(child.name) and (child.is_dir() or child.is_symlink()) for child in base.iterdir()
-        )
+        found = False
+        for child in base.iterdir():
+            if not _GEN_NAME.fullmatch(child.name):
+                continue
+            if mesh_symlink(child):
+                note_skipped_symlink(child, "nanograph generation")
+                continue
+            if child.is_dir() or child.is_symlink():
+                found = True
+        return found
 
     def _choose_legacy(self, store: Path, base: Path, digest: str, version: str | None) -> Path | None:
         """The legacy generation to read, only when the new location has no index (no fresh one was found)."""
@@ -501,7 +533,11 @@ class NanographDriver(BaseDriver):
             if guarded and guarded.get("level") == "warning":
                 lock_warnings.append(guarded)
             name = digest[:16]
-            if (base / name).exists():
+            planted = base / name
+            if mesh_symlink(planted):
+                note_skipped_symlink(planted, "nanograph generation")
+                name = f"{name}-{index_publish.new_name()}"
+            elif planted.exists():
                 name = f"{name}-{index_publish.new_name()}"
             tmp_dir = base / f"{index_publish.TMP_PREFIX}{name}"
             dest = base / name
@@ -527,10 +563,15 @@ class NanographDriver(BaseDriver):
             # Final ownership check, pointer replace and prune under the takeover guard.
             try:
                 with index_publish.critical_section(lock):
-                    try:
-                        before = json.loads((base / CURRENT_NAME).read_text(encoding="utf-8"))
-                    except (OSError, json.JSONDecodeError):
+                    pointer_path = base / CURRENT_NAME
+                    if mesh_symlink(pointer_path):
+                        note_skipped_symlink(pointer_path, "nanograph index pointer")
                         before = {}
+                    else:
+                        try:
+                            before = json.loads(pointer_path.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError):
+                            before = {}
                     previous = before.get("generation") if isinstance(before, dict) else None
                     index_publish.write_json_atomic(base / CURRENT_NAME, pointer)
                     retired = self._prune(base, dest, previous if isinstance(previous, str) else None)

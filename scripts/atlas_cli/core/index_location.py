@@ -71,6 +71,7 @@ _NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 _cache: dict[tuple[str, str], "IndexLocation"] = {}
 _pinned: dict[str, "IndexLocation"] = {}
+_pinned_matches: dict[str, "MeshMatch"] = {}
 _warned_relative = False
 
 
@@ -157,8 +158,15 @@ class MeshMatch:
 
 
 def mesh_match(store: Path) -> MeshMatch | None:
-    """The first ``atlas-mesh.json`` row (walking up from ``store.parent``) whose path is ``store``."""
+    """The first ``atlas-mesh.json`` row (walking up from ``store.parent``) whose path is ``store``.
+
+    Inside :func:`pinned` with a ``match``, that row is returned without any
+    lookup, which also covers ``subpath`` and pathless rows.
+    """
     store = Path(store).expanduser().resolve()
+    pinned_match = _pinned_matches.get(str(store))
+    if pinned_match is not None:
+        return pinned_match
     for directory in [store.parent, *store.parent.parents]:
         if not (directory / meshfile.MESH_NAME).is_file():
             continue
@@ -266,18 +274,24 @@ def _override_root() -> Path | None:
 
 
 @contextmanager
-def pinned(location: IndexLocation) -> Iterator[IndexLocation]:
+def pinned(location: IndexLocation, match: MeshMatch | None = None) -> Iterator[IndexLocation]:
     """Within the block, :func:`resolve` returns ``location`` for its store without any lookup.
 
     For callers that already know the store's mesh row (mesh scope), so no
     walk-up, ``git`` subprocess or standalone id is involved.
     ``ATLAS_INDEX_ROOT`` still replaces the project root, as in :func:`resolve`.
+    With ``match`` (the store's mesh row and document), :func:`mesh_match`
+    returns it too, so row and project preferences such as ``recall.engine``
+    apply to ``subpath`` and pathless rows as well.
     """
     store_r = Path(location.store).expanduser().resolve()
     loc = IndexLocation(store_r, location.project_root, location.atlas_id, location.id_source, location.mode)
     key = str(store_r)
     previous = _pinned.get(key)
+    previous_match = _pinned_matches.get(key)
     _pinned[key] = loc
+    if match is not None:
+        _pinned_matches[key] = match
     try:
         yield loc
     finally:
@@ -285,6 +299,10 @@ def pinned(location: IndexLocation) -> Iterator[IndexLocation]:
             _pinned.pop(key, None)
         else:
             _pinned[key] = previous
+        if previous_match is None:
+            _pinned_matches.pop(key, None)
+        else:
+            _pinned_matches[key] = previous_match
 
 
 def resolve(store: Path) -> IndexLocation:
