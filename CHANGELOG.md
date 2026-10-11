@@ -58,8 +58,12 @@
   reason `outside_project`. A row whose root stays inside the project but is
   a symlink, or has a symlink component inside the project, is `invalid`
   with reason `symlinked_root` (decided with `lstat`, without resolving the
-  link or reading its target). A row id with an empty host (such as
-  `/acme/repo`) is `invalid` with reason `invalid_atlas_id`. A row whose
+  link or reading its target). A row id that is not a filesystem-safe
+  index path (the same rule as the per-store index directory) is `invalid`
+  with reason `invalid_atlas_id`: an empty host such as `/acme/repo`, a
+  host with a port such as `git.example.com:8443/acme/repo`, or an IPv6
+  literal such as `[::1]/acme/repo`. `atlas-mesh.json` validation is
+  unchanged and still accepts those ids. A row whose
   lexical root equals or contains another row's lexical root is `invalid`
   with reason `overlapping_root` when its own walks reach that root; the
   contained row keeps its status. Nothing under an

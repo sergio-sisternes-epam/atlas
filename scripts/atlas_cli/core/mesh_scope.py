@@ -21,12 +21,17 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   ``symlinked_root``, decided with ``lstat`` per component and stopping at
   the first link, before any contents are read and without resolving the
   link. It is never read, and a link into it is ``outside_mesh``. A row
-  whose id is not a canonical ``<host>/<org>/<repo>`` with a non-empty host
-  (:func:`is_member_id`; ``/acme/repo`` passes ``atlas-mesh.json``
-  validation but has no host) is ``invalid`` with reason
-  ``invalid_atlas_id``, decided before any filesystem access; it is treated
-  like an ``outside_project`` row (never read, links into it are
-  ``outside_mesh``). A row whose root is not a directory holding a contract
+  whose id is not both a canonical ``<host>/<org>/<repo>`` with a non-empty
+  host and an index path :func:`index_location.safe_id_path` accepts
+  (:func:`is_member_id` calls that predicate, the one
+  :func:`index_location.index_dir` uses, rather than copying its rules).
+  ``/acme/repo`` passes ``atlas-mesh.json`` validation but has no host; a
+  host with a port (``git.example.com:8443/acme/repo``) or an IPv6 literal
+  (``[::1]/acme/repo``) passes validation but is not a filesystem-safe
+  index path. Such a row is ``invalid`` with reason ``invalid_atlas_id``,
+  decided before any filesystem access; it is treated like an
+  ``outside_project`` row (never read, links into it are ``outside_mesh``).
+  A row whose root is not a directory holding a contract
   file is ``unmounted``; it is never mounted, and no git or network call is
   made for it. Overlap compares lexical roots only. A row whose lexical root
   equals or contains another row's lexical root, whatever that other row's
@@ -262,15 +267,25 @@ _HOST = re.compile(r"^(?:\[[^\[\]/]+\]|[^\[\]:/]+)(?::[0-9]+)?$")
 
 
 def is_member_id(atlas_id: Any) -> bool:
-    """A row id mesh scope accepts: canonical ``<host>/<org>/<repo>`` with a non-empty host.
+    """A row id mesh scope accepts: canonical ``<host>/<org>/<repo>`` that is an index path.
 
     The host is a non-empty name or a bracketed IP literal, with an optional
-    numeric ``:port`` (so ``/acme/repo`` and ``:8080/acme/repo`` are not).
+    numeric ``:port`` in the identity grammar (so ``/acme/repo`` and
+    ``:8080/acme/repo`` are not). The id must also pass
+    :func:`index_location.safe_id_path`, the same predicate
+    :func:`index_location.index_dir` uses, not a copied segment rule. A host
+    with a port or an IPv6 literal is therefore not a member id.
+    ``atlas-mesh.json`` validation is unchanged.
 
     Also checks that a node id built from it parses back to it and is read as
     canonical by the resolver, whatever the other rows of the mesh are.
     """
     if not isinstance(atlas_id, str) or not atlas_id or atlas_id != atlas_id.strip():
+        return False
+    # Same predicate index_dir uses; do not copy the segment rule.
+    try:
+        index_location.safe_id_path(atlas_id)
+    except index_location.IndexLocationError:
         return False
     try:
         parsed = parse_pointer(atlas_id)

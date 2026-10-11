@@ -7,6 +7,9 @@ Rule: the first segment after ``atlas://`` is a canonical host when it is
 host-shaped on its own (a dot, a ``:port``, an IP literal or ``localhost``)
 or it is the host of a mesh row id. Anything else is a short form: it stays
 ``noncanonical_atlas_uri`` with ``suggest`` only on a unique repo-name match.
+A host with a port is host-shaped for that rule, but it is not a mesh member:
+``safe_id_path`` rejects it, so the row is ``invalid`` / ``invalid_atlas_id``
+and is never read. A link into it is ``outside_mesh``.
 
 Linux-safe: no network, no git, no real mount.
 """
@@ -39,7 +42,7 @@ CASES: list[tuple[str, str, str | None, str | None, str]] = [
     (f"atlas://{LOCAL}/notes/a.md", "atlas_uri", None, None, f"atlas://{LOCAL}/notes/a.md"),
     (f"atlas://{LOCAL}/notes/a.md#claim", "atlas_uri", None, None, f"atlas://{LOCAL}/notes/a.md"),
     ("atlas://LocalHost/Acme/Repo/notes/a.md", "atlas_uri", None, None, f"atlas://{LOCAL}/notes/a.md"),
-    (f"atlas://{PORTED}/notes/p.md", "atlas_uri", None, None, f"atlas://{PORTED}/notes/p.md"),
+    (f"atlas://{PORTED}/notes/p.md", "atlas_uri", "outside_mesh", None, f"atlas://{PORTED}/notes/p.md"),
     (f"atlas://{INTRA}/notes/w.md", "atlas_uri", None, None, f"atlas://{INTRA}/notes/w.md"),
     (f"atlas://{LOCAL}/notes/missing.md", "atlas_uri", "missing_page", None, f"atlas://{LOCAL}/notes/missing.md"),
     (f"atlas://{INTRA}/notes/missing.md", "atlas_uri", "missing_page", None, f"atlas://{INTRA}/notes/missing.md"),
@@ -153,10 +156,12 @@ def main() -> int:
         mesh = mesh_scope.discover(project / "atlas" / "src")
         all_members = mesh_scope.members(mesh)
         statuses = {m.atlas_id: m.status for m in all_members}
+        reasons = {m.atlas_id: m.reason for m in all_members}
         check(
             "member-statuses",
             statuses[LOCAL] == "ok"
-            and statuses[PORTED] == "ok"
+            and statuses[PORTED] == "invalid"
+            and reasons[PORTED] == "invalid_atlas_id"
             and statuses[INTRA] == "ok"
             and statuses[LGONE] == "unmounted"
             and statuses[LSECRET] == "excluded",
@@ -178,9 +183,13 @@ def main() -> int:
 
         view = mesh_scope.build_view(mesh)
         node_ids = {n["id"] for n in view["nodes"]}
-        for sid, rel in ((LOCAL, "notes/a.md"), (PORTED, "notes/p.md"), (INTRA, "notes/w.md")):
+        for sid, rel in ((LOCAL, "notes/a.md"), (INTRA, "notes/w.md")):
             nid = f"atlas://{sid}/{rel}"
             check(f"view-node {nid}", nid in node_ids)
+        check(
+            "view-node-ported-absent",
+            f"atlas://{PORTED}/notes/p.md" not in node_ids and all(n["atlas_id"] != PORTED for n in view["nodes"]),
+        )
         resolved_to = {e["to"] for e in view["edges"] if e["resolved"]}
         check(
             "view-edges-reach-no-dot-nodes",
