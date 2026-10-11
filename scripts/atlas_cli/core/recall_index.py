@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
 import sqlite3
+import stat
 import tempfile
 import time
 import uuid
@@ -144,16 +146,61 @@ def active_generation(store: Path) -> Generation | None:
     return found[0] if found else None
 
 
-def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
-    paths.refuse_non_regular(path)
+def _bind_recall_db(path: Path) -> int:
+    """Open or create ``path`` without following a symlink. Caller owns the fd."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        os.lstat(path)
+        return os.open(os.fspath(path), os.O_RDONLY | nofollow)
     except FileNotFoundError:
-        fd = paths.create_exclusive(path)
-        os.close(fd)
-    conn = sqlite3.connect(str(path))
-    inserted = 0
+        try:
+            return paths.create_exclusive(path)
+        except FileExistsError as exc:
+            raise paths.UnsafeDestination(path, "symlink") from exc
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EEXIST):
+            raise paths.UnsafeDestination(path, "symlink") from exc
+        raise
+
+
+def _assert_recall_db_bound(fd: int, path: Path) -> None:
+    """Refuse when ``path`` is no longer the file ``fd`` created or opened.
+
+    ``sqlite3.connect`` opens by name and does not write a header until the
+    first statement. Comparing ``fstat`` of the kept fd with
+    ``os.stat(path, follow_symlinks=False)`` before that statement closes the
+    window in which the placeholder can be swapped for a symlink.
+    """
+    created = os.fstat(fd)
     try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise paths.UnsafeDestination(path, "symlink") from exc
+    if stat.S_ISLNK(current.st_mode) or (current.st_dev, current.st_ino) != (created.st_dev, created.st_ino):
+        kind = "symlink" if stat.S_ISLNK(current.st_mode) else "replaced file"
+        raise paths.UnsafeDestination(path, kind)
+
+
+def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
+    """Write a recall database without following a swapped destination symlink.
+
+    The destination is created with ``O_CREAT|O_EXCL|O_NOFOLLOW`` (or opened
+    with ``O_NOFOLLOW`` when it already exists) and that fd is kept open across
+    ``sqlite3.connect``. The schema is written only after
+    :func:`_assert_recall_db_bound` confirms the path still names that inode.
+    A symlink swapped in between creation and connect is refused; the link
+    target is not given a database header.
+    """
+    paths.refuse_non_regular(path)
+    fd = _bind_recall_db(path)
+    conn: sqlite3.Connection | None = None
+    try:
+        try:
+            conn = sqlite3.connect(str(path))
+        except sqlite3.Error:
+            _assert_recall_db_bound(fd, path)
+            raise
+        _assert_recall_db_bound(fd, path)
+        inserted = 0
         conn.execute(
             "CREATE TABLE pages (id TEXT PRIMARY KEY, path TEXT, role TEXT, digest TEXT, title TEXT, description TEXT, body TEXT, meta_json TEXT, edges_json TEXT)"
         )
@@ -189,9 +236,11 @@ def _write_sqlite(path: Path, pages: list[ProjectedPage], digest: str) -> int:
         conn.execute("INSERT INTO meta VALUES ('corpus_digest', ?)", (digest,))
         conn.execute("INSERT INTO meta VALUES ('page_count', ?)", (str(inserted),))
         conn.commit()
+        return inserted
     finally:
-        conn.close()
-    return inserted
+        if conn is not None:
+            conn.close()
+        os.close(fd)
 
 
 def _write_pointer(root: Path, pointer: dict[str, Any]) -> None:

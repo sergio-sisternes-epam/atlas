@@ -791,7 +791,11 @@ class Query:
         return {self.member_for(s).atlas_id for s in stores}
 
     def target_id(self, page: str) -> str:
-        """A page argument as a node id: a canonical ``atlas://`` URI or a path in the ``--root`` store."""
+        """A page argument as a node id: a canonical ``atlas://`` URI or a path in the ``--root`` store.
+
+        Membership is required. ``edges --to`` uses :meth:`to_id` instead, so an
+        unresolved target whose store is not a mesh row can still be filtered.
+        """
         text = str(page or "").strip()
         if text.startswith(mesh_scope.ATLAS_SCHEME):
             atlas_id, path = mesh_scope.parse_node_id(text, self.hosts)
@@ -807,6 +811,20 @@ class Query:
             )
         path = normalise_target(text).lstrip("/")
         return mesh_scope.node_id(self.root_member.atlas_id, path)
+
+    def to_id(self, page: str) -> str:
+        """Normalise an ``edges --to`` filter, with no membership check.
+
+        Any canonical ``atlas://`` URI is accepted, including a missing page and
+        a store that is not a mesh row, and compared with stored edge targets.
+        A non-canonical ``atlas://`` URI is an error. A store-relative path is
+        still a page in the ``--root`` store.
+        """
+        text = str(page or "").strip()
+        if text.startswith(mesh_scope.ATLAS_SCHEME):
+            atlas_id, path = mesh_scope.parse_node_id(text, self.hosts)
+            return mesh_scope.node_id(atlas_id, path)
+        return self.target_id(text)
 
     def node(self, page: str) -> dict[str, Any]:
         nid = self.target_id(page)
@@ -869,7 +887,7 @@ class Query:
             src = node["id"]
         dst = None
         if to_page:
-            dst = self.target_id(to_page)
+            dst = self.to_id(to_page)
             if dst in self.nodes:
                 self.check_anchor(self.nodes[dst], include_exits, label="page")
         kind_set = set(kinds or ())
@@ -1034,6 +1052,9 @@ def check_export_out(mesh: mesh_scope.Mesh, out: str) -> Path:
     Excluded and invalid roots are compared lexically (never resolved), against
     every spelling ``--out`` takes while its symlinks are followed, so writing
     through a symlinked member root (or a link into one) is refused too.
+    Containment uses the resolved path. The returned path is the lexical
+    absolute destination (``os.path.abspath``, no symlink resolution) so a
+    symlinked output-directory leaf is still a symlink when the writer checks it.
     """
     raw = Path(out).expanduser()
     forbidden: list[tuple[Path, str]] = [
@@ -1071,7 +1092,7 @@ def check_export_out(mesh: mesh_scope.Mesh, out: str) -> Path:
     hit = inside(out_dir)
     if hit is not None:
         raise refuse(out_dir, hit[1])
-    return out_dir
+    return Path(os.path.abspath(raw))
 
 
 def export_json(mg: MeshGraph, out_dir: Path) -> tuple[list[str], dict[str, Any]]:

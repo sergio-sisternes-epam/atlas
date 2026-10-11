@@ -98,7 +98,12 @@ Edges keep authored direction: the page holding `relates_to` is `from`.
 PAGE arguments are store-relative paths; a leading `./` is normalised on
 both arguments and targets. `--from` must name a page in the store; `--to`
 may name any target, including a missing one. `--from` and `--to` may be
-combined.
+combined. In mesh scope, `--to` normalises any canonical `atlas://` URI and
+compares that id with stored edge targets, with no membership check, so an
+unresolved edge that `edges --all` lists (including a missing page, or a
+store that is not a mesh row) can be filtered. A non-canonical `--to` still
+exits 2. `--from` and neighbour seeds still require a page in a readable
+member.
 
 ```json
 {"from": "notes/child-b.md", "to": "notes/missing.md", "kind": "related", "resolved": false}
@@ -219,8 +224,10 @@ rows are listed from the mesh file (status and reason) and are never read.
 (precedence: the flag, then top-level `graph.scope`, then `store`; store
 scope is unchanged). A standalone store exits 2 (`no atlas-mesh.json lists
 this store`). Pages are `atlas://<atlas-id>/<path>` URIs or paths in the
-`--root` store. `nodes` and `edges` take `--store <atlas-id>` (repeatable;
-in store scope it exits 2). Restricted pages, `mesh_member: false`
+`--root` store. `edges --to` is the exception: any canonical `atlas://` URI
+is normalised and compared with stored targets, even when that store is not
+a mesh row (see Edges above). A non-canonical `--to` still exits 2. `nodes`
+and `edges` take `--store <atlas-id>` (repeatable; in store scope it exits 2). Restricted pages, `mesh_member: false`
 stores and `invalid` rows (`outside_project` or `invalid_atlas_id`) never
 appear; an `invalid` row is never read, `--store` or a page in it exits 2,
 and it is listed under `invalid` in the export receipt and `index show

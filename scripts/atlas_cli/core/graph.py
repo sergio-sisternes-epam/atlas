@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from collections import deque
@@ -510,12 +511,21 @@ def source_edge_type_map(
 
 
 def check_out_dir(root: Path, out: str) -> Path:
-    out_dir = Path(out).expanduser().resolve()
+    """Refuse an ``--out`` inside the store; return the lexical absolute path.
+
+    Containment is decided on the resolved path, so a link into the store is
+    refused. The returned path is ``os.path.abspath`` with no symlink
+    resolution, so the writer still sees a symlinked directory leaf and
+    refuses to follow it.
+    """
+    raw = Path(out).expanduser()
+    lexical = Path(os.path.abspath(raw))
+    resolved = raw.resolve()
     try:
-        out_dir.relative_to(root.resolve())
+        resolved.relative_to(root.resolve())
     except ValueError:
-        return out_dir
-    raise GraphError(f"--out {out_dir} is inside the store root; choose a directory outside it")
+        return lexical
+    raise GraphError(f"--out {resolved} is inside the store root; choose a directory outside it")
 
 
 def export_json(source: dict[str, Any], out_dir: Path) -> list[str]:

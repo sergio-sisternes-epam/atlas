@@ -2,6 +2,21 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed: `atlas graph export` (store and mesh scope) checks `--out` containment
+  on the resolved path but hands the writer the lexical absolute path. A
+  symlinked output-directory leaf such as `out-link` is refused rather than
+  followed, so pre-existing `graph.json` and `export-receipt.json` in the
+  target stay byte-identical.
+- Fixed: a recall sqlite database keeps the `O_CREAT|O_EXCL|O_NOFOLLOW` fd
+  open across `sqlite3.connect` and writes the schema only after `fstat` of
+  that fd matches `os.stat` of the path with symlinks not followed. A swap of
+  the placeholder for a symlink between creation and connect is refused, and
+  the target is not given a database header.
+- Fixed: `atlas graph edges --to` in mesh scope normalises any canonical
+  `atlas://` URI and compares it with stored edge targets, with no membership
+  check, so an unresolved edge whose store is not a mesh row can be filtered.
+  `--from` and neighbour seeds still require a readable member page. A
+  non-canonical `--to` still exits 2.
 - Fixed: `atlas index status` in mesh mode classifies every row before
   probing. Excluded, invalid and unmounted rows are reported from the mesh
   row and their status/reason only; their roots are never resolved, stat-ed
