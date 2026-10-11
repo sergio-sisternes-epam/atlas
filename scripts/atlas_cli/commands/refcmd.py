@@ -1948,6 +1948,7 @@ def run_prune(
         try:
             _lock_fd(root_fd, summary_rel)
             try:
+                _require_tip_ancestor(repo, sha)
                 before_warnings = _blocking_warnings(store)
                 for rel, updated, original_bytes, _mode, dev, ino in pending:
                     new_bytes = updated.encode("utf-8")
@@ -1964,6 +1965,7 @@ def run_prune(
                         written.append((rel, new_bytes, _mode, installed.dev, installed.ino, original_bytes))
                         raise
                     written.append((rel, new_bytes, _mode, new_dev, new_ino, original_bytes))
+                _require_tip_ancestor(repo, sha)
                 for rel in drop_rels:
                     gitpath = _git_path(store, repo, rel)
                     _code, expected, _err = run_git(

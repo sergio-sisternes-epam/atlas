@@ -20,6 +20,7 @@
 - `atlas ref prune` leaves a protocol-relative markdown link (`//host/path`) unchanged. It is not a store-root path.
 - `atlas ref show` and `atlas ref prune` refuse the fixed `staging/` directory even when `staging_dir` is a different name.
 - `atlas ref prune` claims a drop with a no-replace rename. A destination that already exists aborts the drop and is not overwritten.
+- `atlas ref prune` rechecks that the resolved rev is still an ancestor of HEAD after the mutation lock is held, before rewriting or dropping pages. A tip that moved to an unrelated commit is refused even when the drop bytes match.
 - `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself, and the worktree bytes match that blob and the HEAD blob. A later or unrelated commit, or a dirty worktree that only matches the older rev, is not the pre-prune snapshot.
 - Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
 - A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.

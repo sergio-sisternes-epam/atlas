@@ -2704,6 +2704,76 @@ def main() -> int:
             else:
                 print("[PASS] prune refuses a descendant rev with matching blobs")
 
+        moved_tip = tmp / "moved-tip"
+        moved_init = run(["init", "--root", str(moved_tip), "--json"])
+        if moved_init.returncode != 0:
+            failures.append(f"moved-tip store init failed: {moved_init.stdout}")
+        else:
+            git(moved_tip, ["init", "-b", "main"])
+            prose = "This page keeps enough prose that compile does not treat it as a link list."
+            (moved_tip / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+            (moved_tip / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+            (moved_tip / "living.md").write_text(
+                page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+                encoding="utf-8",
+            )
+            git(moved_tip, ["add", "."])
+            git(moved_tip, ["commit", "-m", "trial"])
+            snapshot = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=moved_tip,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            before_living = (moved_tip / "living.md").read_text(encoding="utf-8")
+            git(moved_tip, ["checkout", "--orphan", "unrelated"])
+            git(moved_tip, ["commit", "-m", "unrelated tip with the same blobs"])
+            unrelated = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=moved_tip,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            git(moved_tip, ["checkout", "main"])
+            import atlas_cli.commands.refcmd as moved_refcmd
+
+            real_lock = moved_refcmd._lock_fd
+            moved = {"done": False}
+
+            def move_tip_under_lock(fd, label):
+                real_lock(fd, label)
+                if not moved["done"] and label == "summary.md":
+                    moved["done"] = True
+                    git(moved_tip, ["update-ref", "HEAD", unrelated])
+
+            moved_refcmd._lock_fd = move_tip_under_lock
+            captured = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(captured):
+                    moved_code = run_prune(
+                        str(moved_tip),
+                        "summary.md",
+                        ("dead.md",),
+                        snapshot,
+                        "derived_from",
+                        True,
+                    )
+            finally:
+                moved_refcmd._lock_fd = real_lock
+            moved_out = captured.getvalue()
+            if (
+                moved_code == 0
+                or not moved["done"]
+                or not (moved_tip / "dead.md").is_file()
+                or (moved_tip / "living.md").read_text(encoding="utf-8") != before_living
+                or "ancestor" not in moved_out
+            ):
+                failures.append(f"moved tip should be refused before delete: {moved_out}")
+            else:
+                print("[PASS] prune refuses a tip that moved off the snapshot before delete")
+
             import atlas_cli.commands.refcmd as refcmd
 
             real_exchange = refcmd._exchange_names
