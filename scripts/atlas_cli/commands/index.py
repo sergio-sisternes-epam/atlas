@@ -965,8 +965,20 @@ def run_status(root: str | None, as_json: bool) -> int:
             if member.status != mesh_scope.STATUS_OK:
                 rows.append(_unprobed_status_row(row, member, doc, current))
                 continue
-            ref = _ref(loc.project, row)
-            location = index_location.IndexLocation(ref.path, loc.project, ref.store_id, "mesh", "mesh")
+            # Classified root, not _ref(row): _ref ignores subpath and maps a
+            # pathless row to .atlas-missing-path. Pin member.location(), as
+            # index build --mesh --all does, and keep the row for preferences.
+            raw = row.get("path")
+            ref = StoreRef(
+                member.atlas_id,
+                member.root,
+                row,
+                raw if isinstance(raw, str) and raw.strip() else None,
+            )
+            location = member.location()
+            if location is None:
+                rows.append(_described_status_row(ref, doc, current))
+                continue
             with index_location.pinned(location, index_location.MeshMatch(loc.project, row, doc)):
                 rows.append(_described_status_row(ref, doc, current))
     ignore = indexes_ignore_status(ignore_store, loc.project)

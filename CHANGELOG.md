@@ -21,10 +21,13 @@
   probing. Excluded, invalid and unmounted rows are reported from the mesh
   row and their status/reason only; their roots are never resolved, stat-ed
   or read, including a `../` or absolute path outside the project. Only an
-  `ok` member is described. A directory that exists but has no contract is
-  `unmounted` (exit 0), not a schema error; `index show` of that store still
-  reports the error. Standalone status, and mesh status when every row is
-  `ok`, is unchanged.
+  `ok` member is described, from its classified root (`path`/`subpath`, or
+  `.atlas/<id>` when the row has no path) and that member's mesh index, so a
+  pathless member is reported mounted and a subpath member reports its own
+  pages and index rather than the parent store's. A directory that exists but
+  has no contract is `unmounted` (exit 0), not a schema error; `index show`
+  of that store still reports the error. Standalone status, and mesh status
+  of a path row, is unchanged.
 - Fixed: mesh and index writes no longer follow a destination symlink.
   `graph.json`, `export-receipt.json`, mesh snapshot and pointer files,
   generation directories, recall sqlite databases, nanograph query and ready

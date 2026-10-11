@@ -217,7 +217,9 @@ external).
 `export --scope mesh` refuses those same non-regular output entries before
 writing either file, so a regular `graph.json` is not replaced when
 `export-receipt.json` is a symlink. `index status` in mesh mode classifies
-rows first and describes only `ok` members; excluded, invalid and unmounted
+rows first and describes only `ok` members, each from its classified root and
+mesh index location (a pathless row at `.atlas/<id>`, a subpath row at
+`path/subpath`, never the parent store); excluded, invalid and unmounted
 rows are listed from the mesh file (status and reason) and are never read.
 
 `--scope mesh` answers over every member of the project's `atlas-mesh.json`
