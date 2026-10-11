@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased (targets 0.14.0)
 
 ### Added
 
@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- Compile resolves a markdown link that starts with `/` against the store, not the host filesystem. A protocol-relative `//` link is not an internal store link.
+- Compile resolves a markdown link that starts with `/` against the store, not the host filesystem. A relative link that leaves the store is broken even when that file exists outside it. A protocol-relative `//` link is not an internal store link.
 - SCHEMA 2.0 YAML load treats a nesting recursion failure as a frontmatter error. A value deeper than the nesting limit does not escape as `RecursionError`.
 - `atlas ref show` and `atlas ref prune` treat `.atlas` as an Atlas-managed path. They do not walk, read, rewrite, or delete project index and mount pages.
 - Optimise treats a quoted `path` key as the relation path. A live edge is retargeted on a move. A ref-bearing item keeps its path.
@@ -38,8 +38,6 @@
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
 - `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
-
-## Unreleased (targets 0.14.0)
 
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)

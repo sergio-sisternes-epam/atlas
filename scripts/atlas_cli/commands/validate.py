@@ -107,7 +107,6 @@ def _ignores_in(text: str) -> set[str]:
 
 def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
     issues: list[dict] = []
-    parent = path.parent
     for m in MD_LINK.finditer(body):
         target = m.group(2).strip()
         if target.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
@@ -121,36 +120,47 @@ def _check_internal_links(root: Path, path: Path, body: str) -> list[dict]:
                 path_part = path_part[:idx]
         if not path_part or path_part.startswith("//"):
             continue
-        if path_part.startswith("/"):
-            suffix = path_part.lstrip("/")
-            cand = (root / suffix).resolve() if suffix else None
-            try:
-                if cand is not None:
-                    cand.relative_to(root.resolve())
-            except ValueError:
-                cand = None
-            if cand is None or not cand.exists():
-                issues.append(
-                    {
-                        "id": "internal_links",
-                        "path": rel(root, path),
-                        "msg": f"broken link: {target}",
-                    }
-                )
-            continue
-        cand = (parent / path_part).resolve()
-        if not cand.exists():
-            # try as root-relative
-            cand2 = (root / path_part.lstrip("/")).resolve()
-            if not cand2.exists():
-                issues.append(
-                    {
-                        "id": "internal_links",
-                        "path": rel(root, path),
-                        "msg": f"broken link: {target}",
-                    }
-                )
+        if not _link_stays_in_store(root, path, path_part):
+            issues.append(
+                {
+                    "id": "internal_links",
+                    "path": rel(root, path),
+                    "msg": f"broken link: {target}",
+                }
+            )
     return issues
+
+
+def _inside_store(root: Path, cand: Path) -> bool:
+    try:
+        cand.relative_to(root.resolve())
+    except ValueError:
+        return False
+    return cand.exists()
+
+
+def _link_stays_in_store(root: Path, page: Path, path_part: str) -> bool:
+    """True when a markdown path resolves to a file inside the store.
+
+    A leading ``/`` is store-root relative. A relative path must stay inside
+    the store even when the same file exists outside it. A missing relative
+    path may still be a root-relative path, and that fallback is contained too.
+    """
+    store = root.resolve()
+    if path_part.startswith("/"):
+        suffix = path_part.lstrip("/")
+        return bool(suffix) and _inside_store(store, (store / suffix).resolve())
+    relative = (page.parent / path_part).resolve()
+    try:
+        relative.relative_to(store)
+        contained = True
+    except ValueError:
+        contained = False
+    if contained and relative.exists():
+        return True
+    if relative.exists():
+        return False
+    return _inside_store(store, (store / path_part.lstrip("/")).resolve())
 
 
 def _folders_needing_index(root: Path, staging_dir: str) -> list[Path]:

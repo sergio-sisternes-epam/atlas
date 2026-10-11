@@ -3663,6 +3663,18 @@ def main() -> int:
                 failures.append(f"compile link check disagreed with prune: {link_msgs}")
             else:
                 print("[PASS] compile resolves a store-root link inside the store")
+            outside = rooted.parent / "outside.md"
+            outside.write_text("outside\n", encoding="utf-8")
+            escaped = _check_internal_links(
+                rooted,
+                rooted / "living.md",
+                "See [out](../outside.md#section) and [kept](dead.md).",
+            )
+            escaped_msgs = [item.get("msg", "") for item in escaped]
+            if not any("outside.md" in msg for msg in escaped_msgs) or any("dead.md" in msg for msg in escaped_msgs):
+                failures.append(f"relative link outside the store should be broken: {escaped_msgs}")
+            else:
+                print("[PASS] compile rejects a relative link that leaves the store")
             git(rooted, ["init", "-b", "main"])
             git(rooted, ["add", "."])
             git(rooted, ["commit", "-m", "rooted"])
