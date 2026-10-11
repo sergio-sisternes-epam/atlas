@@ -4,6 +4,7 @@ import contextvars
 import os
 import stat
 import sys
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -74,9 +75,14 @@ def mesh_walks():
 
 
 def is_symlink_entry(path: Path) -> bool:
-    """``lstat`` symlink check. Never follows. False when the path cannot be stat-ed."""
+    """``lstat`` symlink check. Never follows. False when the path cannot be stat-ed.
+
+    Uses ``os.lstat`` directly. ``Path.is_symlink`` reaches ``os.stat`` on
+    Python 3.13, which is a following stat to a caller that cannot see
+    ``follow_symlinks=False``.
+    """
     try:
-        return Path(path).is_symlink()
+        return stat.S_ISLNK(os.lstat(path).st_mode)
     except OSError:
         return False
 
@@ -297,3 +303,188 @@ def staging_files(root: Path, staging_dir: str = DEFAULT_STAGING) -> list[Path]:
     if not s.is_dir():
         return []
     return sorted(p for p in s.rglob("*") if p.is_file())
+
+
+class UnsafeDestination(OSError):
+    """Destination exists and is not a regular file, so a writer must not follow it."""
+
+    def __init__(self, path: Path | str, kind: str) -> None:
+        self.kind = kind
+        message = f"refusing to write through a {kind}: {path}"
+        # OSError.__str__ drops a plain message once .filename is set.
+        super().__init__(message)
+        self.filename = os.fspath(path)
+
+    def __str__(self) -> str:
+        return self.args[0] if self.args else f"refusing to write through a {self.kind}: {self.filename}"
+
+
+def _nofollow() -> int:
+    return getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+
+
+def exclusive_flags() -> int:
+    """``O_CREAT|O_EXCL|O_NOFOLLOW`` so a symlink is ``EEXIST`` and is not followed."""
+    return os.O_CREAT | os.O_EXCL | os.O_WRONLY | _nofollow()
+
+
+def _kind(st: os.stat_result) -> str:
+    if stat.S_ISLNK(st.st_mode):
+        return "symlink"
+    if stat.S_ISDIR(st.st_mode):
+        return "directory"
+    if stat.S_ISFIFO(st.st_mode):
+        return "fifo"
+    if stat.S_ISSOCK(st.st_mode):
+        return "socket"
+    return "non-regular file"
+
+
+def refuse_non_regular(path: Path) -> None:
+    """lstat ``path`` and refuse it when it exists and is not a regular file.
+
+    A missing path is fine. A symlink is refused even when its target is a
+    regular file, so callers never follow or replace that directory entry.
+    """
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(st.st_mode):
+        return
+    raise UnsafeDestination(path, _kind(st))
+
+
+def refuse_symlink(path: Path) -> None:
+    """Refuse a symlink (or fifo/socket) at ``path``. A missing path is fine.
+
+    A real directory or regular file is left for the caller (``os.replace`` of
+    a directory onto an existing directory still fails as before).
+    """
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(st.st_mode) or not (stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode)):
+        raise UnsafeDestination(path, _kind(st))
+
+
+def ensure_directory(path: Path) -> None:
+    """Create ``path`` as a real directory. Refuse a symlinked leaf.
+
+    Ancestors may be symlinks (``/tmp`` often is). Only the leaf is lstat-ed.
+    An existing real directory is left alone. ``Path.mkdir(exist_ok=True)`` is
+    not used on the leaf, because that follows a symlink to a directory.
+    """
+    path = Path(path)
+    parent = path.parent
+    if parent != path:
+        try:
+            os.lstat(parent)
+        except FileNotFoundError:
+            parent.mkdir(parents=True, exist_ok=True)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            st = os.lstat(path)
+        else:
+            return
+    if stat.S_ISLNK(st.st_mode):
+        raise UnsafeDestination(path, "symlink")
+    if not stat.S_ISDIR(st.st_mode):
+        raise UnsafeDestination(path, _kind(st))
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError(f"short write to fd {fd}")
+        view = view[written:]
+
+
+def _fsync_dir(parent: Path) -> None:
+    try:
+        dir_fd = os.open(os.fspath(parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
+def atomic_write_bytes(path: Path, data: bytes, *, mode: int | None = None) -> None:
+    """Write ``path`` without following a destination symlink.
+
+    lstat the destination and refuse it when it exists and is not a regular
+    file. Write a temp file created with ``O_CREAT|O_EXCL|O_NOFOLLOW`` in the
+    same directory, fsync, then ``os.replace`` over the destination (that
+    replaces the directory entry, not a symlink target).
+    """
+    path = Path(path)
+    refuse_non_regular(path)
+    parent = path.parent
+    tmp = parent / f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    fd = os.open(os.fspath(tmp), exclusive_flags(), 0o666)
+    try:
+        _write_all(fd, data)
+        os.fsync(fd)
+        if mode is not None:
+            try:
+                os.fchmod(fd, mode)
+            except OSError:
+                pass
+    except BaseException:
+        os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    try:
+        refuse_non_regular(path)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    _fsync_dir(parent)
+
+
+def atomic_write_text(path: Path, text: str, *, mode: int | None = None) -> None:
+    """UTF-8 :func:`atomic_write_bytes`."""
+    atomic_write_bytes(path, text.encode("utf-8"), mode=mode)
+
+
+def append_text(path: Path, text: str) -> None:
+    """Append to a regular file, or create one, without following a symlink."""
+    path = Path(path)
+    data = text.encode("utf-8")
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        atomic_write_bytes(path, data)
+        return
+    if not stat.S_ISREG(st.st_mode):
+        raise UnsafeDestination(path, _kind(st))
+    fd = os.open(os.fspath(path), os.O_WRONLY | os.O_APPEND | _nofollow())
+    try:
+        _write_all(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def create_exclusive(path: Path, *, mode: int = 0o644) -> int:
+    """Create a new regular file with ``O_CREAT|O_EXCL|O_NOFOLLOW``. Caller owns the fd."""
+    return os.open(os.fspath(path), exclusive_flags(), mode)

@@ -38,15 +38,17 @@ it is read only while the new location holds no index at all (see
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import os
 import re
 import sys
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from types import MappingProxyType
+from typing import Any, Iterator, Mapping
 
 from . import gitops, meshfile
 from .identity import IdentityError, normalise
@@ -70,8 +72,6 @@ _SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 _cache: dict[tuple[str, str], "IndexLocation"] = {}
-_pinned: dict[str, "IndexLocation"] = {}
-_pinned_matches: dict[str, "MeshMatch"] = {}
 _warned_relative = False
 
 
@@ -157,6 +157,30 @@ class MeshMatch:
         return self.directory / meshfile.MESH_NAME
 
 
+@dataclass(frozen=True)
+class _Pin:
+    """One caller's pin for a store root.
+
+    ``match`` is the single optional payload (packet MC passes the member's
+    mesh row). It is not a second process-global map.
+    """
+
+    location: IndexLocation
+    match: MeshMatch | None = None
+
+
+_EMPTY_PINS: Mapping[str, _Pin] = MappingProxyType({})
+# Context-local, not process-global: each thread and task sees only its own pins.
+_pins: contextvars.ContextVar[Mapping[str, _Pin]] = contextvars.ContextVar(
+    "atlas_index_location_pins",
+    default=_EMPTY_PINS,
+)
+
+
+def _active_pin(store_r: Path) -> _Pin | None:
+    return _pins.get().get(str(store_r))
+
+
 def mesh_match(store: Path) -> MeshMatch | None:
     """The first ``atlas-mesh.json`` row (walking up from ``store.parent``) whose path is ``store``.
 
@@ -164,9 +188,9 @@ def mesh_match(store: Path) -> MeshMatch | None:
     lookup, which also covers ``subpath`` and pathless rows.
     """
     store = Path(store).expanduser().resolve()
-    pinned_match = _pinned_matches.get(str(store))
-    if pinned_match is not None:
-        return pinned_match
+    pin = _active_pin(store)
+    if pin is not None and pin.match is not None:
+        return pin.match
     for directory in [store.parent, *store.parent.parents]:
         if not (directory / meshfile.MESH_NAME).is_file():
             continue
@@ -280,40 +304,40 @@ def pinned(location: IndexLocation, match: MeshMatch | None = None) -> Iterator[
     For callers that already know the store's mesh row (mesh scope), so no
     walk-up, ``git`` subprocess or standalone id is involved.
     ``ATLAS_INDEX_ROOT`` still replaces the project root, as in :func:`resolve`.
-    With ``match`` (the store's mesh row and document), :func:`mesh_match`
-    returns it too, so row and project preferences such as ``recall.engine``
-    apply to ``subpath`` and pathless rows as well.
+
+    The pin is stored in a :class:`contextvars.ContextVar` keyed by the resolved
+    store root and restored with the token from ``set``. Nested pins of the
+    same or another store unwind to this caller's own pin; a pin in one thread
+    or task is invisible to another. ``match`` is the optional mesh row (packet
+    MC). With ``match``, :func:`mesh_match` returns it too, so row and project
+    preferences such as ``recall.engine`` apply to ``subpath`` and pathless
+    rows as well. An inner pin that omits it keeps the outer row. Any extra
+    fields on ``location`` are kept.
     """
     store_r = Path(location.store).expanduser().resolve()
-    loc = IndexLocation(store_r, location.project_root, location.atlas_id, location.id_source, location.mode)
+    loc = replace(location, store=store_r)
     key = str(store_r)
-    previous = _pinned.get(key)
-    previous_match = _pinned_matches.get(key)
-    _pinned[key] = loc
-    if match is not None:
-        _pinned_matches[key] = match
+    current = _pins.get()
+    previous = current.get(key)
+    carried = match if match is not None else (previous.match if previous is not None else None)
+    updated = dict(current)
+    updated[key] = _Pin(loc, carried)
+    token = _pins.set(updated)
     try:
         yield loc
     finally:
-        if previous is None:
-            _pinned.pop(key, None)
-        else:
-            _pinned[key] = previous
-        if previous_match is None:
-            _pinned_matches.pop(key, None)
-        else:
-            _pinned_matches[key] = previous_match
+        _pins.reset(token)
 
 
 def resolve(store: Path) -> IndexLocation:
     """Resolve the project root and atlas id that own this store's indexes."""
     store_r = Path(store).expanduser().resolve()
     override = _override_root()
-    pin = _pinned.get(str(store_r))
+    pin = _active_pin(store_r)
     if pin is not None:
         if override is not None:
-            return IndexLocation(store_r, override, pin.atlas_id, pin.id_source, pin.mode)
-        return pin
+            return replace(pin.location, store=store_r, project_root=override)
+        return pin.location
     key = (str(store_r), str(override or ""))
     hit = _cache.get(key)
     if hit is not None:

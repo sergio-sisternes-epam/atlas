@@ -499,9 +499,12 @@ def index_unset_cmd(root: str | None, store: str | None, default: bool, as_json:
 @index_group.command("show")
 @click.option("--root", default=None, help="store or project directory (default: cwd)")
 @click.option("--store", "store", default=None, help=_STORE_HELP)
+@click.option("--mesh", "mesh", is_flag=True, help="print only the mesh block (members, scopes, mesh indexes)")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
-def index_show_cmd(root: str | None, store: str | None, as_json: bool) -> None:
+def index_show_cmd(root: str | None, store: str | None, mesh: bool, as_json: bool) -> None:
     """Configured values per level, winning engine, effective engine and index freshness for one store."""
+    if mesh:
+        raise SystemExit(cmd_index.run_show_mesh(root, store, as_json))
     raise SystemExit(cmd_index.run_show(root, store, as_json))
 
 
@@ -517,10 +520,15 @@ def index_status_cmd(root: str | None, as_json: bool) -> None:
 @click.option("--root", default=None, help="store or project directory (default: cwd)")
 @click.option("--store", "store", default=None, help=_STORE_HELP)
 @click.option("--all", "all_stores", is_flag=True, help="every mounted store in the project")
+@click.option("--mesh", "mesh", is_flag=True, help="build or refresh the mesh graph index (.atlas/indexes/graph/_mesh/)")
 @click.option("--force", is_flag=True, help="rebuild even when the index is fresh")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
-def index_build_cmd(root: str | None, store: str | None, all_stores: bool, force: bool, as_json: bool) -> None:
+def index_build_cmd(
+    root: str | None, store: str | None, all_stores: bool, mesh: bool, force: bool, as_json: bool
+) -> None:
     """Build or refresh the index for the effective engine (exit 1 when any build failed)."""
+    if mesh:
+        raise SystemExit(cmd_index.run_build_mesh(root, store, all_stores, force, as_json))
     raise SystemExit(cmd_index.run_build(root, store, all_stores, force, as_json))
 
 
@@ -532,6 +540,14 @@ def graph_group() -> None:
 _ROOT_HELP = "Atlas store root (default: cwd)"
 _PARTIAL_HELP = "report an incomplete corpus (exit 1) instead of failing on projection errors"
 _EXITS_HELP = "include kva/status terminated|deprecated|superseded pages"
+_SCOPE_HELP = "store (default) or mesh: every Atlas in this project's atlas-mesh.json (default: graph.scope, else store)"
+_MESH_STORE_HELP = "mesh scope only: limit to this member atlas id (repeatable)"
+
+
+def _scope_option(fn):
+    return click.option(
+        "--scope", "scope", type=click.Choice(["store", "mesh"]), default=None, help=_SCOPE_HELP
+    )(fn)
 
 
 @graph_group.command("nodes")
@@ -542,6 +558,8 @@ _EXITS_HELP = "include kva/status terminated|deprecated|superseded pages"
 # min=1: 0 has no documented meaning for nodes and would only return an empty list.
 @click.option("--limit", type=click.IntRange(min=1), default=None, help="max nodes (at least 1)")
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@_scope_option
+@click.option("--store", "stores", multiple=True, help=_MESH_STORE_HELP)
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_nodes_cmd(
     root: str | None,
@@ -550,11 +568,15 @@ def graph_nodes_cmd(
     include_exits: bool,
     limit: int | None,
     allow_partial: bool,
+    scope: str | None,
+    stores: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """Pages whose frontmatter matches every --where."""
     raise SystemExit(
-        cmd_graph.run_nodes(root, where, path_prefix, include_exits, limit, allow_partial, as_json)
+        cmd_graph.run_nodes(
+            root, where, path_prefix, include_exits, limit, allow_partial, as_json, scope, stores
+        )
     )
 
 
@@ -566,6 +588,8 @@ def graph_nodes_cmd(
 @click.option("--kind", "kinds", multiple=True, help="relation kind (repeatable)")
 @click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@_scope_option
+@click.option("--store", "stores", multiple=True, help="mesh scope only: edges authored in this member (repeatable)")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_edges_cmd(
     root: str | None,
@@ -575,12 +599,14 @@ def graph_edges_cmd(
     kinds: tuple[str, ...],
     include_exits: bool,
     allow_partial: bool,
+    scope: str | None,
+    stores: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """relates_to edges in authored direction, unresolved ones included."""
     raise SystemExit(
         cmd_graph.run_edges(
-            root, from_page, to_page, all_edges, kinds, include_exits, allow_partial, as_json
+            root, from_page, to_page, all_edges, kinds, include_exits, allow_partial, as_json, scope, stores
         )
     )
 
@@ -608,6 +634,7 @@ def graph_edges_cmd(
     show_default=True,
     help="traversal driver (nanograph: optional, macOS arm64, falls back to native)",
 )
+@_scope_option
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_neighbours_cmd(
     page: str,
@@ -621,13 +648,15 @@ def graph_neighbours_cmd(
     include_exits: bool,
     allow_partial: bool,
     driver: str,
+    scope: str | None,
     as_json: bool,
 ) -> None:
-    """Bounded breadth-first neighbourhood of PAGE."""
+    """Bounded breadth-first neighbourhood of PAGE (mesh scope: an atlas:// URI or a --root path)."""
+    explicit = click.get_current_context().get_parameter_source("driver") != click.core.ParameterSource.DEFAULT
     raise SystemExit(
         cmd_graph.run_neighbours(
             root, page, kinds, direction, hops, where, max_nodes, max_edges,
-            include_exits, allow_partial, as_json, driver,
+            include_exits, allow_partial, as_json, driver if explicit else None, scope,
         )
     )
 
@@ -643,14 +672,15 @@ def graph_drivers_cmd(root: str | None, as_json: bool) -> None:
 @graph_group.command("export")
 @click.option("--root", default=None, help=_ROOT_HELP)
 @click.option("--format", "fmt", type=click.Choice(["json", "nanograph"]), required=True)
-@click.option("--out", "out", required=True, help="output directory outside the store")
+@click.option("--out", "out", required=True, help="output directory outside the store (mesh: outside every member and .atlas/indexes/)")
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)
+@_scope_option
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def graph_export_cmd(
-    root: str | None, fmt: str, out: str, allow_partial: bool, as_json: bool
+    root: str | None, fmt: str, out: str, allow_partial: bool, scope: str | None, as_json: bool
 ) -> None:
-    """Deterministic graph export (graph.json, or nanograph schema.pg + seed.jsonl)."""
-    raise SystemExit(cmd_graph.run_export(root, fmt, out, allow_partial, as_json))
+    """Deterministic graph export (graph.json, or nanograph schema.pg + seed.jsonl; mesh: json, structure only)."""
+    raise SystemExit(cmd_graph.run_export(root, fmt, out, allow_partial, as_json, scope))
 
 
 if __name__ == "__main__":

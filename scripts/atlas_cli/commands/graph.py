@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from ..core import driver_overlay
 from ..core import graph as core
+from ..core import mesh_graph, mesh_scope
 from ..core.index_location import warning_text
 from ..core.paths import store_root
 
@@ -34,8 +36,8 @@ def _base(root: Path, verb: str, source: dict[str, Any] | None) -> dict[str, Any
     return payload
 
 
-def _fail(root: Path, verb: str, error: str, as_json: bool) -> int:
-    payload = {
+def _fail(root: Path, verb: str, error: str, as_json: bool, scope: str | None = None) -> int:
+    payload: dict[str, Any] = {
         "ok": False,
         "root": str(root),
         "verb": verb,
@@ -46,11 +48,141 @@ def _fail(root: Path, verb: str, error: str, as_json: bool) -> int:
         "complete": False,
         "count": 0,
     }
+    if scope is not None:
+        payload["scope"] = scope
     if as_json:
         print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         print(f"atlas graph {verb} — FAIL: {error}")
     return 2
+
+
+# --- scope (M13, M14) -------------------------------------------------------
+
+
+@dataclass
+class Scope:
+    name: str
+    mesh: mesh_scope.Mesh | None = None
+    error: str | None = None
+
+
+def resolve_scope(root: str | None, flag: str | None, stores: tuple[str, ...] = ()) -> Scope:
+    """``--scope`` flag > top-level ``graph.scope`` > ``store``; ``--store`` needs mesh scope."""
+    r = store_root(root)
+    mesh: mesh_scope.Mesh | None = None
+    if flag == "mesh":
+        try:
+            mesh = mesh_scope.discover(r)
+        except mesh_scope.MeshScopeError as e:
+            return Scope("mesh", error=str(e))
+        return Scope("mesh", mesh)
+    if flag is None:
+        try:
+            mesh = mesh_scope.discover(r)
+        except (mesh_scope.MeshScopeError, OSError):
+            mesh = None
+        if mesh is not None and mesh_graph.configured_scope(mesh.doc, "graph") == "mesh":
+            return Scope("mesh", mesh)
+    if stores:
+        return Scope("store", error="--store is only valid in mesh scope (pass --scope mesh)")
+    return Scope("store")
+
+
+def _mesh_lines_tail(payload: dict[str, Any]) -> str:
+    tail = f"count={payload['count']} scope=mesh generation={payload.get('generation') or '-'}"
+    if payload.get("truncated"):
+        tail += " truncated=true"
+    return tail
+
+
+def _run_mesh(
+    root: str | None,
+    verb: str,
+    scope: Scope,
+    allow_partial: bool,
+    as_json: bool,
+    body: Callable[[mesh_graph.Query, mesh_graph.MeshGraph], tuple[dict[str, Any], list[str]]],
+) -> int:
+    r = store_root(root)
+    if scope.error or scope.mesh is None:
+        return _fail(r, verb, scope.error or "no mesh", as_json, scope="mesh")
+    if allow_partial:
+        return _fail(r, verb, "--allow-partial is not supported with --scope mesh", as_json, scope="mesh")
+    try:
+        mg = mesh_graph.ensure(scope.mesh)
+        extra, lines = body(mesh_graph.Query(mg, r), mg)
+    except (mesh_scope.MeshScopeError, core.GraphError, OSError) as e:
+        return _fail(r, verb, str(e), as_json, scope="mesh")
+    payload: dict[str, Any] = {
+        "ok": True,
+        "root": str(r),
+        "verb": verb,
+        "scope": "mesh",
+        "project": str(mg.mesh.project),
+        "mesh_digest": mg.mesh_digest,
+        "generation": mg.generation,
+        "index_dir": mesh_graph.relative_dir(mg.mesh.project, mg.index_dir),
+        "rebuilt": mg.rebuilt,
+        "complete": True,
+        **extra,
+    }
+    notes = [n for n in (extra.get("driver_note"), mg.driver_note) if n]
+    if notes:
+        payload["driver_note"] = "; ".join(notes)
+    warnings = [*mg.warnings, *(extra.get("warnings") or [])]
+    if warnings:
+        payload["warnings"] = warnings
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+        return 0
+    for item in warnings:
+        print(f"warning: {warning_text(item)}", file=sys.stderr)
+    if mg.driver_note and not extra.get("driver_note"):
+        print(f"driver_note: {mg.driver_note}")
+    for line in lines:
+        print(line)
+    print(f"# {_mesh_lines_tail(payload)}")
+    return 0
+
+
+def _mesh_node_line(node: dict[str, Any]) -> str:
+    prefix = f"hop={node['hop']} " if "hop" in node else ""
+    state = " ".join(f"{k}={node[k]}" for k in ("kva", "status") if node.get(k))
+    return f"{prefix}{node['id']}\t{node['type'] or '-'}\t{node['title']}" + (f"\t{state}" if state else "")
+
+
+def _mesh_edge_line(edge: dict[str, Any]) -> str:
+    prefix = f"hop={edge['hop']} " if "hop" in edge else ""
+    line = f"{prefix}{edge['from']} -[{edge['kind']}]-> {edge['to']}"
+    if "direction" in edge:
+        line += f" ({edge['direction']})"
+    if edge.get("cross"):
+        line += " cross"
+    if edge.get("resolved") is False:
+        line += f" unresolved ({edge.get('reason')})"
+    if edge.get("suggest"):
+        line += f" suggest {edge['suggest']}"
+    return line
+
+
+def _noncanonical_warnings(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for edge in edges:
+        if edge.get("resolution") == mesh_scope.RESOLUTION_MESH_PATH and edge.get("resolved"):
+            out.append(
+                {
+                    "code": mesh_scope.NONCANONICAL_LINK,
+                    "level": "warning",
+                    "from": edge["from"],
+                    "suggest": edge.get("suggest"),
+                    "message": (
+                        f"{edge['from']} links to {edge['to']} through a mesh-relative path, which breaks where "
+                        f"the stores are mounted elsewhere; write {edge.get('suggest')} instead"
+                    ),
+                }
+            )
+    return out
 
 
 def _emit(payload: dict[str, Any], as_json: bool, lines: list[str]) -> int:
@@ -117,11 +249,27 @@ def run_nodes(
     limit: int | None,
     allow_partial: bool,
     as_json: bool,
+    scope: str | None = None,
+    stores: tuple[str, ...] = (),
 ) -> int:
+    chosen = resolve_scope(root, scope, stores)
     try:
         wheres = core.parse_where(where)
     except core.GraphError as e:
-        return _fail(store_root(root), "nodes", str(e), as_json)
+        return _fail(store_root(root), "nodes", str(e), as_json, scope="mesh" if chosen.name == "mesh" else None)
+    if chosen.error and chosen.name == "store":
+        return _fail(store_root(root), "nodes", chosen.error, as_json)
+    if chosen.name == "mesh":
+
+        def mesh_body(q: mesh_graph.Query, _mg: mesh_graph.MeshGraph):
+            result = q.nodes_query(
+                wheres=wheres, stores=stores, path_prefix=path_prefix, include_exits=include_exits, limit=limit
+            )
+            nodes = result["nodes"]
+            extra = {"count": len(nodes), "nodes": nodes, "truncated": result["truncated"]}
+            return extra, [_mesh_node_line(n) for n in nodes]
+
+        return _run_mesh(root, "nodes", chosen, allow_partial, as_json, mesh_body)
 
     def body(_: Path, source: dict[str, Any]):
         result = core.query_nodes(
@@ -147,11 +295,35 @@ def run_edges(
     include_exits: bool,
     allow_partial: bool,
     as_json: bool,
+    scope: str | None = None,
+    stores: tuple[str, ...] = (),
 ) -> int:
+    chosen = resolve_scope(root, scope, stores)
+    mark = "mesh" if chosen.name == "mesh" else None
     if all_edges and (from_page or to_page):
-        return _fail(store_root(root), "edges", "--all cannot be combined with --from or --to", as_json)
+        return _fail(store_root(root), "edges", "--all cannot be combined with --from or --to", as_json, scope=mark)
     if not (all_edges or from_page or to_page):
-        return _fail(store_root(root), "edges", "pass --from PAGE, --to PAGE or --all", as_json)
+        return _fail(store_root(root), "edges", "pass --from PAGE, --to PAGE or --all", as_json, scope=mark)
+    if chosen.error and chosen.name == "store":
+        return _fail(store_root(root), "edges", chosen.error, as_json)
+    if chosen.name == "mesh":
+
+        def mesh_body(q: mesh_graph.Query, _mg: mesh_graph.MeshGraph):
+            result = q.edges_query(
+                from_page=from_page, to_page=to_page, kinds=kinds, stores=stores, include_exits=include_exits
+            )
+            edges = result["edges"]
+            extra: dict[str, Any] = {
+                "count": len(edges),
+                "edges": edges,
+                "unresolved_by_reason": result["unresolved_by_reason"],
+            }
+            warnings = _noncanonical_warnings(edges)
+            if warnings:
+                extra["warnings"] = warnings
+            return extra, [_mesh_edge_line(e) for e in edges]
+
+        return _run_mesh(root, "edges", chosen, allow_partial, as_json, mesh_body)
 
     def body(_: Path, source: dict[str, Any]):
         edges = core.query_edges(
@@ -178,14 +350,44 @@ def run_neighbours(
     include_exits: bool,
     allow_partial: bool,
     as_json: bool,
-    driver: str = "native",
+    driver: str | None = "native",
+    scope: str | None = None,
 ) -> int:
+    chosen = resolve_scope(root, scope)
+    mark = "mesh" if chosen.name == "mesh" else None
     if hops < 1 or hops > core.MAX_HOPS:
-        return _fail(store_root(root), "neighbours", f"--hops must be between 1 and {core.MAX_HOPS}", as_json)
+        return _fail(store_root(root), "neighbours", f"--hops must be between 1 and {core.MAX_HOPS}", as_json, scope=mark)
     try:
         wheres = core.parse_where(where)
     except core.GraphError as e:
-        return _fail(store_root(root), "neighbours", str(e), as_json)
+        return _fail(store_root(root), "neighbours", str(e), as_json, scope=mark)
+    if chosen.name == "mesh":
+        wanted = driver or (mesh_graph.configured_driver(chosen.mesh.doc) if chosen.mesh else None) or "native"
+
+        def mesh_body(q: mesh_graph.Query, _mg: mesh_graph.MeshGraph):
+            result = q.neighbours_query(
+                page,
+                kinds=kinds,
+                direction=direction,
+                hops=hops,
+                wheres=wheres,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+                include_exits=include_exits,
+            )
+            extra = {"count": len(result["nodes"]), **result}
+            if wanted == "nanograph":
+                # M16 fallback: the nanograph mesh graph is packet MD; native answers, exit code unchanged.
+                extra["driver_note"] = mesh_graph.NANOGRAPH_NOTE
+            lines = [f"seed {result['seed']}"]
+            if extra.get("driver_note"):
+                lines.append(f"driver: {result['driver_used']} ({extra['driver_note']})")
+            lines += [_mesh_node_line(n) for n in result["nodes"]]
+            lines += [_mesh_edge_line(e) for e in result["edges"]]
+            return extra, lines
+
+        return _run_mesh(root, "neighbours", chosen, allow_partial, as_json, mesh_body)
+    driver = driver or "native"
 
     def body(r: Path, source: dict[str, Any]):
         options = {
@@ -249,8 +451,43 @@ def run_export(
     out: str,
     allow_partial: bool,
     as_json: bool,
+    scope: str | None = None,
 ) -> int:
     r = store_root(root)
+    chosen = resolve_scope(root, scope)
+    if chosen.name == "mesh":
+        if fmt != "json":
+            return _fail(
+                r,
+                "export",
+                "graph export --scope mesh --format nanograph is not built yet (packet MD); use --format json",
+                as_json,
+                scope="mesh",
+            )
+        if chosen.error or chosen.mesh is None:
+            return _fail(r, "export", chosen.error or "no mesh", as_json, scope="mesh")
+        try:
+            out_dir = mesh_graph.check_export_out(chosen.mesh, out)
+        except mesh_scope.MeshScopeError as e:
+            return _fail(r, "export", str(e), as_json, scope="mesh")
+
+        def mesh_body(_q: mesh_graph.Query, mg: mesh_graph.MeshGraph):
+            files, receipt = mesh_graph.export_json(mg, out_dir)
+            extra = {
+                "format": fmt,
+                "out": str(out_dir),
+                "count": receipt["nodes"],
+                "edges": receipt["edges"],
+                "members": receipt["members"],
+                "excluded": receipt["excluded"],
+                "invalid": receipt["invalid"],
+                "unresolved": receipt["unresolved"],
+                "unresolved_by_reason": receipt["unresolved_by_reason"],
+                "files": files,
+            }
+            return extra, [str(out_dir / f) for f in files]
+
+        return _run_mesh(root, "export", chosen, allow_partial, as_json, mesh_body)
     try:
         out_dir = core.check_out_dir(r, out)
     except core.GraphError as e:

@@ -285,7 +285,9 @@ def main() -> int:
         code, p, out = run_json("show-unknown", "index", "show", "--root", str(project), "--store", "github.com/acme/nope")
         check("show-unknown-store", code == 2 and p.get("known_ids") == mesh_ids, out[:400])
 
-        # A mesh row whose directory exists but holds no contract: ok is false with the error.
+        # A mesh row whose directory exists but holds no contract: show still
+        # reads it and reports the error. status classifies it as unmounted
+        # and does not probe, so it is not a schema error (exit 0).
         broken = tmp / "broken"
         init_store(broken / "atlas" / "alpha")
         (broken / "atlas" / "empty").mkdir(parents=True)
@@ -293,7 +295,13 @@ def main() -> int:
         code, p, out = run_json("show-broken", "index", "show", "--root", str(broken), "--store", "github.com/acme/empty")
         check("show-schema-error-not-ok", code == 1 and p.get("ok") is False and bool(p.get("error")), out[:500])
         code, p, out = run_json("status-broken", "index", "status", "--root", str(broken))
-        check("status-schema-error-not-ok", code == 1 and p.get("ok") is False, out[:500])
+        empty = next((r for r in p.get("stores") or [] if r.get("store_id") == "github.com/acme/empty"), {})
+        check(
+            "status-schema-error-not-ok",
+            code == 0 and p.get("ok") is True and empty.get("status") == "unmounted"
+            and empty.get("mounted") is False and "error" not in empty,
+            out[:500],
+        )
 
         # --- a plain directory with no mesh ----------------------------------------------
         plain = tmp / "plain"

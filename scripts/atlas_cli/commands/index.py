@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import engine_preference as ep
-from ..core import index_location, meshfile
+from ..core import index_location, mesh_graph, mesh_scope, meshfile
 from ..core.identity import IdentityError, normalise
 from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored, indexes_ignore_status
 from ..core.paths import store_root
@@ -483,6 +483,118 @@ def run_build(
     return code
 
 
+def _discover_mesh(loc: Located) -> mesh_scope.Mesh:
+    try:
+        return mesh_scope.discover(loc.project or loc.root)
+    except mesh_scope.MeshScopeError as e:
+        raise UsageError(str(e)) from e
+
+
+def build_mesh(mesh: mesh_scope.Mesh, force: bool = False) -> dict[str, Any]:
+    """Build or refresh the mesh graph index; never falls back to an in-memory answer."""
+    try:
+        mg = mesh_graph.ensure(mesh, force=force, fallback=False)
+    except Exception as e:  # noqa: BLE001 - reported per build, exit 1
+        return {"status": "failed", "error": str(e), "index_dir": ".atlas/indexes/graph/_mesh"}
+    return {
+        "status": "built" if mg.rebuilt else "fresh",
+        "generation": mg.generation,
+        "mesh_digest": mg.mesh_digest,
+        "index_dir": mesh_graph.relative_dir(mesh.project, mg.index_dir),
+        "members": [m.atlas_id for m in mg.members if m.status == mesh_scope.STATUS_OK],
+        "nodes": len(mg.doc.get("nodes") or []),
+        "edges": len(mg.doc.get("edges") or []),
+        "unresolved_by_reason": mg.doc.get("unresolved_by_reason"),
+        **({"warnings": mg.warnings} if mg.warnings else {}),
+    }
+
+
+def _mesh_build_line(res: dict[str, Any]) -> str:
+    if res.get("status") == "failed":
+        return f"mesh graph: FAILED: {res.get('error')}"
+    verb = "built" if res.get("status") == "built" else "fresh (not rebuilt)"
+    return (
+        f"mesh graph: {verb} generation={res.get('generation')} index={res.get('index_dir')} "
+        f"members={','.join(res.get('members') or []) or '-'}"
+    )
+
+
+_SKIP_MESSAGES = {
+    mesh_scope.STATUS_EXCLUDED: "skipped: excluded from the mesh (mesh_member: false)",
+    mesh_scope.STATUS_INVALID: "skipped: invalid mesh member",
+    mesh_scope.STATUS_UNMOUNTED: "skipped: store not mounted",
+}
+
+
+def _build_member(m: mesh_scope.Member, row: dict[str, Any], force: bool) -> dict[str, Any]:
+    """Build the member's own root (``path/subpath``, or ``.atlas/<id>`` for a pathless row).
+
+    The index location is pinned to the member's row id under the project, so
+    no walk-up, ``git`` subprocess or standalone id is involved.
+    """
+    raw = row.get("path")
+    ref = StoreRef(m.atlas_id, m.root, row, raw if isinstance(raw, str) and raw.strip() else None)
+    location = m.location()
+    if location is None:
+        return build_store(ref, force)
+    with index_location.pinned(location):
+        return build_store(ref, force)
+
+
+def _build_members(mesh: mesh_scope.Mesh, force: bool) -> list[dict[str, Any]]:
+    """Build every ``ok`` member; every other row is reported as skipped and its root is never accessed."""
+    rows = mesh.doc.get("stores") or []
+    results: list[dict[str, Any]] = []
+    for m in mesh_scope.members(mesh):
+        row = rows[m.index]
+        if m.status == mesh_scope.STATUS_OK:
+            results.append(_build_member(m, row, force))
+            continue
+        message = _SKIP_MESSAGES.get(m.status, f"skipped: member {m.status}")
+        if m.reason:
+            message += f" ({m.reason})"
+        res: dict[str, Any] = {"store_id": m.atlas_id, "status": "skipped", "member_status": m.status, "message": message}
+        if m.reason:
+            res["reason"] = m.reason
+        raw = row.get("path")
+        if isinstance(raw, str) and raw.strip():
+            res["path"] = raw
+        results.append(res)
+    return results
+
+
+def run_build_mesh(root: str | None, store: str | None, all_stores: bool, force: bool, as_json: bool) -> int:
+    """``atlas index build --mesh [--all] [--force]``: member builds first, then the mesh graph (M10b)."""
+    if store:
+        return _fail(as_json, "--mesh cannot be combined with --store")
+    loc = locate(root)
+    if loc.error:
+        return _locate_fail(as_json, loc)
+    try:
+        mesh = _discover_mesh(loc)
+        results = _build_members(mesh, force) if all_stores else []
+    except UsageError as e:
+        return _fail(as_json, str(e), root=str(loc.root))
+    # Member locks are all released before the mesh lock is taken (M9 lock order).
+    mesh_res = build_mesh(mesh, force)
+    failed = [r for r in results if r.get("status") == "failed"]
+    mesh_failed = mesh_res.get("status") == "failed"
+    payload: dict[str, Any] = {
+        "ok": not failed and not mesh_failed,
+        "root": str(loc.root),
+        "project": str(mesh.project),
+        "mesh_file": _rel(loc, loc.mesh_file),
+        "mesh": mesh_res,
+    }
+    if all_stores:
+        payload["stores"] = results
+    lines = [*[_build_line(r) for r in results], _mesh_build_line(mesh_res)]
+    if failed or mesh_failed:
+        lines.append(f"{len(failed) + int(mesh_failed)} build(s) failed")
+    _emit(as_json, payload, lines)
+    return 1 if failed or mesh_failed else 0
+
+
 # --- set / unset ----------------------------------------------------------------
 
 
@@ -720,9 +832,90 @@ def run_show(root: str | None, store: str | None, as_json: bool) -> int:
     return 0 if payload["ok"] else 1
 
 
+def run_show_mesh(root: str | None, store: str | None, as_json: bool) -> int:
+    """``atlas index show --mesh``: the mesh block alone."""
+    if store:
+        return _fail(as_json, "--mesh cannot be combined with --store")
+    loc = locate(root)
+    if loc.error:
+        return _locate_fail(as_json, loc)
+    try:
+        block = mesh_graph.describe_block(_discover_mesh(loc))
+    except (UsageError, mesh_scope.MeshScopeError) as e:
+        return _fail(as_json, str(e), root=str(loc.root))
+    _emit(as_json, {"ok": True, "mesh": block}, mesh_graph.block_lines(block))
+    return 0
+
+
 def _ignore_line(ignore: dict[str, Any]) -> str:
     reason = ignore.get("reason")
     return f"ignore: {ignore.get('status')}" + (f" ({reason})" if reason and ignore.get("status") != "ok" else "")
+
+
+def _described_status_row(ref: StoreRef, doc: dict[str, Any] | None, current: str | None) -> dict[str, Any]:
+    """The status row ``describe_store`` produces. Standalone and ok members only."""
+    d = describe_store(ref, doc)
+    lv = d.get("levels") or {}
+    configured, source = (lv.get("store"), "store") if lv.get("store") else (lv.get("project"), "project") if lv.get("project") else (None, "default")
+    idx = d.get("index") or {}
+    error = d.get("error") or d.get("schema_error")
+    return {
+        "store_id": ref.store_id,
+        **({"current": ref.store_id == current} if current else {}),
+        "path": ref.rel,
+        "mounted": ref.mounted,
+        "configured": configured,
+        "configured_source": source,
+        "engine_requested": d.get("engine_requested"),
+        "engine_source": d.get("engine_source"),
+        "engine_effective": d.get("engine_effective"),
+        "profile": d.get("profile"),
+        "freshness": idx.get("freshness") if ref.mounted else None,
+        "generation": idx.get("generation") if ref.mounted else None,
+        "index_dir": idx.get("index_dir"),
+        **({"error": error} if error else {}),
+    }
+
+
+def _configured_meta(row: dict[str, Any] | None, doc: dict[str, Any] | None) -> tuple[Any, str]:
+    """Configured engine from the already-loaded mesh document. Does not touch the store."""
+    row_recall = (row or {}).get("recall")
+    top_recall = (doc or {}).get("recall") if row is not None else None
+    store_eng = row_recall.get("engine") if isinstance(row_recall, dict) else None
+    project_eng = top_recall.get("engine") if isinstance(top_recall, dict) else None
+    if store_eng:
+        return store_eng, "store"
+    if project_eng:
+        return project_eng, "project"
+    return None, "default"
+
+
+def _unprobed_status_row(
+    row: dict[str, Any], member: mesh_scope.Member, doc: dict[str, Any] | None, current: str | None
+) -> dict[str, Any]:
+    """A non-ok mesh row: authored path, status and reason. Never resolved or read."""
+    raw = row.get("path")
+    rel = raw if isinstance(raw, str) and raw.strip() else None
+    configured, source = _configured_meta(row, doc)
+    out = {
+        "store_id": str(row["id"]),
+        **({"current": str(row["id"]) == current} if current else {}),
+        "path": rel,
+        "mounted": False,
+        "configured": configured,
+        "configured_source": source,
+        "engine_requested": None,
+        "engine_source": None,
+        "engine_effective": None,
+        "profile": None,
+        "freshness": None,
+        "generation": None,
+        "index_dir": None,
+        "status": member.status,
+    }
+    if member.reason:
+        out["reason"] = member.reason
+    return out
 
 
 def run_status(root: str | None, as_json: bool) -> int:
@@ -742,37 +935,53 @@ def run_status(root: str | None, as_json: bool) -> int:
             doc = _load_doc(loc)
         except UsageError as e:
             return _usage_fail(as_json, e, loc.root)
-        refs = [_ref(loc.project, row) for row in _rows(doc)]
+        refs = []
         mode = "mesh"
         current = str(loc.match.row["id"]) if loc.match is not None else None
     top = (doc or {}).get("recall")
     default = top.get("engine") if isinstance(top, dict) else None
     rows = []
-    for ref in refs:
-        d = describe_store(ref, doc)
-        lv = d.get("levels") or {}
-        configured, source = (lv.get("store"), "store") if lv.get("store") else (lv.get("project"), "project") if lv.get("project") else (None, "default")
-        idx = d.get("index") or {}
-        error = d.get("error") or d.get("schema_error")
-        rows.append(
-            {
-                "store_id": ref.store_id,
-                **({"current": ref.store_id == current} if current else {}),
-                "path": ref.rel,
-                "mounted": ref.mounted,
-                "configured": configured,
-                "configured_source": source,
-                "engine_requested": d.get("engine_requested"),
-                "engine_source": d.get("engine_source"),
-                "engine_effective": d.get("engine_effective"),
-                "profile": d.get("profile"),
-                "freshness": idx.get("freshness") if ref.mounted else None,
-                "generation": idx.get("generation") if ref.mounted else None,
-                "index_dir": idx.get("index_dir"),
-                **({"error": error} if error else {}),
-            }
-        )
-    ignore = indexes_ignore_status(refs[0].path if refs else loc.root, loc.project)
+    ignore_store = loc.root
+    if mode == "standalone":
+        for ref in refs:
+            rows.append(_described_status_row(ref, doc, current))
+        if refs:
+            ignore_store = refs[0].path
+    else:
+        assert doc is not None and loc.project is not None
+        try:
+            classified = mesh_scope.members(mesh_scope.Mesh(loc.project, doc))
+        except (mesh_scope.MeshScopeError, OSError, TypeError, KeyError, ValueError) as e:
+            return _fail(as_json, f"cannot classify mesh members without reading them: {e}", root=str(loc.root))
+        source_rows = list(doc.get("stores") or [])
+        for member in classified:
+            row = source_rows[member.index] if member.index < len(source_rows) else None
+            if not isinstance(row, dict):
+                return _fail(
+                    as_json,
+                    f"cannot classify mesh members without reading them: stores[{member.index}] is not an object",
+                    root=str(loc.root),
+                )
+            if member.status != mesh_scope.STATUS_OK:
+                rows.append(_unprobed_status_row(row, member, doc, current))
+                continue
+            # Classified root, not _ref(row): _ref ignores subpath and maps a
+            # pathless row to .atlas-missing-path. Pin member.location(), as
+            # index build --mesh --all does, and keep the row for preferences.
+            raw = row.get("path")
+            ref = StoreRef(
+                member.atlas_id,
+                member.root,
+                row,
+                raw if isinstance(raw, str) and raw.strip() else None,
+            )
+            location = member.location()
+            if location is None:
+                rows.append(_described_status_row(ref, doc, current))
+                continue
+            with index_location.pinned(location, index_location.MeshMatch(loc.project, row, doc)):
+                rows.append(_described_status_row(ref, doc, current))
+    ignore = indexes_ignore_status(ignore_store, loc.project)
     errors = [r for r in rows if r.get("error")]
     payload = {
         "ok": not errors,
@@ -802,5 +1011,19 @@ def run_status(root: str | None, as_json: bool) -> int:
     lines.append(_ignore_line(ignore))
     if errors:
         lines.append(f"{len(errors)} store(s) with errors")
+    for row in rows:
+        status = row.get("status")
+        if status and status != mesh_scope.STATUS_OK:
+            reason = f" ({row['reason']})" if row.get("reason") else ""
+            lines.append(f"member {row['store_id']}: {status}{reason}")
+    if mode == "mesh":
+        # M15: the block appears only once a mesh scope is configured or the mesh index exists.
+        try:
+            mesh = mesh_scope.discover(loc.project)
+            if mesh_graph.in_use(mesh):
+                payload["mesh"] = mesh_graph.describe_block(mesh)
+                lines += mesh_graph.block_lines(payload["mesh"])
+        except (mesh_scope.MeshScopeError, OSError):
+            pass
     _emit(as_json, payload, lines)
     return 0 if payload["ok"] else 1

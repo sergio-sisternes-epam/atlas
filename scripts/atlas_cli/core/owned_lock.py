@@ -1,6 +1,6 @@
 """Owner-token lock file shared by index builders and mesh writers.
 
-A holder creates ``<parent>/<name>`` with ``O_CREAT | O_EXCL`` and writes JSON
+A holder creates ``<parent>/<name>`` with ``O_CREAT | O_EXCL | O_NOFOLLOW`` and writes JSON
 with a per-acquisition ``owner`` token, pid, host and ``created_at``. A lock
 older than ``stale_seconds``, or whose pid is gone on this host, is stale: a
 new holder renames it aside to ``<name>.stale-<owner>-<rand>`` (atomic; losing
@@ -32,6 +32,8 @@ import os
 import socket
 import time
 import uuid
+
+from . import paths
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -178,7 +180,7 @@ class OwnedLock:
 
     def _create(self) -> bool:
         try:
-            fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            fd = os.open(str(self.path), paths.exclusive_flags(), 0o644)
         except FileExistsError:
             return False
         try:
@@ -256,8 +258,9 @@ class OwnedLock:
         deadline = time.monotonic() + wait
         while True:
             token = uuid.uuid4().hex
+            paths.refuse_non_regular(guard)
             try:
-                fd = os.open(str(guard), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                fd = os.open(str(guard), paths.exclusive_flags(), 0o644)
             except FileExistsError:
                 self._break_guard(guard)
                 if time.monotonic() >= deadline:
@@ -325,10 +328,13 @@ class OwnedLock:
             self._release_guard(token)
 
     def try_acquire(self) -> bool:
-        self.parent.mkdir(parents=True, exist_ok=True)
+        paths.ensure_directory(self.parent)
         for _ in range(5):
+            # A symlink must not be stat-ed (that follows) or renamed aside.
+            paths.refuse_non_regular(self.path)
             if self._create():
                 return True
+            paths.refuse_non_regular(self.path)
             seen_id = self._identity(self.path)
             if seen_id is None:
                 continue

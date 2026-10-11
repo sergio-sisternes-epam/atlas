@@ -38,6 +38,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, TypeVar
 
+from . import paths
 from .owned_lock import TAKEOVER_STALE_SECONDS, OwnedLock, OwnershipLost
 
 LOCK_NAME = ".lock"
@@ -86,28 +87,26 @@ def fsync_tree(path: Path) -> None:
 
 
 def write_json_atomic(target: Path, data: dict[str, Any]) -> None:
-    """Write ``target`` via a unique temp sibling, fsync and ``os.replace``."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / f"{TMP_PREFIX}{target.name}.{os.getpid()}.{new_name()}"
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+    """Write ``target`` without following a destination symlink.
+
+    A symlink, directory or other non-regular entry is refused and left in
+    place. A regular file is replaced via a temp sibling and ``os.replace``.
+    """
+    paths.ensure_directory(target.parent)
+    paths.atomic_write_text(target, json.dumps(data, indent=2, sort_keys=True) + "\n")
     fsync_path(target.parent)
 
 
 def publish_dir(tmp_dir: Path, dest: Path) -> None:
-    """Atomically move a fully written temp generation to its final name."""
+    """Atomically move a fully written temp generation to its final name.
+
+    A symlinked destination is refused and left in place (``os.replace`` would
+    replace the symlink entry, but must not be how a generation is published
+    over a link into a member).
+    """
     fsync_tree(tmp_dir)
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    paths.ensure_directory(dest.parent)
+    paths.refuse_symlink(dest)
     os.replace(tmp_dir, dest)
     fsync_path(dest.parent)
 

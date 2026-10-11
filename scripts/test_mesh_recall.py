@@ -416,7 +416,7 @@ def main() -> int:
             all(v == (str(project_edge.resolve()), "mesh") for v in seen.values()),
             str(seen),
         )
-        check("pin-released", str(project_edge.resolve() / "atlas" / "mono" / "kb") not in index_location._pinned)
+        check("pin-released", str(project_edge.resolve() / "atlas" / "mono" / "kb") not in index_location._pins.get())
 
         # --- excluded member never touched (in process, file access patched) -------------
         index_location.clear_cache()

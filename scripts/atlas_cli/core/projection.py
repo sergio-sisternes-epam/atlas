@@ -16,13 +16,14 @@ agrees.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .frontmatter import FrontmatterError, read_page
+from .frontmatter import FrontmatterError, parse_page
 from .overlay import overlay_files
 from .paths import (
     CONTRACT_NAME,
@@ -293,12 +294,12 @@ def project_store(
         if path.name == "log.md":
             role = "log"
         try:
-            meta, body = read_page(path, version)
+            # Parse the bytes just hashed. A second read could pair a page from
+            # one corpus with the digest of another.
+            text = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", errors="replace").read()
+            meta, body = parse_page(text, version)
         except FrontmatterError as e:
             omitted.append({"path": rel(root, path), "reason": f"parse:{e}"})
-            continue
-        except OSError as e:
-            omitted.append({"path": rel(root, path), "reason": f"unreadable:{e}"})
             continue
         page_id = rel(root, path)
         pages.append(

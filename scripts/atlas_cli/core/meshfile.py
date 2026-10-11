@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-import tempfile
+import stat
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import paths
 from .identity import IdentityError, normalise
 
 MESH_NAME = "atlas-mesh.json"
@@ -462,38 +463,22 @@ def _current_umask() -> int:
 
 
 def write_json_atomic(fp: Path, doc: Any, indent: str | int = 2, trailing_newline: bool = True) -> None:
-    """Temp file in the same directory, flush + fsync, then ``os.replace``; no temp file survives."""
+    """Temp file in the same directory, fsync, then ``os.replace``; no temp file survives.
+
+    A symlink or other non-regular destination is refused and left in place.
+    Indentation, ``ensure_ascii=False`` and the trailing-newline flag are unchanged.
+    An existing regular file keeps its mode; a new file uses the ``open()`` umask mode.
+    """
     text = json.dumps(doc, indent=indent, ensure_ascii=False) + ("\n" if trailing_newline else "")
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{fp.name}.", suffix=".tmp", dir=str(fp.parent))
-    tmp = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        try:
-            mode = fp.stat().st_mode & 0o7777
-        except OSError:
-            # New file: the mode a plain open() would give, not mkstemp's 0600.
-            mode = 0o666 & ~_current_umask()
-        try:
-            os.chmod(tmp, mode)
-        except OSError:
-            pass
-        os.replace(tmp, fp)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    try:
-        dir_fd = os.open(str(fp.parent), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-    finally:
-        os.close(dir_fd)
+        st = os.lstat(fp)
+    except FileNotFoundError:
+        mode = 0o666 & ~_current_umask()
+    else:
+        if not stat.S_ISREG(st.st_mode):
+            raise paths.UnsafeDestination(fp, "symlink" if stat.S_ISLNK(st.st_mode) else "non-regular file")
+        mode = st.st_mode & 0o7777
+    paths.atomic_write_text(fp, text, mode=mode)
 
 
 def set_recall_engine(project: Path, target: str | None, value: str | None) -> RecallWrite:

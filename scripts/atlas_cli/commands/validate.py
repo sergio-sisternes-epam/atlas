@@ -15,6 +15,7 @@ from ..core import index_location
 from ..core.ignore_guard import ensure_index_ignored, ensure_indexes_ignored
 from ..core.recall_index import IndexError_, publish_generation
 from ..core.engine_preference import refresh_preferred
+from ..core.mesh_graph import refresh_after_compile
 from ..core.schema import (
     by_type_map,
     compute_stamp_shape,
@@ -44,6 +45,8 @@ NON_BLOCKING_WARNING_IDS = {
     # A failed ignore guard is reported, never fatal: the index is still built.
     "atlas_indexes_ignore_failed",
     "atlas_index_ignore_failed",
+    # M10: a failed mesh graph refresh is a warning, never a compile failure.
+    "mesh_graph_refresh_failed",
 }
 
 # Memory layers (frame / gist / page, original shipped 0.13.0-beta;
@@ -1150,6 +1153,13 @@ def run(
     if not dry_run and not focused and not critical:
         for item in refresh_preferred(r, schema):
             (warnings if item.get("level") == "warning" else info).append(item)
+
+    if not dry_run and not focused:
+        # After member index work, so the mesh lock is never held while a member lock is taken (M9).
+        # The mesh graph reports broken links itself, so it refreshes even when this compile fails.
+        mesh_item = refresh_after_compile(r)
+        if mesh_item:
+            (warnings if mesh_item.get("level") == "warning" else info).append(mesh_item)
 
     if not dry_run:
         for ignored in (ensure_indexes_ignored(r), ensure_index_ignored(r)):

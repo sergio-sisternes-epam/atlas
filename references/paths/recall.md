@@ -259,8 +259,15 @@ atlas index build [--store <atlas-id> | --all] [--force]
   plus the project's `ignore` status as in `show`. It does so from the
   project root, any subdirectory or inside a mounted store; inside a store,
   `current_store` (and `current: true` on its row, a `current store:` line
-  in text mode) names that store. `ok` is `false` (exit 1) when any row has
-  an `error`. Without an `atlas-mesh.json`, a directory that is not a store
+  in text mode) names that store. In mesh mode each row is classified first.
+  Only an `ok` member is resolved and described. An excluded, invalid or
+  unmounted row is reported from the mesh row alone (`status` and `reason`
+  when set; configured engine from the row or project default). Its root is
+  never resolved, stat-ed or read, including a `../` or absolute path
+  outside the project. A directory that exists but has no contract is
+  `unmounted` (exit 0), not a schema error; `index show` of that store still
+  reports the error. `ok` is `false` (exit 1) when any probed row has an
+  `error`. Without an `atlas-mesh.json`, a directory that is not a store
   exits 2 with `code: not_a_store` and the `atlas mount` hint.
 - **`build`** builds or refreshes the index for the effective engine of the
   store at (or containing) `--root`, of `--store <atlas-id>`, or of every
