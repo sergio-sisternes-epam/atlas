@@ -22,8 +22,8 @@ kept so later per-member lists can join without a contract change.
 
 Members follow :func:`mesh_scope.members`: only ``ok`` members are searched,
 each with its index location pinned to its mesh row (project and row id).
-``excluded``, ``unmounted`` and ``invalid`` members (a row outside the project
-or with an invalid atlas id) are never read and are reported with their
+``excluded``, ``unmounted`` and ``invalid`` members (a row outside the project,
+with an invalid atlas id or whose root overlaps another row's root) are never read and are reported with their
 status and, when ``mesh_scope`` gives one, a ``reason``. Hit URIs are
 :func:`mesh_scope.node_id` ids, so a path with ``%``, ``#``, ``?`` or
 whitespace is percent-encoded and round-trips through

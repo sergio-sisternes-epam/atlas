@@ -21,7 +21,13 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
   like an ``outside_project`` row (never read, links into it are
   ``outside_mesh``). A row whose root is not a directory holding a contract
   file is ``unmounted``; it is never mounted, and no git or network call is
-  made for it. Invariant: every ``ok`` member's id round-trips through
+  made for it. Overlap is decided lexically before any filesystem access: a
+  row whose root (``project / path / subpath``, normalised, with no absolute
+  part or ``..`` segment) equals or contains another row's lexical root,
+  whatever that other row's status, is ``invalid`` with reason
+  ``overlapping_root``, because reading it would also read the other row's
+  pages. It is never read, and a link into it is ``outside_mesh``; the
+  contained row keeps its own status. Invariant: every ``ok`` member's id round-trips through
   :func:`node_id` / :func:`parse_node_id` and resolves as ``atlas_uri``.
 - Loading (M2): an ``ok`` member is read through its mesh location (the
   project and the row id, as :func:`index_location.mesh_match` gives for a
@@ -67,7 +73,7 @@ from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import contained_root, has_contract_file
+from .paths import contained_root, has_contract_file, join_under
 from .projection import ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
@@ -80,6 +86,7 @@ STATUS_INVALID = "invalid"
 
 MEMBER_OUTSIDE_PROJECT = "outside_project"
 MEMBER_INVALID_ID = "invalid_atlas_id"
+MEMBER_OVERLAPPING = "overlapping_root"
 
 RESOLUTION_LOCAL = "local"
 RESOLUTION_ATLAS_URI = "atlas_uri"
@@ -383,20 +390,43 @@ def _mount_label(project: Path, row: dict[str, Any], sid: str) -> str:
     return (PurePosixPath(".atlas") / PurePosixPath(*sid.split("/"))).as_posix()
 
 
+def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
+    """Indexes of rows whose lexical root equals or contains another row's lexical root.
+
+    Purely lexical (no filesystem access). Only a row whose root has no
+    absolute part or ``..`` segment can contain another; every other row's
+    normalised lexical root counts as a contained root, whatever its status.
+    """
+    lexical = [_row_root(project, row, i) for i, row in enumerate(rows)]
+    out: set[int] = set()
+    for i, row in enumerate(rows):
+        if join_under(project, *_row_parts(row, i)) is None:
+            continue
+        mine = lexical[i]
+        if any(j != i and _lexically_under(other, mine) for j, other in enumerate(lexical)):
+            out.add(i)
+    return out
+
+
 def members(mesh: Mesh) -> list[Member]:
     """Every row in file order with its status.
 
-    Neither an excluded root, a root that escapes the project nor the root
-    of a row with an invalid id is ever touched: the id and containment are
-    checked before any stat of the root.
+    Neither an excluded root, a root that escapes the project, a root that
+    overlaps another row's root nor the root of a row with an invalid id is
+    ever touched: the id, overlap and containment are checked before any
+    stat of the root.
     """
     out: list[Member] = []
-    for i, row in enumerate(mesh.doc.get("stores") or []):
+    rows = list(mesh.doc.get("stores") or [])
+    overlapping = _overlapping_rows(mesh.project, rows)
+    for i, row in enumerate(rows):
         sid = str(row["id"])
         root = _row_root(mesh.project, row, i)
         reason = None
         if not is_member_id(row.get("id")):
             status, reason = STATUS_INVALID, MEMBER_INVALID_ID
+        elif i in overlapping:
+            status, reason = STATUS_INVALID, MEMBER_OVERLAPPING
         elif not meshfile.is_mesh_member(row):
             status = STATUS_EXCLUDED
         elif _contained_row_root(mesh.project, row, i) is None:

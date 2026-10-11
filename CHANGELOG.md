@@ -53,7 +53,10 @@
   `path` or `subpath` is absolute, has a `..` segment or crosses a symlink
   that resolves outside the project is `invalid` with reason
   `outside_project`, and a row id with an empty host (such as `/acme/repo`)
-  is `invalid` with reason `invalid_atlas_id`. Nothing under it is read, and links into it stay
+  is `invalid` with reason `invalid_atlas_id`. A row whose root equals or
+  contains another row's root is `invalid` with reason `overlapping_root`
+  (decided lexically, before any file access); the contained row keeps its
+  status. Nothing under it is read, and links into it stay
   unresolved as `outside_mesh`. The module names pages
   `atlas://<atlas-id>/<path>` (with `%`, `#`, `?`, whitespace and
   non-printable characters percent-encoded, so every page round-trips), withholds `sensitivity: restricted` pages and
