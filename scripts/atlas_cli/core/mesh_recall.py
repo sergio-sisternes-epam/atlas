@@ -98,12 +98,13 @@ def resolve_settings(root: Path, scope_flag: str | None, rrf_k_flag: Any = None)
     the scope is ``store`` and nothing else changes: the store pipeline reports
     any mesh file problem exactly as it always has.
 
-    A listed row root is a mesh even when the row is excluded, a ``subpath``
-    row or pathless. Discovery names the project without reading that store,
-    so a project ``recall.scope: mesh`` federates and reports the member
-    excluded instead of falling back to store recall. Explicit ``--scope
-    store`` still searches that store alone: exclusion is a mesh-scope rule,
-    and the flag overrides the project setting.
+    A listed row root is a mesh even when the row is excluded, has an id that
+    is not an index path, a ``subpath`` row or pathless. Discovery names the
+    project without reading that store, so a project ``recall.scope: mesh``
+    federates and reports the member excluded or invalid
+    (``invalid_atlas_id``) instead of falling back to store recall. Explicit
+    ``--scope store`` still searches that store alone: exclusion is a
+    mesh-scope rule, and the flag overrides the project setting.
     """
     k_flag = parse_rrf_k(rrf_k_flag) if rrf_k_flag is not None else None
     scope = str(scope_flag).strip().lower() if scope_flag else None
@@ -116,9 +117,9 @@ def resolve_settings(root: Path, scope_flag: str | None, rrf_k_flag: Any = None)
         except mesh_scope.MeshScopeError as e:
             raise MeshRecallError(str(e)) from e
     elif scope is None:
-        # Failure means this root is not a listed row. An excluded subpath or
-        # pathless root is listed, so it is not a failure and cannot drop
-        # ``recall.scope: mesh`` into store recall.
+        # Failure means this root is not a listed row. An excluded, invalid-id,
+        # subpath or pathless root is listed, so it is not a failure and cannot
+        # drop ``recall.scope: mesh`` into store recall.
         try:
             mesh = mesh_scope.discover(root)
         except mesh_scope.MeshScopeError:

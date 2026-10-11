@@ -45,9 +45,10 @@
   returns every hit from every member, whatever its engine. `--profile` or
   `--allow-partial` with mesh scope, a negative `--limit` with mesh scope,
   `--rrf-k` in store scope, a bad k or no mesh exits 2. A listed excluded,
-  subpath or pathless root is still discovered, without reading that store,
-  so `recall.scope: mesh` federates and reports the member excluded instead
-  of falling back to store recall. Explicit `--scope store` still searches
+  invalid-id, subpath or pathless root is still discovered, without reading
+  that store, so `recall.scope: mesh` federates and reports the member
+  excluded or invalid (`invalid_atlas_id`) instead of falling back to store
+  recall. Explicit `--scope store` still searches
   that store alone: exclusion applies only in mesh scope, and the flag
   overrides the project setting. Mesh scope never follows a symlink: ripgrep is not passed `--follow` or `-L` and is not given a symlink path, and page walks (grep, FTS5, nanograph and the mesh view) skip symlinked files and directories. A member whose root, or any in-project component of that root, is a symlink is `invalid` with reason `symlinked_root` and is not read. Store scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds

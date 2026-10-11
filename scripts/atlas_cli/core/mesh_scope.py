@@ -5,11 +5,12 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
 
 - Discovery (M2): ``--root`` is a project directory holding
   ``atlas-mesh.json`` or any listed row root, including an excluded row, a
-  ``subpath`` root and a pathless row. :func:`index_location.mesh_match`
-  covers a ``path`` row; :func:`_member_root_match` covers the rest,
-  membership included, by resolving that row root's own path components
-  only. Nothing inside the store is read. A standalone store raises
-  :class:`MeshScopeError`.
+  row whose id is not an index path, a ``subpath`` root and a pathless row.
+  :func:`_member_root_match` names the project by a lexical match of every
+  listed row location, whatever the row's id validity, membership or status.
+  Nothing under that root is read. :func:`index_location.mesh_match` still
+  covers a ``path`` row reached through a symlink component, and raises on
+  duplicate store ids. A standalone store raises :class:`MeshScopeError`.
 - Members (M2): the rows in file order. A row with ``mesh_member: false`` is
   ``excluded`` and nothing inside its root is ever read (no stat, open,
   listdir or projection). A row whose root is not contained in the project
@@ -329,15 +330,18 @@ def discover(root: Path | str) -> Mesh:
     start = Path(root).expanduser().resolve()
     if (start / meshfile.MESH_NAME).is_file():
         return _load_mesh(start)
+    # Lexical match first, so an invalid-id row is found without resolving
+    # its root. mesh_match remains for a path row reached through a symlink,
+    # and for the duplicate-id error.
+    project = _member_root_match(start)
+    if project is not None:
+        return _load_mesh(project)
     try:
         match = index_location.mesh_match(start)
     except index_location.IndexLocationError as e:
         raise MeshScopeError(str(e)) from e
     if match is not None:
         return _load_mesh(match.directory)
-    project = _member_root_match(start)
-    if project is not None:
-        return _load_mesh(project)
     raise MeshScopeError(f"no atlas-mesh.json lists this store: {start}")
 
 
@@ -350,13 +354,27 @@ def _load_mesh(project: Path) -> Mesh:
     return Mesh(project, doc)
 
 
-def _member_root_match(start: Path) -> Path | None:
-    """Rows ``mesh_match`` does not cover: a ``subpath`` root or a row with no ``path``.
+def _lexically_at(candidate: Path, start: Path) -> bool:
+    """True when two paths are the same location with no filesystem access."""
+    return os.path.normpath(candidate) == os.path.normpath(start)
 
-    Membership does not matter. An excluded row is still listed, so discovery
-    must find its project or ``recall.scope: mesh`` would fall back to store
-    recall and read that store. Only the row root's own path components are
-    resolved; nothing inside the store is read.
+
+def _member_root_match(start: Path) -> Path | None:
+    """Every listed row location, including ones ``mesh_match`` does not cover.
+
+    A ``path`` row, a ``subpath`` root and a pathless row all count. Id
+    validity, membership and status do not: an excluded or invalid-id row is
+    still listed, so discovery must find its project or ``recall.scope: mesh``
+    would fall back to store recall and read that store. The match is lexical
+    (the normalised row root). Nothing under the row root is read, and an
+    invalid id is never resolved, so it never receives an index path.
+    :func:`members` classifies the id.
+
+    A member id whose root has a symlink component is still matched by
+    resolving that root's own path components. ``--root`` is already resolved
+    by the time discovery runs, and without this a direct root at a symlinked
+    member would miss the mesh and fall back to store recall. The link is not
+    followed for an invalid id.
     """
     for directory in [start.parent, *start.parent.parents]:
         if not (directory / meshfile.MESH_NAME).is_file():
@@ -366,7 +384,12 @@ def _member_root_match(start: Path) -> Path | None:
         except (meshfile.MeshFileError, OSError, ValueError):
             continue
         for i, row in enumerate(doc.get("stores") or []):
-            if not isinstance(row, dict) or not is_member_id(row.get("id")):
+            if not isinstance(row, dict):
+                continue
+            if _lexically_at(_row_root(directory, row, i), start):
+                return directory
+            # Invalid ids stay lexical: resolving them would touch the root.
+            if not is_member_id(row.get("id")):
                 continue
             candidate = _contained_row_root(directory, row, i)
             if candidate is None:
