@@ -215,6 +215,7 @@ class MemberAnswer:
     engine_requested: str | None
     engine_used: str | None
     driver_note: str | None
+    path_rejected: bool = False
 
 
 MemberSearch = Callable[..., MemberAnswer]
@@ -248,12 +249,14 @@ def store_search(
     payload = outcome.payload
     if outcome.render in ("critical", "fail", "partial") or payload.get("ok") is False or outcome.code != 0:
         raise MemberError(str(payload.get("error") or f"exit {outcome.code}"))
+    rejected = bool(outcome.path_rejected)
     return MemberAnswer(
-        hits=list(payload.get("hits") or []),
+        hits=[] if rejected else list(payload.get("hits") or []),
         match=payload.get("match"),
         engine_requested=payload.get("engine_requested"),
         engine_used=payload.get("engine_used"),
         driver_note=payload.get("driver_note"),
+        path_rejected=rejected,
     )
 
 
@@ -328,7 +331,9 @@ def federate(
             record["error"] = _short(e)
             records.append(record)
             continue
-        hits = answer.hits[:per_member] if per_member else answer.hits
+        # A rejected path: filter yields no hits for this member. Other members are unchanged.
+        member_hits = [] if answer.path_rejected else answer.hits
+        hits = member_hits[:per_member] if per_member else member_hits
         record.update(
             engine_requested=answer.engine_requested,
             engine_used=answer.engine_used,

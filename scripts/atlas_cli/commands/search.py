@@ -151,7 +151,25 @@ def _present(meta: dict, key: str):
     return val
 
 
-def _path_constraint(root: Path, raw: str | None) -> tuple[Path | None, str | None]:
+class _InvalidPathFilter:
+    """Mesh ``path:`` crossed a symlink.
+
+    Not ``None``. ``None`` means there is no path constraint, and grep, BM25
+    and nanograph would then search the whole member. Callers must return no
+    hits for this member instead.
+    """
+
+
+_INVALID_PATH_FILTER = _InvalidPathFilter()
+
+
+def _path_constraint(root: Path, raw: str | None) -> tuple[Path | _InvalidPathFilter | None, str | None]:
+    """Resolve a ``path:`` filter.
+
+    ``(None, None)`` means no filter. ``(_INVALID_PATH_FILTER, warning)`` means
+    mesh scope would have to follow a symlink: return no hits for this member,
+    do not drop the constraint. Store scope never takes that branch.
+    """
     if not raw:
         return None, None
     if skipping_symlinks():
@@ -159,7 +177,7 @@ def _path_constraint(root: Path, raw: str | None) -> tuple[Path | None, str | No
         link = leading_symlink(candidate_link)
         if link is not None:
             note_skipped_symlink(link, "path filter")
-            return None, f"path: is a symlink; mesh scope does not follow it ({raw})"
+            return _INVALID_PATH_FILTER, f"path: is a symlink; mesh scope does not follow it ({raw})"
     candidate = Path(raw)
     if candidate.is_absolute():
         resolved = candidate.resolve()
@@ -172,12 +190,26 @@ def _path_constraint(root: Path, raw: str | None) -> tuple[Path | None, str | No
     return resolved, None
 
 
-def _under_prefix(page: Path, prefix: Path) -> bool:
+def _under_prefix(page: Path, prefix: Path | _InvalidPathFilter) -> bool:
+    if prefix is _INVALID_PATH_FILTER:
+        return False
     try:
         page.resolve().relative_to(prefix)
         return True
     except ValueError:
         return page.resolve() == prefix
+
+
+def _mesh_symlink_path(root: Path, query: str) -> bool:
+    """True when a mesh ``path:`` filter crosses a symlink. Does not follow it."""
+    if not skipping_symlinks():
+        return False
+    filters, _rest = _split_filters(query)
+    raw = filters.get("path")
+    if not raw:
+        return False
+    candidate = Path(raw) if Path(raw).is_absolute() else root / raw
+    return leading_symlink(candidate) is not None
 
 
 def _grep_search(
@@ -199,6 +231,9 @@ def _grep_search(
     prefix, path_warn = _path_constraint(root, filters.get("path"))
     if path_warn:
         warnings.append(path_warn)
+    # Rejected filter: no walk, no ripgrep target, no hits. Do not search unconstrained.
+    if prefix is _INVALID_PATH_FILTER:
+        return [], warnings
     if prefix is not None and not prefix.exists():
         return [], warnings
 
@@ -326,10 +361,12 @@ def _bm25_eligible(
     root: Path,
     page: ProjectedPage,
     filters: dict[str, str],
-    prefix: Path | None,
+    prefix: Path | _InvalidPathFilter | None,
     include_exits: bool,
     withhold: Withhold | None = None,
 ) -> bool:
+    if prefix is _INVALID_PATH_FILTER:
+        return False
     if page.role == "log":
         return False
     meta = page.meta
@@ -387,6 +424,8 @@ def _bm25_search(
     if path_warn:
         warnings.append(path_warn)
     meta_out = {"ephemeral": False, "fast_path": False, "match": "all"}
+    if prefix is _INVALID_PATH_FILTER:
+        return [], warnings, meta_out
     if prefix is not None and not prefix.exists():
         return [], warnings, meta_out
 
@@ -509,6 +548,8 @@ def _nanograph_search(
     prefix, path_warn = _path_constraint(root, filters.get("path"))
     if path_warn:
         warnings.append(path_warn)
+    if prefix is _INVALID_PATH_FILTER:
+        return [], warnings, {"index": None}
     try:
         source = graph_core.load_source(root)
         if prefix is not None and not prefix.exists():
@@ -564,6 +605,7 @@ class SearchOutcome:
     all_warnings: list = field(default_factory=list)
     index_warnings: list = field(default_factory=list)
     source: str = ""
+    path_rejected: bool = False
 
 
 def run(
@@ -742,6 +784,12 @@ def search(
             r, query, staging_name, limit, include_exits, page_ver, withhold
         )
 
+    # Federated merge reads this payload. A rejected filter is no hits, even if
+    # an engine forgot to stop and searched without the constraint.
+    path_rejected = _mesh_symlink_path(r, query)
+    if path_rejected:
+        hits = []
+
     all_warnings: list = [w for w in [warning, *extra_warnings] if w]
     index_warnings: list[dict] = []
     if mode_used == "sqlite-fts5" and bm25_meta.get("legacy_warning"):
@@ -796,7 +844,9 @@ def search(
         payload["score_orientation"] = "higher_better"
         payload["nanograph_index"] = nano_meta.get("index")
 
-    return SearchOutcome("engine", payload, 0, r, query, all_warnings, index_warnings, pref.source)
+    return SearchOutcome(
+        "engine", payload, 0, r, query, all_warnings, index_warnings, pref.source, path_rejected=path_rejected
+    )
 
 
 def render(outcome: SearchOutcome, as_json: bool) -> int:
