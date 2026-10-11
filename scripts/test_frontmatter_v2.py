@@ -49,6 +49,18 @@ class FrontmatterV2Tests(unittest.TestCase):
         with self.assertRaises(FrontmatterError):
             load_yaml_value(nested)
 
+    def test_recursion_failure_is_frontmatter_error(self) -> None:
+        nested = "1"
+        for _ in range(1200):
+            nested = f"[{nested}]"
+        for value in (nested, f"---\nk: {nested}\n---\nbody\n"):
+            with self.assertRaises(FrontmatterError) as caught:
+                if value.startswith("---"):
+                    split_fm_v2(value)
+                else:
+                    load_yaml_value(value)
+            self.assertIn("nesting exceeds limit", str(caught.exception))
+
     def test_v1_parser_unchanged_for_yes(self) -> None:
         text = "---\ntitle: yes\n---\n\nbody\n"
         meta, _ = split_fm(text)

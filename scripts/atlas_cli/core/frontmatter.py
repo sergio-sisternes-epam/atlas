@@ -124,7 +124,15 @@ def schema_v2_loader():
     from yaml.nodes import MappingNode
 
     class UniqueSafeLoader(yaml.SafeLoader):
-        pass
+        def compose_node(self, parent, index):
+            depth = getattr(self, "_atlas_depth", 0) + 1
+            if depth > MAX_YAML_DEPTH:
+                raise FrontmatterError("frontmatter nesting exceeds limit")
+            self._atlas_depth = depth
+            try:
+                return super().compose_node(parent, index)
+            finally:
+                self._atlas_depth = depth - 1
 
     UniqueSafeLoader.yaml_implicit_resolvers = {
         ch: [
@@ -185,20 +193,33 @@ def _bounded_yaml_events(text: str) -> None:
         raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
 
 
-def load_yaml_value(text: str) -> Any:
-    """Parse one YAML value with the SCHEMA 2.0 scalar rules."""
-    _bounded_yaml_events(text)
+def _load_bounded(text: str, loader: Any, *, invalid: str) -> Any:
     try:
         import yaml
     except ImportError as e:
         raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
     try:
-        data = yaml.load(text, Loader=schema_v2_loader())
+        return yaml.load(text, Loader=loader)
+    except RecursionError as e:
+        raise FrontmatterError("frontmatter nesting exceeds limit") from e
     except yaml.YAMLError as e:
-        raise FrontmatterError(f"invalid YAML: {e}") from e
+        raise FrontmatterError(f"{invalid}: {e}") from e
+
+
+def _normalize(value: Any) -> Any:
+    try:
+        return _jsonish(value)
+    except RecursionError as e:
+        raise FrontmatterError("frontmatter nesting exceeds limit") from e
+
+
+def load_yaml_value(text: str) -> Any:
+    """Parse one YAML value with the SCHEMA 2.0 scalar rules."""
+    _bounded_yaml_events(text)
+    data = _load_bounded(text, schema_v2_loader(), invalid="invalid YAML")
     if data is None:
         return None
-    return _jsonish(data)
+    return _normalize(data)
 
 
 def split_fm_v2(text: str) -> tuple[dict, str]:
@@ -211,22 +232,12 @@ def split_fm_v2(text: str) -> tuple[dict, str]:
     block = text[3:end].strip("\n")
     body = text[end + 4 :]
     _bounded_yaml_events(block)
-    try:
-        import yaml
-    except ImportError as e:
-        raise FrontmatterError("PyYAML is required for SCHEMA 2.0 frontmatter") from e
-    UniqueSafeLoader = schema_v2_loader()
-    try:
-        data = yaml.load(block, Loader=UniqueSafeLoader)
-    except yaml.YAMLError as e:
-        raise FrontmatterError(f"invalid YAML frontmatter: {e}") from e
-    except FrontmatterError:
-        raise
+    data = _load_bounded(block, schema_v2_loader(), invalid="invalid YAML frontmatter")
     if data is None:
         return {}, body
     if not isinstance(data, dict):
         raise FrontmatterError("frontmatter must be a mapping")
-    return _jsonish(data), body
+    return _normalize(data), body
 
 
 def parse_page(text: str, schema_version: str = "1.0") -> tuple[dict, str]:
