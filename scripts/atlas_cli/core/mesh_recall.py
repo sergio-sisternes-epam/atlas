@@ -23,8 +23,10 @@ kept so later per-member lists can join without a contract change.
 Members follow :func:`mesh_scope.members`: only ``ok`` members are searched,
 each with its index location pinned to its mesh row (project and row id).
 ``excluded``, ``unmounted`` and ``invalid`` members (a row outside the project,
-with an invalid atlas id or whose root overlaps another row's root) are never read and are reported with their
-status and, when ``mesh_scope`` gives one, a ``reason``. Hit URIs are
+with an invalid atlas id, a symlinked root, or whose lexical root overlaps
+another row's root) are never read and are reported with their
+status and, when ``mesh_scope`` gives one, a ``reason``. Mesh page walks do
+not follow symlinks. Hit URIs are
 :func:`mesh_scope.node_id` ids, so a path with ``%``, ``#``, ``?`` or
 whitespace is percent-encoded and round-trips through
 :func:`mesh_scope.parse_node_id`.
@@ -39,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import index_location, mesh_scope, meshfile
+from .paths import mesh_walks
 
 SCOPES = meshfile.SCOPES
 DEFAULT_SCOPE = "store"
@@ -316,7 +319,7 @@ def federate(
             continue
         record = _member_record(member, mesh_scope.STATUS_OK)
         try:
-            with _pinned(member, settings.mesh):
+            with _pinned(member, settings.mesh), mesh_walks():
                 answer = run_member(member.root, query, per_member, engine_override, include_exits)
         except Exception as e:  # noqa: BLE001 - one broken member must not sink the others
             complete = False

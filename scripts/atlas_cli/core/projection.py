@@ -24,7 +24,7 @@ from typing import Any
 
 from .frontmatter import FrontmatterError, read_page
 from .overlay import overlay_files
-from .paths import CONTRACT_NAME, SCHEMA_NAME, rel, store_root
+from .paths import CONTRACT_NAME, SCHEMA_NAME, is_symlink_entry, rel, skipping_symlinks, store_root
 from .recall_config import schema_version
 from .schema import staging_dir_name
 
@@ -67,13 +67,21 @@ def _contained(root: Path, path: Path) -> bool:
 
 
 def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
+    root = Path(root)
+    # Mesh scope: do not open a symlinked root, and do not follow a symlink
+    # into another store. Store scope (the default) is unchanged, including
+    # ``is_file`` following a file symlink.
+    if skipping_symlinks() and is_symlink_entry(root):
+        return []
     staging = staging_dir_name(schema)
     skip = set(SKIP_TOP) | {staging}
     out: list[Path] = []
     root_r = root.resolve()
+    mesh = skipping_symlinks()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
         try:
-            parts = Path(dirpath).resolve().relative_to(root_r).parts
+            parts = here.resolve().relative_to(root_r).parts
         except ValueError:
             dirnames[:] = []
             continue
@@ -81,10 +89,14 @@ def eligible_paths(root: Path, schema: dict[str, Any] | None) -> list[Path]:
             dirnames[:] = []
             continue
         dirnames[:] = [d for d in dirnames if d not in skip]
+        if mesh:
+            dirnames[:] = [d for d in dirnames if not is_symlink_entry(here / d)]
         for name in filenames:
             if not name.endswith(".md"):
                 continue
-            path = Path(dirpath) / name
+            path = here / name
+            if mesh and is_symlink_entry(path):
+                continue
             if path.is_file():
                 out.append(path)
     return sorted(out)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextvars
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 RESERVED = frozenset({"index.md", "log.md"})
@@ -32,6 +34,56 @@ def has_contract_file(root: Path) -> bool:
     not the strict single-file compile gate in core.schema.find_contract_path.
     """
     return any((root / name).is_file() for name in CONTRACT_FILENAMES)
+
+
+# Mesh-scope page walks set this. Store scope leaves it false, so those walks
+# stay byte-identical (ripgrep may still be handed a symlink; ``is_file`` still
+# follows a file symlink).
+_MESH_WALKS: contextvars.ContextVar[bool] = contextvars.ContextVar("atlas_mesh_walks", default=False)
+
+
+def skipping_symlinks() -> bool:
+    """True while mesh-scope walks must not follow symlinks."""
+    return _MESH_WALKS.get()
+
+
+@contextmanager
+def mesh_walks():
+    """Do not follow symlinks for the duration of a mesh-scope page walk.
+
+    Store scope never enters this context, so its walks are unchanged.
+    """
+    token = _MESH_WALKS.set(True)
+    try:
+        yield
+    finally:
+        _MESH_WALKS.reset(token)
+
+
+def is_symlink_entry(path: Path) -> bool:
+    """``lstat`` symlink check. Never follows. False when the path cannot be stat-ed."""
+    try:
+        return Path(path).is_symlink()
+    except OSError:
+        return False
+
+
+def has_symlink_component(base: Path, *relatives: str) -> bool:
+    """True when a lexical path under ``base`` has a symlink component.
+
+    Absolute parts and ``..`` return False: those are not an in-project
+    symlink. The walk stops at the first symlink and uses ``lstat``, so the
+    link is not followed and nothing under it is stat-ed or opened.
+    """
+    lexical = join_under(base, *relatives)
+    if lexical is None:
+        return False
+    acc = base
+    for part in lexical.relative_to(base).parts:
+        acc = acc / part
+        if is_symlink_entry(acc):
+            return True
+    return False
 
 
 def join_under(base: Path, *relatives: str) -> Path | None:
@@ -101,32 +153,51 @@ def _contained(root: Path, path: Path) -> bool:
 
 
 def walk_tops(root: Path, staging_dir: str = DEFAULT_STAGING) -> list[Path]:
-    """Top-level entries of ``root`` a walk enters: skipped directories are dropped by name, unlisted."""
+    """Top-level entries of ``root`` a walk enters: skipped directories are dropped by name, unlisted.
+
+    Mesh scope (:func:`skipping_symlinks`) also drops symlink entries, and does
+    not list a symlinked root, so ripgrep is never handed a symlink path.
+    Store scope is unchanged.
+    """
+    if skipping_symlinks() and is_symlink_entry(root):
+        return []
     skip = set(SKIP_DIRS) | {staging_dir}
     try:
         names = sorted(os.listdir(root))
     except OSError:
         return []
-    return [root / name for name in names if name not in skip]
+    tops = [root / name for name in names if name not in skip]
+    if skipping_symlinks():
+        tops = [p for p in tops if not is_symlink_entry(p)]
+    return tops
 
 
 def iter_concept_md(root: Path, staging_dir: str = DEFAULT_STAGING):
     """Yield concept markdown files (skip staging, templates, mesh, index artifacts).
 
     Skipped top-level directories are pruned by name, so nothing inside them
-    is listed or stat'ed. Symlinked directories are not followed.
+    is listed or stat'ed. Symlinked directories are not followed. Mesh scope
+    also skips symlinked files (``lstat`` before ``is_file``) and does not
+    open a symlinked walk root. Store scope is unchanged.
     """
+    if skipping_symlinks() and is_symlink_entry(root):
+        return
     root_res = root.resolve()
     skip = set(SKIP_DIRS) | {staging_dir}
     found: list[Path] = []
     top = True
+    mesh = skipping_symlinks()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
         if top:
             dirnames[:] = [d for d in dirnames if d not in skip]
             top = False
-        here = Path(dirpath)
+        if mesh:
+            dirnames[:] = [d for d in dirnames if not is_symlink_entry(here / d)]
         found.extend(here / name for name in filenames if name.endswith(".md"))
     for path in sorted(found):
+        if mesh and is_symlink_entry(path):
+            continue
         if not path.is_file():
             continue
         if not _contained(root_res, path):

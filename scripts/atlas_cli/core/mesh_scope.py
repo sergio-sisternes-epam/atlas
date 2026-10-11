@@ -13,32 +13,33 @@ as the structure-only mesh graph and use :func:`members` for federated recall.
 - Members (M2): the rows in file order. A row with ``mesh_member: false`` is
   ``excluded`` and nothing inside its root is ever read (no stat, open,
   listdir or projection). A row whose root is not contained in the project
-  (an absolute ``path`` or ``subpath``, a ``..`` segment, or a symlink that
-  resolves outside the project) is ``invalid`` with reason
-  ``outside_project``; nothing under it is read either, and a link into it
-  is unresolved with reason ``outside_mesh``. A row whose id is not a
-  canonical ``<host>/<org>/<repo>`` with a non-empty host
+  (an absolute ``path`` or ``subpath``, or a ``..`` segment) is ``invalid``
+  with reason ``outside_project``; nothing under it is read either, and a
+  link into it is unresolved with reason ``outside_mesh``. A row whose
+  lexical root stays inside the project but has a symlink component (the
+  root itself, or any parent component) is ``invalid`` with reason
+  ``symlinked_root``, decided with ``lstat`` per component and stopping at
+  the first link, before any contents are read and without resolving the
+  link. It is never read, and a link into it is ``outside_mesh``. A row
+  whose id is not a canonical ``<host>/<org>/<repo>`` with a non-empty host
   (:func:`is_member_id`; ``/acme/repo`` passes ``atlas-mesh.json``
   validation but has no host) is ``invalid`` with reason
   ``invalid_atlas_id``, decided before any filesystem access; it is treated
   like an ``outside_project`` row (never read, links into it are
   ``outside_mesh``). A row whose root is not a directory holding a contract
   file is ``unmounted``; it is never mounted, and no git or network call is
-  made for it. Overlap compares lexical roots and, when the row stays
-  inside the project, the real root (symlink-resolved path components only;
-  not a read of member contents). A row whose root equals or contains
-  another row's root, whatever that other row's status, is ``invalid`` with
-  reason ``overlapping_root``, because reading it would also read the other
-  row's pages. It is never read, and a link into it is ``outside_mesh``; the
-  contained row keeps its own status. Equal real roots (two aliases of one
-  directory) make both rows overlapping. A contained root its walks never
-  reach does not count: its path below the containing root, lexical or real,
-  starts in a directory every walk skips (:data:`WALK_SKIPPED`, from
-  ``paths.SKIP_DIRS`` and ``projection.SKIP_TOP``; ``staging`` is not in it)
-  and neither holds nor lies in an index directory read by name
-  (:data:`DIRECT_READS`). So a store at the project root stays ``ok`` beside
-  stores mounted under ``.atlas/<host>/<org>/<repo>/``, and an alias into a
-  skipped directory does not count either. Invariant: every ``ok`` member's id round-trips through
+  made for it. Overlap compares lexical roots only. A row whose lexical root
+  equals or contains another row's lexical root, whatever that other row's
+  status, is ``invalid`` with reason ``overlapping_root``, because reading
+  it would also read the other row's pages. It is never read, and a link
+  into it is ``outside_mesh``; the contained row keeps its own status. A
+  contained root its walks never reach does not count: its lexical path
+  below the containing root starts in a directory every walk skips
+  (:data:`WALK_SKIPPED`, from ``paths.SKIP_DIRS`` and
+  ``projection.SKIP_TOP``; ``staging`` is not in it) and neither holds nor
+  lies in an index directory read by name (:data:`DIRECT_READS`). So a
+  store at the project root stays ``ok`` beside stores mounted under
+  ``.atlas/<host>/<org>/<repo>/``. Invariant: every ``ok`` member's id round-trips through
   :func:`node_id` / :func:`parse_node_id` and resolves as ``atlas_uri``.
 - Loading (M2): an ``ok`` member is read through its mesh location (the
   project and the row id, as :func:`index_location.mesh_match` gives for a
@@ -84,7 +85,7 @@ from urllib.parse import unquote
 
 from . import graph, index_location, meshfile
 from .identity import IdentityError, fold_host, parse_pointer
-from .paths import SKIP_DIRS, contained_root, has_contract_file, join_under
+from .paths import SKIP_DIRS, contained_root, has_contract_file, has_symlink_component, join_under, mesh_walks
 from .projection import SKIP_TOP, ProjectedPage, normalise_target
 
 ATLAS_SCHEME = "atlas://"
@@ -98,6 +99,7 @@ STATUS_INVALID = "invalid"
 MEMBER_OUTSIDE_PROJECT = "outside_project"
 MEMBER_INVALID_ID = "invalid_atlas_id"
 MEMBER_OVERLAPPING = "overlapping_root"
+MEMBER_SYMLINKED_ROOT = "symlinked_root"
 
 RESOLUTION_LOCAL = "local"
 RESOLUTION_ATLAS_URI = "atlas_uri"
@@ -432,29 +434,6 @@ def _reached(parts: tuple[str, ...]) -> bool:
     return any(parts[: len(read)] == read or read[: len(parts)] == parts for read in DIRECT_READS)
 
 
-def _real_row_root(project: Path, row: dict[str, Any], index: int) -> Path | None:
-    """Symlink-resolved member root when it stays inside ``project``.
-
-    Resolves only the row root's own path components (the containment walk in
-    :func:`paths.contained_root`, then :meth:`Path.resolve`). Nothing under
-    the root is listed or opened, so an excluded store is not read to decide
-    overlap. A row with an invalid atlas id is not resolved: that status is
-    decided before any access of its root, and its lexical root still counts.
-    """
-    # An invalid atlas id is decided before any filesystem access of its root.
-    if not is_member_id(row.get("id")):
-        return None
-    contained = _contained_row_root(project, row, index)
-    if contained is None:
-        return None
-    try:
-        resolved = contained.resolve()
-        resolved.relative_to(project.resolve())
-    except (OSError, RuntimeError, ValueError):
-        return None
-    return resolved
-
-
 def _contains_reached(outer: Path, inner: Path) -> bool:
     """True when ``inner`` is ``outer`` or inside it and walks of ``outer`` reach it."""
     try:
@@ -465,29 +444,21 @@ def _contains_reached(outer: Path, inner: Path) -> bool:
 
 
 def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
-    """Indexes of rows whose root equals or contains a root its own reads reach.
+    """Indexes of rows whose lexical root equals or contains a root its own reads reach.
 
-    Compares lexical roots and, for a valid member id that stays inside the
-    project, the real (symlink-resolved) root. An invalid atlas id is not
-    resolved. Only a row whose root has no absolute part
-    or ``..`` segment can contain another; every other row's normalised
-    lexical root counts as a contained root, whatever its status. Resolving a
-    row root's own path components is not a read of member contents. A
-    contained root below a directory the walks skip (:func:`_reached`) does
-    not count, on the lexical relative path and on the real one.
+    Compares lexical roots only. A symlink root is not resolved: it is
+    ``symlinked_root`` and its lexical path still counts as a contained root.
+    Only a row whose root has no absolute part or ``..`` segment can contain
+    another; every other row's normalised lexical root counts as a contained
+    root, whatever its status. A contained root below a directory the walks
+    skip (:func:`_reached`) does not count, on the lexical relative path.
     """
     lexical = [_row_root(project, row, i) for i, row in enumerate(rows)]
-    real = [_real_row_root(project, row, i) for i, row in enumerate(rows)]
     out: set[int] = set()
     for i, row in enumerate(rows):
         if join_under(project, *_row_parts(row, i)) is None:
             continue
-        lexical_hit = any(j != i and _contains_reached(lexical[i], other) for j, other in enumerate(lexical))
-        mine_real = real[i]
-        real_hit = mine_real is not None and any(
-            j != i and other is not None and _contains_reached(mine_real, other) for j, other in enumerate(real)
-        )
-        if lexical_hit or real_hit:
+        if any(j != i and _contains_reached(lexical[i], other) for j, other in enumerate(lexical)):
             out.add(i)
     return out
 
@@ -495,10 +466,11 @@ def _overlapping_rows(project: Path, rows: list[dict[str, Any]]) -> set[int]:
 def members(mesh: Mesh) -> list[Member]:
     """Every row in file order with its status.
 
-    Nothing inside an excluded root, a root that escapes the project, a root
-    that overlaps another row's root or the root of a row with an invalid id
-    is listed or opened. Overlap may resolve a row root's own path components;
-    that is not a read of member contents.
+    Nothing inside an excluded root, a symlinked root, a root that escapes
+    the project, a root that overlaps another row's root or the root of a
+    row with an invalid id is listed or opened. A symlinked root is decided
+    with ``lstat`` per in-project component, stopping at the first link,
+    before any contents are read. Overlap is lexical only.
     """
     out: list[Member] = []
     rows = list(mesh.doc.get("stores") or [])
@@ -509,6 +481,8 @@ def members(mesh: Mesh) -> list[Member]:
         reason = None
         if not is_member_id(row.get("id")):
             status, reason = STATUS_INVALID, MEMBER_INVALID_ID
+        elif has_symlink_component(mesh.project, *_row_parts(row, i)):
+            status, reason = STATUS_INVALID, MEMBER_SYMLINKED_ROOT
         elif i in overlapping:
             status, reason = STATUS_INVALID, MEMBER_OVERLAPPING
         elif not meshfile.is_mesh_member(row):
@@ -544,7 +518,8 @@ def load_member(member: Member) -> MemberPages:
     if member.status != STATUS_OK:
         raise MeshScopeError(f"store {member.atlas_id} is {member.status}; its pages are not read")
     try:
-        source = graph.load_source(member.root, location=member.location())
+        with mesh_walks():
+            source = graph.load_source(member.root, location=member.location())
     except graph.GraphError as e:
         raise MeshScopeError(f"store {member.atlas_id}: {e}") from e
     pages: dict[str, ProjectedPage] = {}

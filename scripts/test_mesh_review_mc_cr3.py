@@ -8,18 +8,16 @@ fall back to store recall. Explicit ``--scope store`` still searches that
 store alone: exclusion is a mesh-scope rule, and the flag overrides the
 project setting.
 
-Blocker: overlap compares symlink-resolved row roots as well as lexical ones.
-An excluded ``alias -> atlas/secret`` with an included ``atlas/``, the reverse
-(an included alias of an ancestor), and two aliases of the same directory are
-``overlapping_root`` on the containing (or equal) row. A real relative path
-under a walk-skipped directory does not count. Resolving a row root is not a
-read of member contents.
+A member root that is a symlink is ``invalid`` / ``symlinked_root``, decided
+with ``lstat`` and not resolved for overlap. Lexical overlap and the
+walk-skip exemption remain. Classification does not follow the link.
 
 Linux-safe: no network, no git.
 """
 
 from __future__ import annotations
 
+import builtins
 import contextlib
 import io
 import json
@@ -57,6 +55,46 @@ class ContentGuard(Guard):
             return False
         return absolute.startswith(self.root + os.sep)
 
+
+class NoFollow(Guard):
+    """Fail ``stat``/``open`` of exactly ``link``. ``lstat`` of the symlink is allowed."""
+
+    def __init__(self, link: Path) -> None:
+        super().__init__(link.parent)
+        self.link = os.path.normpath(str(link))
+
+    def __enter__(self) -> NoFollow:
+        for name in ("stat", "open", "listdir", "scandir", "readlink", "access", "walk"):
+            self._wrap_follow(os, name)
+        self._wrap_follow(builtins, "open")
+        self._wrap_follow(io, "open")
+        return self
+
+    def _wrap_follow(self, owner: object, name: str) -> None:
+        original = getattr(owner, name)
+        guard = self
+
+        def wrapped(*args, **kwargs):
+            # lstat (follow_symlinks=False) of the symlink itself is allowed.
+            if kwargs.get("follow_symlinks") is False:
+                return original(*args, **kwargs)
+            if args and guard._inside(args[0]):
+                guard.hits.append(f"{name}({args[0]})")
+                raise PermissionError(f"symlink followed: {name} {args[0]}")
+            return original(*args, **kwargs)
+
+        self.saved.append((owner, name, original))
+        setattr(owner, name, wrapped)
+
+    def _inside(self, path: object) -> bool:
+        if isinstance(path, int):
+            return False
+        try:
+            text = os.fsdecode(os.fspath(path))
+        except TypeError:
+            return False
+        return os.path.normpath(os.path.join(os.getcwd(), text)) == self.link
+
 SUB = "github.com/acme/sub"
 BARE = "github.com/acme/bare"
 SIDE = "github.com/acme/side"
@@ -89,10 +127,12 @@ def run_scoped(
     *,
     engine: str = "grep",
     guard_cls: type[Guard] = Guard,
+    guard: Guard | None = None,
 ) -> tuple[int, dict, list[str], str]:
     index_location.clear_cache()
     buf, ebuf = io.StringIO(), io.StringIO()
-    guard = guard_cls(guard_root) if guard_root is not None else contextlib.nullcontext()
+    if guard is None:
+        guard = guard_cls(guard_root) if guard_root is not None else contextlib.nullcontext()
     code = 99
     try:
         with guard, contextlib.redirect_stdout(buf), contextlib.redirect_stderr(ebuf):
@@ -324,32 +364,38 @@ def main() -> int:
             listed, detail = False, str(e)
         check("subpath-default-still-listed", listed, detail)
 
-        # --- Blocker: symlink aliases ------------------------------------------------
+        # --- Symlinked roots (alias is not resolved for overlap) ----------------
+        # ``atlas/secret`` is a real directory of the included store, so a walk
+        # of ``atlas/`` reads it. The forbidden access is following ``alias``.
         project, secret = build_alias_into_included(tmp / "alias-into")
-        statuses = statuses_of(project)
+        alias = project / "alias"
+        with NoFollow(alias) as classify:
+            statuses = statuses_of(project)
+        check("alias-into-classify-nofollow", classify.hits == [], str(classify.hits[:3]))
         check(
             "alias-into-members",
-            statuses == [(TOP, "invalid", "overlapping_root"), (NESTED, "excluded", None), (SIDE, "ok", None)],
+            statuses == [(TOP, "ok", None), (NESTED, "invalid", "symlinked_root"), (SIDE, "ok", None)],
             str(statuses),
         )
         for engine in ("grep", "bm25"):
-            code, payload, touched, err = run_scoped(project, "mesh", secret, engine=engine)
+            held = NoFollow(alias)
+            code, payload, touched, err = run_scoped(project, "mesh", None, engine=engine, guard=held)
             text = json.dumps(payload)
             members = {m["atlas_id"]: m for m in payload.get("members") or []}
             uris = [h.get("uri", "") for h in payload.get("hits") or []]
             check(f"alias-into-{engine}-exit-0", code == 0, f"{code} {err[:200]} {text[:300]}")
-            check(f"alias-into-{engine}-unread", touched == [], str(touched[:5]))
-            top = members.get(TOP, {})
+            check(f"alias-into-{engine}-nofollow", touched == [], str(touched[:5]))
+            nested = members.get(NESTED, {})
             check(
-                f"alias-into-{engine}-ancestor-overlapping",
-                top.get("status") == "invalid" and top.get("reason") == "overlapping_root",
-                str(top),
+                f"alias-into-{engine}-symlinked-root",
+                nested.get("status") == "invalid" and nested.get("reason") == "symlinked_root" and nested.get("hits") == 0,
+                str(nested),
             )
-            check(f"alias-into-{engine}-excluded", members.get(NESTED, {}).get("status") == "excluded", str(members.get(NESTED)))
-            check(f"alias-into-{engine}-side-only", uris == [f"atlas://{SIDE}/notes/side.md"], str(uris))
-            check(f"alias-into-{engine}-no-canary", ALIAS_CANARY not in text and ALIAS_CANARY not in err, text[:400])
+            check(f"alias-into-{engine}-top-ok", members.get(TOP, {}).get("status") == "ok", str(members.get(TOP)))
+            check(f"alias-into-{engine}-no-nested-uri", not any(NESTED in u for u in uris), str(uris))
+            check(f"alias-into-{engine}-side-hit", any(u.startswith(f"atlas://{SIDE}/") for u in uris), str(uris))
         index_location.clear_cache()
-        with Guard(secret) as guard:
+        with NoFollow(alias) as guard:
             try:
                 view = mesh_scope.build_view(mesh_scope.discover(project))
                 error = ""
@@ -358,18 +404,18 @@ def main() -> int:
         index_location.clear_cache()
         node_ids = [n["id"] for n in view.get("nodes", [])]
         edges = [e for e in view.get("edges", []) if e.get("from") == f"atlas://{SIDE}/notes/side.md"]
-        check("alias-into-view-unread", guard.hits == [] and not error, f"{guard.hits[:3]} {error}")
-        check("alias-into-view-no-secret-node", not any("secret" in i or ALIAS_CANARY in i or i.startswith(f"atlas://{TOP}/") for i in node_ids), str(node_ids))
+        check("alias-into-view-nofollow", guard.hits == [] and not error, f"{guard.hits[:3]} {error}")
+        check("alias-into-view-no-nested-node", not any(i.startswith(f"atlas://{NESTED}/") for i in node_ids), str(node_ids))
         into_top = next((e for e in edges if TOP in e.get("to", "")), {})
         into_nested = next((e for e in edges if NESTED in e.get("to", "")), {})
-        check("alias-into-link-overlapping-outside-mesh", into_top.get("reason") == "outside_mesh" and not into_top.get("resolved"), str(into_top))
-        check("alias-into-link-excluded", into_nested.get("reason") == "excluded_member" and not into_nested.get("resolved"), str(into_nested))
+        check("alias-into-link-top-resolves", into_top.get("resolved") is True, str(into_top))
+        check("alias-into-link-symlinked-outside-mesh", into_nested.get("reason") == "outside_mesh" and not into_nested.get("resolved"), str(into_nested))
 
         project, secret = build_included_alias_ancestor(tmp / "alias-ancestor")
         statuses = statuses_of(project)
         check(
             "alias-ancestor-members",
-            statuses == [(TOP, "invalid", "overlapping_root"), (NESTED, "excluded", None), (SIDE, "ok", None)],
+            statuses == [(TOP, "invalid", "symlinked_root"), (NESTED, "excluded", None), (SIDE, "ok", None)],
             str(statuses),
         )
         code, payload, touched, err = run_scoped(project, "mesh", secret)
@@ -385,7 +431,7 @@ def main() -> int:
         statuses = statuses_of(project)
         check(
             "same-dir-members",
-            statuses == [(LEFT, "invalid", "overlapping_root"), (RIGHT, "invalid", "overlapping_root"), (SIDE, "ok", None)],
+            statuses == [(LEFT, "invalid", "symlinked_root"), (RIGHT, "invalid", "symlinked_root"), (SIDE, "ok", None)],
             str(statuses),
         )
         code, payload, touched, err = run_scoped(project, "mesh", store)
@@ -400,7 +446,7 @@ def main() -> int:
         statuses = statuses_of(project)
         check(
             "skipped-real-members",
-            statuses == [(TOP, "ok", None), (NESTED, "excluded", None)],
+            statuses == [(TOP, "ok", None), (NESTED, "invalid", "symlinked_root")],
             str(statuses),
         )
         code, payload, touched, err = run_scoped(project, "mesh", hidden)
@@ -411,20 +457,33 @@ def main() -> int:
         check("skipped-real-top-only", uris == [f"atlas://{TOP}/notes/top.md"], str(uris))
         check("skipped-real-no-canary", ALIAS_CANARY not in text and ALIAS_CANARY not in err, text[:400])
 
+        # Classification must not follow ``hop`` into ``secret``. Search of the
+        # included store reads ``atlas/secret`` because it is a real directory
+        # of that store, not because the symlink is followed.
         project, secret = build_lexical_skip_real_reached(tmp / "lexical-skip")
-        statuses = statuses_of(project)
+        with Guard(secret) as classify:
+            statuses = statuses_of(project)
+        check("lexical-skip-classify-unread", classify.hits == [], str(classify.hits[:3]))
         check(
             "lexical-skip-real-reached-members",
-            statuses == [(TOP, "invalid", "overlapping_root"), (HOP, "excluded", None), (SIDE, "ok", None)],
+            statuses == [(TOP, "ok", None), (HOP, "invalid", "symlinked_root"), (SIDE, "ok", None)],
             str(statuses),
         )
-        code, payload, touched, err = run_scoped(project, "mesh", secret)
+        held = NoFollow(project / "atlas" / "templates" / "hop")
+        code, payload, touched, err = run_scoped(project, "mesh", None, guard=held)
         text = json.dumps(payload)
+        members = {m["atlas_id"]: m for m in payload.get("members") or []}
         uris = [h.get("uri", "") for h in payload.get("hits") or []]
+        hop = members.get(HOP, {})
         check("lexical-skip-real-reached-exit-0", code == 0, f"{code} {err[:200]} {text[:300]}")
-        check("lexical-skip-real-reached-unread", touched == [], str(touched[:5]))
-        check("lexical-skip-real-reached-side-only", uris == [f"atlas://{SIDE}/notes/side.md"], str(uris))
-        check("lexical-skip-real-reached-no-canary", ALIAS_CANARY not in text and ALIAS_CANARY not in err, text[:400])
+        check("lexical-skip-real-reached-nofollow", touched == [], str(touched[:5]))
+        check(
+            "lexical-skip-real-reached-symlinked",
+            hop.get("status") == "invalid" and hop.get("reason") == "symlinked_root" and hop.get("hits") == 0,
+            str(hop),
+        )
+        check("lexical-skip-real-reached-no-hop-uri", not any(HOP in u for u in uris), str(uris))
+        check("lexical-skip-real-reached-side-hit", any(u.startswith(f"atlas://{SIDE}/") for u in uris), str(uris))
     finally:
         index_location.clear_cache()
         shutil.rmtree(tmp, ignore_errors=True)
