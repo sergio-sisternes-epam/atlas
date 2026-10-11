@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from atlas_cli.commands import index as index_cmd  # noqa: E402
 from atlas_cli.core import index_location  # noqa: E402
 
 A = "github.com/acme/alpha"
@@ -201,6 +202,85 @@ def main() -> int:
         check("missing-root-mesh-unchanged", (project / "atlas-mesh.json").read_bytes() == mesh_before)
         as_file.unlink()
         (project / "atlas-mesh.json").write_bytes(mesh_original)
+
+        # --- set/unset from a store subdirectory (no --store) write only that store's row ----
+        mesh_path = project / "atlas-mesh.json"
+        original_doc = json.loads(mesh_original)
+
+        def mesh_doc() -> dict:
+            return json.loads(mesh_path.read_text(encoding="utf-8"))
+
+        def only_row_changed(doc: dict, sid: str, engine: str) -> bool:
+            """``sid``'s row carries ``engine``; every other row and the top level equal the original."""
+            rows_now = {r.get("id"): r for r in doc.get("stores") or []}
+            rows_was = {r.get("id"): r for r in original_doc["stores"]}
+            if list(rows_now) != list(rows_was):
+                return False
+            row = rows_now[sid]
+            expected_row = {**rows_was[sid], "recall": {"engine": engine}}
+            others_same = all(rows_now[i] == rows_was[i] for i in rows_was if i != sid)
+            top_same = {k: v for k, v in doc.items() if k != "stores"} == {
+                k: v for k, v in original_doc.items() if k != "stores"
+            }
+            return row == expected_row and others_same and top_same
+
+        nano_warn = (index_cmd.unavailable_warning("nanograph") or {}).get("code")
+
+        # JSON mode, from alpha's subdirectory (alpha is the first row).
+        code, p, out = run_json("set-subdir", "index", "set", "bm25", "--root", str(inner))
+        check(
+            "set-subdir-updates-row",
+            code == 0 and p.get("ok") is True and p.get("changed") is True and p.get("target") == A
+            and p.get("previous") is None and p.get("value") == "bm25" and only_row_changed(mesh_doc(), A, "bm25"),
+            out[:600],
+        )
+        code, p, out = run_json("set-subdir-second", "index", "set", "nanograph", "--root", str(inner))
+        warn_codes = [w.get("code") for w in p.get("warnings") or []]
+        check(
+            "set-subdir-second-engine-overwrites-row",
+            code == 0 and p.get("ok") is True and p.get("target") == A and p.get("previous") == "bm25"
+            and p.get("value") == "nanograph" and only_row_changed(mesh_doc(), A, "nanograph")
+            and warn_codes == ([nano_warn] if nano_warn else []),
+            out[:600],
+        )
+        code, p, out = run_json("unset-subdir", "index", "unset", "--root", str(inner))
+        doc = mesh_doc()
+        check(
+            "unset-subdir-restores-row",
+            code == 0 and p.get("ok") is True and p.get("changed") is True and p.get("target") == A
+            and p.get("previous") == "nanograph" and p.get("value") is None
+            and "recall" not in doc["stores"][0] and doc == original_doc,
+            out[:600],
+        )
+        # The writer keeps the detected indent and trailing newline, so the file round-trips byte for byte.
+        check("unset-subdir-restores-bytes", mesh_path.read_bytes() == mesh_original)
+
+        # Text mode, from beta's subdirectory (not the first row, so a first-row default would fail).
+        beta_inner = project / "atlas" / "beta" / "notes"
+        beta_inner.mkdir(exist_ok=True)
+        code, out, err = atlas("index", "set", "bm25", "--root", str(beta_inner))
+        check(
+            "set-subdir-text",
+            code == 0 and f"store {B} recall.engine (unset) -> bm25" in out and "error" not in err
+            and only_row_changed(mesh_doc(), B, "bm25"),
+            out + err,
+        )
+        code, out, err = atlas("index", "set", "nanograph", "--root", str(beta_inner))
+        check(
+            "set-subdir-text-second-engine",
+            code == 0 and f"store {B} recall.engine bm25 -> nanograph" in out
+            and (("warning:" in err and "nanograph" in err) if nano_warn else "warning:" not in err)
+            and only_row_changed(mesh_doc(), B, "nanograph"),
+            out + err,
+        )
+        code, out, err = atlas("index", "unset", "--root", str(beta_inner))
+        check(
+            "unset-subdir-text",
+            code == 0 and f"store {B} recall.engine nanograph -> (unset)" in out
+            and mesh_doc() == original_doc and mesh_path.read_bytes() == mesh_original,
+            out + err,
+        )
+        mesh_path.write_bytes(mesh_original)
 
         code, p, out = run_json("show-unknown", "index", "show", "--root", str(project), "--store", "github.com/acme/nope")
         check("show-unknown-store", code == 2 and p.get("known_ids") == mesh_ids, out[:400])
