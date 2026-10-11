@@ -4,7 +4,9 @@
 Covers atlas ids and URIs on every hit, grep and bm25 members, scope and k
 precedence with their sources, store scope unchanged, exit 2 and exit 1
 cases, the restricted pre-filter, an excluded member that is never touched,
-canary privacy over ``.atlas/indexes/`` and the ``rrf-interleave-noise``
+``invalid`` members (outside the project, invalid atlas id) that are never
+read and are reported, percent-encoded node ids for a page path with ``#``,
+members searched through their pinned mesh index location, canary privacy over ``.atlas/indexes/`` and the ``rrf-interleave-noise``
 probe. Linux-safe: no network, no git.
 """
 
@@ -25,7 +27,7 @@ ATLAS = ROOT / "scripts" / "atlas.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from atlas_cli.commands import search as search_cmd  # noqa: E402
-from atlas_cli.core import index_location  # noqa: E402
+from atlas_cli.core import index_location, mesh_recall, mesh_scope  # noqa: E402
 from test_mesh_members import Guard  # noqa: E402
 
 ALPHA = "github.com/acme/alpha"
@@ -44,6 +46,12 @@ CANARY = {
 }
 RESTRICTED = {ALPHA: "ALPHARESTRICTEDWOMBAT", BETA: "BETARESTRICTEDWOMBAT"}
 EXCLUDED = "SECRETSTOREWOMBAT"
+HASH = "github.com/acme/hash"
+SUB = "github.com/acme/sub"
+ESCAPE = "github.com/acme/escape"
+NOID = "/acme/noid"
+INVALID_CANARY = "INVALIDMEMBERWOMBAT"
+HASH_PAGE = "notes/c#sharp graph.md"
 
 
 def write(path: Path, text: str) -> None:
@@ -118,6 +126,28 @@ def build_mesh(tmp: Path, *, recall: dict | None = None, three: bool = True, bro
     return project
 
 
+def build_edge_mesh(tmp: Path) -> Path:
+    """hash (a page path with ``#``), sub (a subpath row), escape (outside the project), noid (invalid id)."""
+    project = tmp / "proj"
+    hashed = project / "atlas" / "hash"
+    schema(hashed)
+    write(hashed / HASH_PAGE, page("Sharp graph export", "Graph export with a hash", "Graph export nanograph sharp."))
+    sub = project / "atlas" / "mono" / "kb"
+    schema(sub)
+    write(sub / "notes" / "sub.md", page("Sub graph export", "Graph export in a subpath", "Graph export nanograph sub."))
+    for store in (tmp / "outside", project / "atlas" / "noid"):
+        schema(store)
+        write(store / "notes" / "bait.md", page(f"{QUERY} {INVALID_CANARY}", f"{INVALID_CANARY} {QUERY}", f"{QUERY} {INVALID_CANARY}"))
+    stores = [
+        {"id": HASH, "path": "atlas/hash"},
+        {"id": ESCAPE, "path": "../outside"},
+        {"id": NOID, "path": "atlas/noid"},
+        {"id": SUB, "path": "atlas/mono", "subpath": "kb"},
+    ]
+    write(project / "atlas-mesh.json", json.dumps({"version": 1, "stores": stores}, indent=2) + "\n")
+    return project
+
+
 def env() -> dict[str, str]:
     out = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
     out["DBUS_SESSION_BUS_ADDRESS"] = "disabled:"
@@ -173,7 +203,7 @@ def main() -> int:
         check("mesh-has-hits", len(hits) >= 5, str(len(hits)))
         check(
             "every-hit-has-atlas-id-and-uri",
-            all(h.get("atlas_id") and h.get("uri") == f"atlas://{h['atlas_id']}/{h['path']}" for h in hits),
+            all(h.get("atlas_id") and h.get("uri") == mesh_scope.node_id(h["atlas_id"], h["path"]) for h in hits),
         )
         check(
             "hit-keys",
@@ -332,6 +362,61 @@ def main() -> int:
         outputs.append(json.dumps(two_p))
         check("two-store-exit-0", code_2 == 0 and {h["atlas_id"] for h in two_p["hits"]} == {ALPHA, BETA})
         check("two-store-uris", all(h["uri"].startswith(f"atlas://{h['atlas_id']}/") for h in two_p["hits"]))
+
+        # --- invalid members are never read and are reported; '#' paths are encoded ----
+        edge = tmp / "edge"
+        edge.mkdir()
+        project_edge = build_edge_mesh(edge)
+        code_e, edge_p, err_e = recall(project_edge, "--scope", "mesh")
+        outputs.append(json.dumps(edge_p) + err_e)
+        em = {m["atlas_id"]: m for m in edge_p.get("members") or []}
+        check("edge-exit-0", code_e == 0 and edge_p.get("complete") is True, f"{code_e} {err_e} {edge_p}")
+        check(
+            "invalid-members-reported",
+            [(m["atlas_id"], m["status"], m.get("reason")) for m in edge_p["members"]]
+            == [
+                (HASH, "ok", None),
+                (ESCAPE, "invalid", "outside_project"),
+                (NOID, "invalid", "invalid_atlas_id"),
+                (SUB, "ok", None),
+            ],
+            str(edge_p.get("members")),
+        )
+        check("invalid-members-no-hits", all(h["atlas_id"] in (HASH, SUB) for h in edge_p["hits"]) and em[ESCAPE]["hits"] == 0)
+        check("invalid-members-never-output", INVALID_CANARY not in json.dumps(edge_p) and "bait.md" not in json.dumps(edge_p))
+        check("invalid-members-no-index", not any((project_edge / ".atlas" / "indexes" / k / ESCAPE).exists() for k in ("fts5", "nanograph")))
+        code_et, text_e, _ = recall(project_edge, "--scope", "mesh", as_json=False)
+        outputs.append(text_e)
+        check(
+            "invalid-members-text",
+            code_et == 0 and f"{ESCAPE} invalid (outside_project)" in text_e and f"{NOID} invalid (invalid_atlas_id)" in text_e,
+            text_e[-300:],
+        )
+        hash_hits = [h for h in edge_p["hits"] if h["atlas_id"] == HASH]
+        check("hash-page-hit", [h["path"] for h in hash_hits] == [HASH_PAGE], str(edge_p["hits"]))
+        if hash_hits:
+            uri = hash_hits[0]["uri"]
+            check("hash-page-uri-encoded", uri == f"atlas://{HASH}/notes/c%23sharp%20graph.md", uri)
+            check("hash-page-uri-round-trips", mesh_scope.parse_node_id(uri) == (HASH, HASH_PAGE), uri)
+        index_location.clear_cache()
+        settings_e = mesh_recall.resolve_settings(project_edge, "mesh")
+        seen: dict[str, tuple[str, str]] = {}
+
+        def spy(root: Path, *_: object) -> mesh_recall.MemberAnswer:
+            loc = index_location.resolve(root)
+            seen[loc.atlas_id] = (str(loc.project_root), loc.mode)
+            return mesh_recall.MemberAnswer([], "all", "grep", "grep", None)
+
+        with Guard(edge / "outside") as g_out, Guard(project_edge / "atlas" / "noid") as g_noid:
+            payload_e, code_spy = mesh_recall.federate(settings_e, QUERY, search=spy)
+        check("invalid-member-roots-never-touched", g_out.hits == [] and g_noid.hits == [], str(g_out.hits[:3] + g_noid.hits[:3]))
+        check("spy-only-ok-members", code_spy == 0 and sorted(seen) == sorted([HASH, SUB]), str(seen))
+        check(
+            "members-search-through-pinned-location",
+            all(v == (str(project_edge.resolve()), "mesh") for v in seen.values()),
+            str(seen),
+        )
+        check("pin-released", str(project_edge.resolve() / "atlas" / "mono" / "kb") not in index_location._pinned)
 
         # --- excluded member never touched (in process, file access patched) -------------
         index_location.clear_cache()

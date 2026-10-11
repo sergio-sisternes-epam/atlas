@@ -19,15 +19,25 @@ by tier, then RRF score ``sum(1 / (k + rank))`` with a 1-based member rank,
 then mesh row order, then path; truncate to ``limit``. Page ids are disjoint
 across stores, so within a tier v1 ranks like an interleave; the formula is
 kept so later per-member lists can join without a contract change.
+
+Members follow :func:`mesh_scope.members`: only ``ok`` members are searched,
+each with its index location pinned to its mesh row (project and row id).
+``excluded``, ``unmounted`` and ``invalid`` members (a row outside the project
+or with an invalid atlas id) are never read and are reported with their
+status and, when ``mesh_scope`` gives one, a ``reason``. Hit URIs are
+:func:`mesh_scope.node_id` ids, so a path with ``%``, ``#``, ``?`` or
+whitespace is percent-encoded and round-trips through
+:func:`mesh_scope.parse_node_id`.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import mesh_scope, meshfile
+from . import index_location, mesh_scope, meshfile
 
 SCOPES = meshfile.SCOPES
 DEFAULT_SCOPE = "store"
@@ -232,7 +242,7 @@ def _short(err: BaseException) -> str:
 
 
 def _member_record(member: mesh_scope.Member, status: str) -> dict[str, Any]:
-    return {
+    record: dict[str, Any] = {
         "atlas_id": member.atlas_id,
         "status": status,
         "engine_requested": None,
@@ -241,6 +251,15 @@ def _member_record(member: mesh_scope.Member, status: str) -> dict[str, Any]:
         "match": None,
         "hits": 0,
     }
+    if member.reason is not None:
+        record["reason"] = member.reason
+    return record
+
+
+def _pinned(member: mesh_scope.Member):
+    """The member's mesh index location for the duration of its search (no walk-up or standalone id)."""
+    location = member.location()
+    return index_location.pinned(location) if location is not None else nullcontext()
 
 
 def federate(
@@ -265,11 +284,13 @@ def federate(
     complete = True
     for member in mesh_scope.members(settings.mesh):
         if member.status != mesh_scope.STATUS_OK:
+            # excluded, unmounted or invalid: reported, never read
             records.append(_member_record(member, member.status))
             continue
         record = _member_record(member, mesh_scope.STATUS_OK)
         try:
-            answer = run_member(member.root, query, per_member, engine_override, include_exits)
+            with _pinned(member):
+                answer = run_member(member.root, query, per_member, engine_override, include_exits)
         except Exception as e:  # noqa: BLE001 - one broken member must not sink the others
             complete = False
             record["status"] = STATUS_ERROR
@@ -315,6 +336,8 @@ def render_text(payload: dict[str, Any]) -> list[str]:
             parts.append(f"{m['atlas_id']} ok {m['engine_used']} hits={m['hits']}{match}")
         elif m["status"] == STATUS_ERROR:
             parts.append(f"{m['atlas_id']} error ({m.get('error')})")
+        elif m.get("reason"):
+            parts.append(f"{m['atlas_id']} {m['status']} ({m['reason']})")
         else:
             parts.append(f"{m['atlas_id']} {m['status']}")
     lines.append(f"members (complete={str(payload['complete']).lower()} rrf_k={payload['rrf_k']}): " + "; ".join(parts))

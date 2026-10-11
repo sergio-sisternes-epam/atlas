@@ -30,10 +30,14 @@
   with its own engine, profile, exclusions and per-store index (no shared
   text index is built). `sensitivity: restricted` pages are removed from each
   member's eligible set before ranking, so neither hits nor `members[].hits`
-  counts reveal them; excluded members are never read and unmounted ones are
-  reported, never mounted. Hits are fused by tier (all-words before any-word
+  counts reveal them; excluded and `invalid` members (a row outside the
+  project or with an invalid atlas id) are never read and are reported with
+  their `reason`, and unmounted ones are reported, never mounted. Each member
+  is searched through its own mesh index location (project and row id), so a
+  subpath row uses `.atlas/indexes/<type>/<row id>/`. Hits are fused by tier (all-words before any-word
   retry), then reciprocal rank fusion `sum(1/(k + rank))`, then mesh row
-  order and path, and carry `atlas_id`, `uri`, `tier`, `rrf_score` and
+  order and path, and carry `atlas_id`, `uri` (a node id whose path is
+  percent-encoded as in mesh core, so a path with `#` round-trips), `tier`, `rrf_score` and
   `engine_used`. Precedence: `--scope` > `recall.scope` > `store`, and
   `--rrf-k` > `recall.rrf_k` > 60, with the sources reported. A failing member
   is reported as `error` with `complete: false` and exit 1; `--profile` with
