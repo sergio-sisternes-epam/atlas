@@ -34,14 +34,17 @@
   project or with an invalid atlas id) are never read and are reported with
   their `reason`, and unmounted ones are reported, never mounted. Each member
   is searched through its own mesh index location (project and row id), so a
-  subpath row uses `.atlas/indexes/<type>/<row id>/`. Hits are fused by tier (all-words before any-word
+  subpath row uses `.atlas/indexes/<type>/<row id>/`, and its own mesh row,
+  so a `subpath` or pathless row honours its row and project `recall.engine`. Hits are fused by tier (all-words before any-word
   retry), then reciprocal rank fusion `sum(1/(k + rank))`, then mesh row
   order and path, and carry `atlas_id`, `uri` (a node id whose path is
   percent-encoded as in mesh core, so a path with `#` round-trips), `tier`, `rrf_score` and
   `engine_used`. Precedence: `--scope` > `recall.scope` > `store`, and
   `--rrf-k` > `recall.rrf_k` > 60, with the sources reported. A failing member
-  is reported as `error` with `complete: false` and exit 1; `--profile` with
-  mesh scope, `--rrf-k` in store scope, a bad k or no mesh exits 2. Store
+  is reported as `error` with `complete: false` and exit 1; `--limit 0`
+  returns every hit from every member, whatever its engine. `--profile` or
+  `--allow-partial` with mesh scope, a negative `--limit` with mesh scope,
+  `--rrf-k` in store scope, a bad k or no mesh exits 2. Store
   scope output is unchanged byte for byte.
 - Mesh core (library only, no new command yet): `core/mesh_scope.py` finds
   the mesh for a project or a listed store, lists its members in file order
@@ -69,9 +72,10 @@
   (`store`|`mesh`) and `recall.rrf_k` (integer 1-1000), a top-level `graph`
   block with `scope` (`store`|`mesh`) and `driver` (`native`|`nanograph`),
   and a row-level `mesh_member` (boolean, default true). `scope` or `rrf_k`
-  in a store row's `recall` block is an error that names the row. The keys
-  are validated and kept by `atlas index set|unset` and mount, but have no
-  effect yet. `index_location.mesh_index_dir()` reserves
+  in a store row's `recall` block is an error that names the row. All the
+  keys are validated and kept by `atlas index set|unset` and mount;
+  `recall.scope`, `recall.rrf_k` and `mesh_member` drive federated recall
+  (above), while the `graph` block has no effect yet. `index_location.mesh_index_dir()` reserves
   `.atlas/indexes/<graph|nanograph>/_mesh/`, which no valid atlas id can
   reach. Without the new keys, all existing output is byte-identical.
 - FTS5 queries (`--engine bm25`, `atlas:ranked` and other FTS5 profiles)

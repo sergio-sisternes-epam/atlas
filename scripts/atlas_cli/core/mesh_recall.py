@@ -32,6 +32,7 @@ whitespace is percent-encoded and round-trips through
 
 from __future__ import annotations
 
+import sys
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +52,9 @@ ERROR_MAX = 200
 
 PROFILE_ERROR = "--profile cannot be used with --scope mesh: recall profiles are per store"
 PARTIAL_ERROR = "--allow-partial cannot be used with --scope mesh: partial projection is a per-store profile option"
+LIMIT_ERROR = "--limit with --scope mesh must be 0 (all hits) or a positive integer"
+# What a member pipeline is asked for when the mesh limit is 0 (all): grep would read 0 as "none".
+MEMBER_UNBOUNDED = sys.maxsize
 RRF_K_STORE_ERROR = "--rrf-k applies only to --scope mesh; this request resolved to store scope"
 
 
@@ -214,7 +218,10 @@ def store_search(
     engine_override: str | None,
     include_exits: bool,
 ) -> MemberAnswer:
-    """Run one member's own ``recall run`` pipeline in process (P23, P26 unchanged)."""
+    """Run one member's own ``recall run`` pipeline in process (P23, P26 unchanged).
+
+    ``limit`` 0 means all hits for every engine, as in :func:`fuse`.
+    """
     from ..commands import search as search_cmd
     from .schema import load_schema
 
@@ -222,7 +229,7 @@ def store_search(
     if schema is None:
         raise MemberError(err or "missing schema")
     outcome = search_cmd.search(
-        root, query, limit, engine_override, include_exits, None, False, withhold=withhold
+        root, query, limit or MEMBER_UNBOUNDED, engine_override, include_exits, None, False, withhold=withhold
     )
     payload = outcome.payload
     if outcome.render in ("critical", "fail", "partial") or payload.get("ok") is False or outcome.code != 0:
@@ -256,10 +263,17 @@ def _member_record(member: mesh_scope.Member, status: str) -> dict[str, Any]:
     return record
 
 
-def _pinned(member: mesh_scope.Member):
-    """The member's mesh index location for the duration of its search (no walk-up or standalone id)."""
+def _pinned(member: mesh_scope.Member, mesh: mesh_scope.Mesh):
+    """The member's mesh index location and row for the duration of its search.
+
+    No walk-up or standalone id, and the row and project ``recall.engine``
+    apply to ``subpath`` and pathless rows too.
+    """
     location = member.location()
-    return index_location.pinned(location) if location is not None else nullcontext()
+    if location is None:
+        return nullcontext()
+    match = index_location.MeshMatch(mesh.project, mesh.doc["stores"][member.index], mesh.doc)
+    return index_location.pinned(location, match)
 
 
 def federate(
@@ -273,12 +287,15 @@ def federate(
 ) -> tuple[dict[str, Any], int]:
     """Ask every included member for ``2 x limit`` hits, fuse, and build the M12 payload.
 
+    ``limit`` 0 means all hits; a negative ``limit`` raises :class:`MeshRecallError`.
     Exit 0 when every included member answered, 1 when at least one failed.
     """
     if settings.mesh is None or settings.scope != "mesh":
         raise MeshRecallError("federated recall needs mesh scope")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise MeshRecallError(LIMIT_ERROR)
     run_member = search or store_search
-    per_member = max(int(limit), 0) * OVERFETCH
+    per_member = limit * OVERFETCH
     records: list[dict[str, Any]] = []
     lists: list[RankedList] = []
     complete = True
@@ -289,7 +306,7 @@ def federate(
             continue
         record = _member_record(member, mesh_scope.STATUS_OK)
         try:
-            with _pinned(member):
+            with _pinned(member, settings.mesh):
                 answer = run_member(member.root, query, per_member, engine_override, include_exits)
         except Exception as e:  # noqa: BLE001 - one broken member must not sink the others
             complete = False

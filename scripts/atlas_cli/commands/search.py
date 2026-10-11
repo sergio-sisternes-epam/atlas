@@ -580,6 +580,8 @@ def run_scoped(
         return _fail(as_json, {"ok": False, "error": mesh_recall.PROFILE_ERROR, "root": str(r), "query": query})
     if allow_partial:
         return _fail(as_json, {"ok": False, "error": mesh_recall.PARTIAL_ERROR, "root": str(r), "query": query})
+    if limit < 0:
+        return _fail(as_json, {"ok": False, "error": mesh_recall.LIMIT_ERROR, "root": str(r), "query": query})
     payload, code = mesh_recall.federate(
         settings, query, limit=limit, engine_override=engine_override, include_exits=include_exits
     )
