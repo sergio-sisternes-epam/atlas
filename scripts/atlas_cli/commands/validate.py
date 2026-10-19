@@ -1126,12 +1126,10 @@ def run(
 
         if path.name in RESERVED:
             # index.md / log.md are allowed, but must not be ordinary concepts (OKF).
-            in_scope = not want_type
-            if in_scope and focus_path is not None:
-                try:
-                    path.resolve().relative_to(focus_path)
-                except ValueError:
-                    in_scope = False
+            # Scope reserved files exactly like ordinary pages (--type and --path).
+            in_scope = not focused or _in_focus(
+                path, meta if isinstance(meta, dict) else {}, want_type, focus_path
+            )
             if in_scope:
                 for finding in _reserved_file_findings(r, path, meta, body):
                     if allow_inline_ignores and finding["id"] in ignores:

@@ -111,6 +111,25 @@ def main() -> int:
         got = findings(payload)
         check("focused --path outside skips reserved findings", got == set(), got)
 
+        # 4b. --type scopes reserved files like ordinary pages
+        code, payload = compile_json(store, "--type", "meeting")
+        got = findings(payload)
+        check(
+            "compile --type meeting catches a type: meeting index.md",
+            ("warnings", "reserved_name_concept", "meetings/standup/index.md") in got,
+            got,
+        )
+        code, payload = compile_json(store, "--type", "document")
+        got = findings(payload)
+        check(
+            "compile --type document skips the type: meeting index.md",
+            not any(p == "meetings/standup/index.md" for _, _, p in got),
+            got,
+        )
+        code, payload = compile_json(store, "--type", "meeting", "--path", "notes")
+        got = findings(payload)
+        check("--type meeting with --path outside skips it", got == set(), got)
+
         # 5. concept-typed log.md -> warning
         store = new_store(tmp, "typedlog")
         write(store / "log.md", "---\ntype: decision\ntitle: A decision\n---\n\nWe decided X.\n")
