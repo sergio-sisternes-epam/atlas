@@ -2043,6 +2043,32 @@ def main() -> int:
             "memory-migrate" in skill_text
             and "references/paths/memory-migrate.md" in skill_text,
         )
+        remember_text = (ROOT / "references/paths/remember.md").read_text(
+            encoding="utf-8"
+        )
+        remember_squished = " ".join(remember_text.split())
+        check(
+            "remember.md splits a multi-item source into one memory per item",
+            "### Split a multi-item source" in remember_text
+            and "do **not** file them as bullets on one page" in remember_squished
+            and "a1.memory.md" in remember_text
+            and "status: unverified" in remember_text
+            and "status: provisional" in remember_text,
+        )
+        memorise_text = (ROOT / "references/paths/atlas-memorise.md").read_text(
+            encoding="utf-8"
+        )
+        check(
+            "atlas-memorise.md defaults to memory + gist + schema and points at the split",
+            "memory + gist + schema" in memorise_text
+            and "Split a multi-item source" in memorise_text
+            and "optional progressive disclosure" not in memorise_text.lower(),
+        )
+        check(
+            "SKILL.md Memory layers row is the procedure default, not optional disclosure",
+            "| Memory layers | Procedure default is memory + gist + schema" in skill_text
+            and "Optional progressive disclosure" not in skill_text,
+        )
         memory_migrate_path = ROOT / "references/paths/memory-migrate.md"
         check("memory-migrate.md exists", memory_migrate_path.is_file())
         migrate_text = (ROOT / "references/paths/migrate.md").read_text(encoding="utf-8")

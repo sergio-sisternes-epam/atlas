@@ -35,7 +35,70 @@ root: <atlas store root>
    - **Original 0.13.0-beta** — recommended when `atlas_release` is exactly `0.13.0-beta`, OR `memory.layers` is `["frame", "gist", "page"]`, OR `atlas_release` is absent and the document is **not** the unstamped full beta.2 init described above. Recommended types: `experience`, `decision`, `lesson`, `recipe`, `work`, `protostar`, `page`, `gist`, `frame`. Do not recommend `memory` on this shape.
 
    `document` is an existing legacy type that remains valid to read; it is not a recommended choice for new writes on any shape. Recommended frontmatter: `origin` (internal|third-party|user|derived), `sensitivity` (public|internal|restricted). A protostar is a forming idea (`kva: forming`, `growth: true`) parked beside its origin; never a `residuals/` folder.
-4. **Write** a claim-bearing page (frontmatter + body). Or:
+
+### Split a multi-item source
+
+When a source holds several distinct items (announcements, decisions, action
+points — transcript, keynote, event list), do **not** file them as bullets on
+one page. Each item is one memory (own file, own claim, own `derived_from` to
+the source) and, unless those items already form one tight same-folder cluster,
+its own gist. One schema per folder lists those gists once each (kind
+`related`); another schema only if the subject changes. The source stays a
+record page linking to every memory (`kind: related`; `records` only if this
+page captures the outcome of that target). Claims do not live on the source.
+Gists never derive from gists, hubs, indexes, or schemas; same-folder parents
+only. Keep `stale_upper_page` exact-substring, secret scan before a gist, and
+compile green before claiming stored.
+
+Each memory carries `status: provisional | unverified | verified` (no
+memory-specific contract meaning; recall token `status:`; OKF tolerates
+unknown keys; not `draft|stable|deprecated`, and not `terminated` /
+`deprecated` / `superseded`, which recall excludes). Transcript or announcement
+claims start `unverified`; hedges and roadmap statements start `provisional`.
+Flip only that memory to `verified` after a primary-source check. Do not lift
+the flag onto the source or the gist. Gist and schema do not out-claim their
+memories.
+
+**Worked example** (fictional; `https://example.com` only). Five announcements
+→ `a1`–`a5.memory.md` + five `.gist.md` + `announcements.schema.md` (lists each
+gist once, kind `related`) + source `keynote.md`. a2–a4 match a1
+(`status: unverified`); a5 is hedged, so `status: provisional`. Source gist
+skipped — reason: claims live on the memories.
+
+```yaml
+# announcements/a1.memory.md
+type: memory
+title: Dock opens one hour early
+created: 2026-01-01
+status: unverified
+description: The dock will open one hour earlier on gathering day.
+relates_to:
+  - {path: announcements/keynote.md, kind: derived_from}
+```
+
+```yaml
+# announcements/a1.gist.md
+type: gist
+title: Dock opens one hour early
+created: 2026-01-01
+description: The dock will open one hour earlier on gathering day.
+relates_to:
+  - {path: announcements/a1.memory.md, kind: derived_from}
+```
+
+```yaml
+# announcements/keynote.md — record page; not the claim home
+type: experience
+title: Gathering keynote transcript
+created: 2026-01-01
+resource: https://example.com/gatherings/keynote
+relates_to:
+  - {path: announcements/a1.memory.md, kind: related}
+  - {path: announcements/a2.memory.md, kind: related}
+  # a3.memory.md, a4.memory.md, a5.memory.md likewise
+```
+
+4. **Write** a claim-bearing page (frontmatter + body). If the source holds several distinct items, follow **Split a multi-item source** first. Or:
    - `atlas migrate <source> --root <root>` into staging only, then
    - `atlas promote <staging-file> --to <target> [--type …] --root <root>`, then
    - complete claims (promote only scaffolds).
@@ -46,7 +109,7 @@ root: <atlas store root>
      kind: implements
    ```
    (or `autogenesis/work/<work_id>.md` when the subject uses Autogenesis space) and ensure the work hub exists (create via **work** path if needed). Protostars also `relates_to` their origin page with `kind: derived_from`.
-7. **Write model and layers** — one writer owns a folder; do not rewrite sibling schemas. The four-layer climb is optional. A page may be indexed with or without a schema, and a memory or other type may omit a gist. Non-memory types stay index-first-class: do not invent a typed middle extension for them. Do not refuse a remember solely because a middle rung is absent. A new or contradicted memory may cascade upward to an owning gist and schema when evidence supports that gist. Gists are filed beside their same-folder `derived_from` parents (one, or several when those parents already form one cluster). They are never derived from a work hub, plan, index, another gist, or a schema/frame, and cross-folder `relates_to` does not join a cluster. On the current `CONTRACT.json` shape, every folder gist must be listed by at least one same-folder `type: schema` page using `relates_to` kind `related`; multiple schemas are legal and each lists its own gists. Schema is required because a gist was created, not because a page was indexed. When the subject of the live branch changes, create another schema rather than rewriting an unrelated sibling: name it `<name>.schema.md`, link schema-to-schema to the prior schema, and list the new schema from `index.md`. Keep `hub.md` in place; it is a work hub, not a memory page or a rung in recall. The index lists schema cues when a schema exists, not memory copies or every gist as a hot list. Links between layers stay same-level (schema–schema, gist–gist, memory–memory); parent/child relationships use the specified `related` or `derived_from` edge. A non-empty gist `description` must appear as an exact substring in the body or description of at least one memory page it derives from; otherwise current-shape compile reports `stale_upper_page`. Before writing a gist, scan the text you would copy: critical or high secret-class text, or `sensitivity: restricted`, refuses the gist; a medium `booking_manage_reference` is a handoff, not a written gist. Never invent a gist body or write a title-only stub to clear `missing_gist`. On shipped `SCHEMA.json` stores, retain existing `frame`/`gist`/`page` or `memory` type names and the shipped `frame_members` ladder; do not impose the current-shape schema gate there.
+7. **Write model and layers** — one writer owns a folder; do not rewrite sibling schemas. Default write is memory + gist + schema (one gist per memory unless the cluster-gist rule already applies; one schema per folder listing those gists). Skip only as a recorded one-line exception: a single short fact, or an index-first-class non-memory type (work hub, decision, lesson, recipe) — do not invent a typed middle extension for those. Compile still does not hard-fail a missing gist or a schema-only folder, and a page may be indexed with or without a schema; do not refuse a remember solely because a middle rung is absent. Procedure rule, not a new compile gate. A new or contradicted memory may cascade upward to an owning gist and schema when evidence supports that gist. Gists are filed beside their same-folder `derived_from` parents (one, or several when those parents already form one cluster). They are never derived from a work hub, plan, index, another gist, or a schema/frame, and cross-folder `relates_to` does not join a cluster. On the current `CONTRACT.json` shape, every folder gist must be listed by at least one same-folder `type: schema` page using `relates_to` kind `related`; multiple schemas are legal and each lists its own gists. Schema is required because a gist was created, not because a page was indexed. When the subject of the live branch changes, create another schema rather than rewriting an unrelated sibling: name it `<name>.schema.md`, link schema-to-schema to the prior schema, and list the new schema from `index.md`. Keep `hub.md` in place; it is a work hub, not a memory page or a rung in recall. The index lists schema cues when a schema exists, not memory copies or every gist as a hot list. Links between layers stay same-level (schema–schema, gist–gist, memory–memory); parent/child relationships use the specified `related` or `derived_from` edge. A non-empty gist `description` must appear as an exact substring in the body or description of at least one memory page it derives from; otherwise current-shape compile reports `stale_upper_page`. Before writing a gist, scan the text you would copy: critical or high secret-class text, or `sensitivity: restricted`, refuses the gist; a medium `booking_manage_reference` is a handoff, not a written gist. Never invent a gist body or write a title-only stub to clear `missing_gist`. On shipped `SCHEMA.json` stores, retain existing `frame`/`gist`/`page` or `memory` type names and the shipped `frame_members` ladder; do not impose the current-shape schema gate there.
    For the original 0.13.0-beta shape, gist parents include `page`; for 0.13.0-beta.2 they include `memory` (see step 3 for the full shape-specific type list). The current `CONTRACT.json` shape uses `schema`, `gist`, and `memory`.
    **Suffixes are search handles, not types:** create current-shape pages as `<name>.schema.md`, `<name>.gist.md`, or `<name>.memory.md`. Frontmatter `type` remains `schema`, `gist`, or `memory` and is the contract type. Keep shipped-beta `SCHEMA.json` page type names unchanged.
 8. **Spine pages** — if the new page belongs to a cluster that already has a short index (work hub Outcomes, or a document titled as an evolution / “all ideas” spine), add a `relates_to` edge and a one-line claim on that spine. Do not copy the essay onto the spine.
