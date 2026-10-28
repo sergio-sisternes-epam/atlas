@@ -2,6 +2,10 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Changed: path remember splits a multi-item source into one memory per distinct
+  item (own gist; one schema per folder; the source page links out and does not
+  hold the claims). Memory, gist, and schema are the default write, not an
+  optional climb. Compile gates are unchanged.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

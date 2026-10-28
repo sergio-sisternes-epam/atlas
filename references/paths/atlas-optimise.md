@@ -54,11 +54,12 @@ with path or full is a refusal.
 
 ## Locked model this path enforces
 
-The four-layer walk is optional progressive disclosure. Recall may walk index,
-then schema, then gist, then memory, and it may stop early. `index.md` is a
-cue list, not content. An index may exist with or without a schema. A memory
-or any other type may sit in the index with no gist and no typed middle
-extension. Non-memory types stay index-first-class: this path does not force
+Recall may walk index, then schema, then gist, then memory, and it may stop
+early. That walk is not the write rule: path remember defaults to memory +
+gist + schema (see **Split a multi-item source**). `index.md` is a cue list,
+not content. Compile fact, not a skip license: an index may exist with or
+without a schema, and a memory may sit with no gist (`missing_gist` stays
+info). Non-memory types stay index-first-class: this path does not force
 them through a gist or a schema.
 
 When a gist is created, that gist forces one same-folder schema. A second
