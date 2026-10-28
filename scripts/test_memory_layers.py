@@ -2049,7 +2049,10 @@ def main() -> int:
         remember_squished = " ".join(remember_text.split())
         check(
             "remember.md splits a multi-item source into one memory per item",
-            "### Split a multi-item source" in remember_text
+            any(
+                line.startswith("## Split a multi-item source")
+                for line in remember_text.splitlines()
+            )
             and "do **not** file them as bullets on one page" in remember_squished
             and "a1.memory.md" in remember_text
             and "status: unverified" in remember_text
