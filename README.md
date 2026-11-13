@@ -17,6 +17,13 @@ Atlas gives working knowledge durable, linked pages that can be shared across st
 
 Atlas includes a base schema that can be adapted to a use case. It does not prescribe a single Semantic Knowledge Organisation.
 
+## Modules
+
+| Module | What it does |
+| --- | --- |
+| Getting started | Explain first-use purpose, prerequisites, the shortest useful journey, and storage choices. |
+| Help | Explain installed modules without running them. |
+
 ## Install
 
 ```bash
