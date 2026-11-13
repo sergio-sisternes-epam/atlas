@@ -41,7 +41,7 @@ SKIP_TOP = frozenset({"templates", ".atlas-index", ".atlas", "mesh", "schema.d",
 OVERLAY_DIR = "schema.d"
 # Bump whenever projection logic (parsing, roles, edges, eligibility) changes:
 # it is part of the corpus digest, so every existing generation rebuilds once.
-PROJECTION_VERSION = 2
+PROJECTION_VERSION = 3
 
 
 class ProjectionError(ValueError):

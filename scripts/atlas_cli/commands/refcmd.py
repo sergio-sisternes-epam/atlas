@@ -2004,6 +2004,11 @@ def run_prune(
             raise RefError(f"summary would fail compile: {transformed[0]}")
         removed: list[tuple[str, bytes, int]] = []
         written: list[tuple[str, bytes, int, int, int, bytes]] = []
+        from ..core.ignore_guard import ensure_prune_lock_ignored
+
+        ignored = ensure_prune_lock_ignored(store).item()
+        if ignored and ignored.get("level") == "warning":
+            warnings.append(str(ignored.get("msg") or ignored.get("message") or "could not ignore prune lock"))
         root_fd = _open_prune_lock(store)
         try:
             _lock_fd(root_fd, summary_rel)

@@ -258,6 +258,8 @@ def guard_indexes(store: Path) -> GuardResult:
 
 
 MESH_PATTERNS = ("atlas-mesh.json.lock*", ".atlas-mesh.json.*.tmp")
+PRUNE_LOCK_NAME = ".atlas-ref-prune.lock"
+PRUNE_LOCK_CODE = "atlas_ref_prune_lock_ignore_failed"
 
 
 def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
@@ -299,6 +301,47 @@ def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
         with exclude.open("a", encoding="utf-8") as fh:
             fh.write(lead + "".join(f"{line}\n" for line in missing))
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), missing[0])
+    except OSError as e:
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))
+    except Exception as e:  # noqa: BLE001 - a guard never fails the command
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=str(e) or type(e).__name__)
+
+
+def ensure_prune_lock_ignored(store: Path) -> GuardResult:
+    """Append the exact prune lock path to ``info/exclude``. Never raises.
+
+    The lock stays in the store so cooperating prunes share one inode. A
+    store that is itself a worktree must not be able to commit that file.
+    """
+    code = PRUNE_LOCK_CODE
+    pattern = "/" + PRUNE_LOCK_NAME
+    exclude: Path | None = None
+    try:
+        if shutil.which("git") is None or not store.is_dir():
+            return GuardResult(NOT_GIT, code, pattern)
+        if _git(store, "rev-parse", "--is-inside-work-tree") != "true":
+            return GuardResult(NOT_GIT, code, pattern)
+        top = _git(store, "rev-parse", "--show-toplevel")
+        exclude_raw = _git(store, "rev-parse", "--git-path", "info/exclude")
+        if not top or not exclude_raw:
+            return GuardResult(FAILED, code, pattern, reason="git rev-parse failed")
+        rel_posix = store.resolve().relative_to(Path(top).resolve()).as_posix()
+        rel_posix = "" if rel_posix == "." else rel_posix
+        exclude = Path(exclude_raw)
+        if not exclude.is_absolute():
+            exclude = (store / exclude).resolve()
+        escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
+        prefix = f"/{escaped}/" if escaped else "/"
+        line = prefix + PRUNE_LOCK_NAME
+        existing = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
+        have = {item.strip() for item in existing.splitlines()}
+        if line in have:
+            return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line)
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        lead = "" if not existing or existing.endswith("\n") else "\n"
+        with exclude.open("a", encoding="utf-8") as fh:
+            fh.write(f"{lead}{line}\n")
+        return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), line, note="the prune lock stays")
     except OSError as e:
         return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))
     except Exception as e:  # noqa: BLE001 - a guard never fails the command

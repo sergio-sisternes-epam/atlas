@@ -367,6 +367,26 @@ def main() -> int:
             else:
                 print("[PASS] prune retargets tip links and writes summary ref edges")
                 print("[PASS] compile has no broken tip links after prune")
+            lock_ignored = subprocess.run(
+                ["git", "check-ignore", "-q", "--", ".atlas-ref-prune.lock"],
+                cwd=store,
+            )
+            lock_status = subprocess.run(
+                ["git", "status", "--short", "--", ".atlas-ref-prune.lock"],
+                cwd=store,
+                text=True,
+                capture_output=True,
+            )
+            if (
+                lock_ignored.returncode != 0
+                or lock_status.stdout.strip()
+                or not (store / ".atlas-ref-prune.lock").is_file()
+            ):
+                failures.append(
+                    f"prune lock should be ignored: status={lock_status.stdout!r} code={lock_ignored.returncode}"
+                )
+            else:
+                print("[PASS] prune lock is excluded from git")
 
         escaped = store / "escaped.md"
         escaped.write_text(

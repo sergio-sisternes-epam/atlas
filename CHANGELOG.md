@@ -22,6 +22,8 @@
 - `atlas ref prune` claims a drop with a no-replace rename. A destination that already exists aborts the drop and is not overwritten.
 - `atlas ref prune` rechecks that the resolved rev is still an ancestor of HEAD after the mutation lock is held, before rewriting or dropping pages. A tip that moved to an unrelated commit is refused even when the drop bytes match.
 - `atlas ref show` and `atlas ref prune` refuse a path that was under `staging` or the `staging_dir` recorded on the selected commit, even when the worktree schema has renamed that directory. A commit that cannot prove its staging name is refused. A `staging_dir` that is not a single directory name, such as a list, is not coerced into one.
+- Projection version is 3, so a generation built before ref-bearing edges were omitted from projection is no longer current.
+- `atlas ref prune` adds `.atlas-ref-prune.lock` to the repository `info/exclude` before creating it, so the lock is not an untracked file a store can commit.
 - `atlas ref prune` accepts `--ref` only when the resolved commit is an ancestor of HEAD, including HEAD itself, and the worktree bytes match that blob and the HEAD blob. A later or unrelated commit, or a dirty worktree that only matches the older rev, is not the pre-prune snapshot.
 - Memory-layer gist and frame checks ignore `relates_to` items that carry `ref`. A history edge does not satisfy a tip parent or frame-member contract.
 - A prune rewrite that cannot delete its displaced temp exchanges the original page back before failing. If that undo fails, the completed exchange is still rolled back with the rest of the prune.
