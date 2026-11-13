@@ -35,6 +35,9 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **schema** | Init, overlay install/new/uninstall; compile merge |
 | **configure** | SCHEMA 2.0 recall inspect, upgrade, explicit profile selection |
 | **ci** | Assess, install, or repair CI for an Atlas mount (reads `SCHEMA.json` or `CONTRACT.json`; new `atlas init` writes `CONTRACT.json`) |
+| **history** | Read one store path at a git rev; a relates_to.ref edge is not a tip hop |
+| **version-hint** | Add one living-page relates_to.ref hint; grain stays deferred |
+| **prune** | After KVA terminate, drop named failed-path pages from tip onto one summary |
 
 Named-module details live in `references/paths/<module>.md` in this same
 package revision. CLI option lists come from that revision’s non-mutating

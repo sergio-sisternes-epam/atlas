@@ -200,6 +200,7 @@ def _converted_frame_text(
     for gist_path in gist_paths:
         if not any(
             isinstance(item, dict)
+            and not str(item.get("ref") or "").strip()
             and item.get("path") == gist_path
             and str(item.get("kind") or item.get("role") or "").strip().lower() == "related"
             for item in relates

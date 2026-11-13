@@ -17,7 +17,14 @@ from . import index_location, index_publish
 from .ignore_guard import ensure_indexes_ignored
 from .index_location import IndexLocationError
 from .paths import is_symlink_entry, leading_symlink, mesh_symlink, note_skipped_symlink, skipping_symlinks
-from .projection import ProjectedPage, cheap_fingerprint, content_digest, eligible_paths, project_store
+from .projection import (
+    ProjectedPage,
+    _edges_from_meta,
+    cheap_fingerprint,
+    content_digest,
+    eligible_paths,
+    project_store,
+)
 from .recall_config import fts5_available, recall_enabled
 
 INDEX_DIR = index_location.LEGACY_DIR
@@ -548,14 +555,11 @@ def pages_from_db(db_path: Path) -> list[ProjectedPage]:
             meta = json.loads(row[7] or "{}")
         except json.JSONDecodeError:
             meta = {}
-        try:
-            edges = json.loads(row[8] or "[]")
-        except json.JSONDecodeError:
-            edges = []
         if not isinstance(meta, dict):
             meta = {}
-        if not isinstance(edges, list):
-            edges = []
+        # Re-derive from frontmatter so a generation written before the history
+        # fence cannot present a ref-bearing edge as a tip hop.
+        edges = _edges_from_meta(meta)
         pages.append(
             ProjectedPage(
                 page_id=str(row[0]),

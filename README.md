@@ -23,6 +23,9 @@ Atlas includes a base schema that can be adapted to a use case. It does not pres
 | --- | --- |
 | Getting started | Explain first-use purpose, prerequisites, the shortest useful journey, and storage choices. |
 | Help | Explain installed modules without running them. |
+| History | Read one store path at a git rev. A `ref` edge is not a tip hop. |
+| Version hint | Point a living page at a prior git rev without copying the old body. |
+| Prune | After terminate, drop named failed-path pages from tip onto one summary. |
 
 ## Install
 
@@ -39,7 +42,7 @@ After installation, invoke the skill in an agent session:
 - `/atlas Recall what we know about <topic> from the project Atlas.`
 - `/atlas Remember this decision and its source: <decision and source>.`
 
-Atlas uses guided paths for operations such as recall, remember, schema changes, and store migration. See [`SKILL.md`](SKILL.md) for the runtime contract and path rules.
+Atlas uses guided paths for operations such as recall, remember, schema changes, store migration, history, version hints, and prune. See [`SKILL.md`](SKILL.md) for the runtime contract and path rules.
 
 ## Prerequisites
 

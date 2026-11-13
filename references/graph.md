@@ -29,6 +29,9 @@ and never build or publish a recall index. The one exception is the opt-in
 - Excluded exactly as recall excludes them: `log.md` pages (role `log`),
   the staging directory, `templates/`, `.atlas/`, `.atlas-index/`,
   `schema.d/` and `mesh/`.
+- Ref-bearing `relates_to` items are history, not tip hops. `atlas graph`
+  omits an item when the `ref` key is present, including an empty or
+  non-string value. That omission is not missing data.
 - A projection error (for example invalid SCHEMA 2.0 YAML) exits 2 with the
   message. With `--allow-partial` the command exits 1 instead, with
   `complete: false` and an `omitted` list of `{path, reason}`.
@@ -92,7 +95,7 @@ on schema 1.0 and 2.0 stores.
 atlas graph edges --root R (--from PAGE | --to PAGE | --all) [--kind K]... [--include-exits] [--json]
 ```
 
-Edges keep authored direction: the page holding `relates_to` is `from`.
+Edges are tip-projection edges. A `relates_to` item with a `ref` key is omitted. Edges keep authored direction: the page holding `relates_to` is `from`.
 PAGE arguments are store-relative paths; a leading `./` is normalised on
 both arguments and targets. `--from` must name a page in the store; `--to`
 may name any target, including a missing one. `--from` and `--to` may be
