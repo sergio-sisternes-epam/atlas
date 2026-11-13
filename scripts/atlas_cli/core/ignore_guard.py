@@ -9,8 +9,11 @@ edited; committed ``.gitignore`` files are never touched.
 
 from __future__ import annotations
 
+import errno
+import os
 import re
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -262,6 +265,47 @@ PRUNE_LOCK_NAME = ".atlas-ref-prune.lock"
 PRUNE_LOCK_CODE = "atlas_ref_prune_lock_ignore_failed"
 
 
+def _read_regular_exclude(exclude: Path) -> str:
+    """Read ``info/exclude`` without following a symlink. Missing is empty."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(exclude, flags)
+    except FileNotFoundError:
+        if exclude.is_symlink():
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude")
+        return ""
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
+        chunks: list[bytes] = []
+        while True:
+            data = os.read(fd, 65536)
+            if not data:
+                break
+            chunks.append(data)
+        return b"".join(chunks).decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
+
+
+def _append_regular_exclude(exclude: Path, text: str) -> None:
+    """Append to a regular ``info/exclude``. A symlink is not followed."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise OSError(errno.ENOTSUP, "refusing to update info/exclude without O_NOFOLLOW")
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+    try:
+        fd = os.open(exclude, flags)
+    except FileNotFoundError:
+        fd = os.open(exclude, flags | os.O_CREAT, 0o644)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
 def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
     """Append the mesh write lock and temp-file patterns to ``info/exclude``.
 
@@ -329,18 +373,19 @@ def ensure_prune_lock_ignored(store: Path) -> GuardResult:
         rel_posix = "" if rel_posix == "." else rel_posix
         exclude = Path(exclude_raw)
         if not exclude.is_absolute():
-            exclude = (store / exclude).resolve()
+            exclude = store / exclude
+        # Resolve only the parent. Resolving the file would follow a symlink
+        # and append the ignore rule outside .git.
+        exclude = exclude.parent.resolve() / exclude.name
         escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
         prefix = f"/{escaped}/" if escaped else "/"
         line = prefix + PRUNE_LOCK_NAME
-        existing = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
+        existing = _read_regular_exclude(exclude)
         have = {item.strip() for item in existing.splitlines()}
         if line in have:
             return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line)
-        exclude.parent.mkdir(parents=True, exist_ok=True)
         lead = "" if not existing or existing.endswith("\n") else "\n"
-        with exclude.open("a", encoding="utf-8") as fh:
-            fh.write(f"{lead}{line}\n")
+        _append_regular_exclude(exclude, f"{lead}{line}\n")
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), line, note="the prune lock stays")
     except OSError as e:
         return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))

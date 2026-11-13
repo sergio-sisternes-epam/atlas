@@ -72,6 +72,38 @@ def git(repo: Path, args: list[str]) -> None:
         raise RuntimeError(f"git {args}: {proc.stderr}")
 
 
+def symlink_exclude_refused(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "symlink-exclude"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"symlink exclude init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    outside = tmp / "outside-exclude"
+    outside.write_text("keep\n", encoding="utf-8")
+    raw = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=store,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    exclude = Path(raw)
+    if not exclude.is_absolute():
+        exclude = store / exclude
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    if exclude.exists() or exclude.is_symlink():
+        exclude.unlink()
+    exclude.symlink_to(outside)
+    from atlas_cli.core.ignore_guard import ensure_prune_lock_ignored
+
+    result = ensure_prune_lock_ignored(store)
+    if result.status != "failed" or outside.read_text(encoding="utf-8") != "keep\n" or exclude.is_symlink() is False:
+        failures.append(f"symlinked info/exclude was followed: {result}")
+    else:
+        print("[PASS] prune ignore refuses a symlinked info/exclude")
+
+
 def contract_file(root: Path) -> Path:
     for name in ("CONTRACT.json", "SCHEMA.json"):
         path = root / name
@@ -115,6 +147,7 @@ def main() -> int:
     _scenario_contract()
     tmp = Path(tempfile.mkdtemp(prefix="atlas-ref-"))
     try:
+        symlink_exclude_refused(tmp, failures)
         store = tmp / "store"
         init = run(["init", "--root", str(store), "--json"])
         if init.returncode != 0:
