@@ -340,6 +340,35 @@ relates_to:
         ]
         self.assertTrue(uncovered, planned)
 
+    def test_empty_ref_is_not_a_live_relation(self) -> None:
+        import atlas_optimise as opt
+
+        root = init_store(self.base)
+        page(
+            root / "schema.md",
+            """
+type: schema
+title: Schema
+created: 2026-10-05
+relates_to:
+  - path: missing.md
+    kind: related
+    ref: ""
+  - path: missing.md
+    kind: related
+    ref: 0
+""",
+            "## Content\n\nSchema page has enough prose for a concept page.",
+        )
+        store = opt.Store(root)
+        meta = store.pages["schema.md"][1]
+        self.assertEqual(opt._live_relates(meta), [])
+        live, history = opt._member_edge_counts(store, meta, "missing.md")
+        self.assertEqual((live, history), (0, 2))
+        _code, planned = plan(root, self.base / "out")
+        dead = [task for task in tasks(planned) if task["kind"] == "dead-schema-member"]
+        self.assertEqual(dead, [], planned)
+
     def test_referrer_rewrite_keeps_history_edge(self) -> None:
         import atlas_optimise as opt
 

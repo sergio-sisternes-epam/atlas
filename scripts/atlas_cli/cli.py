@@ -605,7 +605,7 @@ def graph_nodes_cmd(
 @click.option("--root", default=None, help=_ROOT_HELP)
 @click.option("--from", "from_page", default=None, help="edges authored by this page")
 @click.option("--to", "to_page", default=None, help="edges targeting this path")
-@click.option("--all", "all_edges", is_flag=True, help="every edge in the store")
+@click.option("--all", "all_edges", is_flag=True, help="every tip edge; history edges with ref are omitted")
 @click.option("--kind", "kinds", multiple=True, help="relation kind (repeatable)")
 @click.option("--include-exits", is_flag=True, help=_EXITS_HELP)
 @click.option("--allow-partial", is_flag=True, help=_PARTIAL_HELP)

@@ -1924,7 +1924,7 @@ def run_prune(
         repo = _repo(store)
         sha = _resolve_commit(repo, rev)
         _require_tip_ancestor(repo, sha)
-        for rel in drop_rels:
+        for rel in (summary_rel, *drop_rels):
             if _historical_managed(repo, store, sha, rel):
                 raise RefError(f"refusing Atlas-managed path {rel}")
         warnings: list[str] = []
@@ -2004,17 +2004,20 @@ def run_prune(
             raise RefError(f"summary would fail compile: {transformed[0]}")
         removed: list[tuple[str, bytes, int]] = []
         written: list[tuple[str, bytes, int, int, int, bytes]] = []
-        from ..core.ignore_guard import ensure_prune_lock_ignored
+        from ..core.ignore_guard import ALREADY_IGNORED, IGNORED_ADDED, ensure_prune_lock_ignored
 
-        ignored = ensure_prune_lock_ignored(store).item()
-        if ignored and ignored.get("level") == "warning":
-            warnings.append(str(ignored.get("msg") or ignored.get("message") or "could not ignore prune lock"))
+        ignored = ensure_prune_lock_ignored(store)
+        if ignored.status not in {ALREADY_IGNORED, IGNORED_ADDED}:
+            reason = f": {ignored.reason}" if ignored.reason else ""
+            raise RefError(
+                "refusing to create prune lock; .atlas-ref-prune.lock is not excluded" + reason
+            )
         root_fd = _open_prune_lock(store)
         try:
             _lock_fd(root_fd, summary_rel)
             try:
                 _require_tip_ancestor(repo, sha)
-                for rel in drop_rels:
+                for rel in (summary_rel, *drop_rels):
                     if _historical_managed(repo, store, sha, rel):
                         raise RefError(f"refusing Atlas-managed path {rel}")
                 before_warnings = _blocking_warnings(store)

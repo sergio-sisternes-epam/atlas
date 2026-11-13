@@ -252,9 +252,14 @@ def _relates(meta: dict) -> list[dict]:
     return [r for r in rel if isinstance(r, dict)] if isinstance(rel, list) else []
 
 
+def _history_item(item: dict) -> bool:
+    """History is the presence of ``ref``, including an empty or non-string value."""
+    return "ref" in item
+
+
 def _live_relates(meta: dict) -> list[dict]:
     """Tip relations only. A ref-bearing item is history and satisfies no live contract."""
-    return [item for item in _relates(meta) if not str(item.get("ref") or "").strip()]
+    return [item for item in _relates(meta) if not _history_item(item)]
 
 
 def _kind(item: dict) -> str:
@@ -398,7 +403,7 @@ def _span_is_history(lines: list[str], span: tuple[int, int]) -> bool:
     parsed = _parsed_span(lines, span)
     if parsed is None:
         return True
-    return bool(str(parsed.get("ref") or "").strip())
+    return _history_item(parsed)
 
 
 def _history_path_lines(text: str) -> set[int]:
@@ -2129,7 +2134,7 @@ def _member_edge_counts(store: Store, meta: dict, member: str) -> tuple[int, int
                 continue
         elif store.canonical(path) != want:
             continue
-        if str(item.get("ref") or "").strip():
+        if _history_item(item):
             history += 1
         else:
             live += 1

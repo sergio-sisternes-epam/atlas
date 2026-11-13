@@ -125,6 +125,120 @@ def page(title: str, relates: str, body: str) -> str:
     )
 
 
+def historical_summary_refused(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "historical-summary"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"historical summary init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    contract = contract_file(store)
+    schema = json.loads(contract.read_text(encoding="utf-8"))
+    schema.setdefault("structure", {})["staging_dir"] = "drafts"
+    contract.write_text(json.dumps(schema), encoding="utf-8")
+    prose = "This page keeps enough prose that compile does not treat it as a link list."
+    (store / "drafts").mkdir()
+    summary = store / "drafts" / "summary.md"
+    summary.write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+    (store / "drafts" / "index.md").write_text(page("Index", "relates_to: []\n", prose), encoding="utf-8")
+    (store / "note.md").write_text(page("Note", "relates_to: []\n", prose), encoding="utf-8")
+    git(store, ["add", contract.name, "drafts", "note.md"])
+    git(store, ["commit", "-m", "drafts was staging"])
+    old = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=store, text=True, capture_output=True, check=True
+    ).stdout.strip()
+    schema["structure"]["staging_dir"] = "staging"
+    contract.write_text(json.dumps(schema), encoding="utf-8")
+    git(store, ["add", contract.name])
+    git(store, ["commit", "-m", "staging renamed"])
+    before = summary.read_text(encoding="utf-8")
+    pruned = run(
+        [
+            "ref",
+            "prune",
+            "--summary",
+            "drafts/summary.md",
+            "--drop",
+            "note.md",
+            "--ref",
+            old,
+            "--kind",
+            "derived_from",
+            "--root",
+            str(store),
+            "--json",
+        ]
+    )
+    if (
+        pruned.returncode == 0
+        or "managed" not in pruned.stdout
+        or summary.read_text(encoding="utf-8") != before
+        or not (store / "note.md").is_file()
+    ):
+        failures.append(f"historical staging summary should be refused: {pruned.stdout}")
+    else:
+        print("[PASS] prune refuses a summary that was historically managed")
+
+
+def unwritable_exclude_aborts(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "unwritable-exclude"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"unwritable exclude init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    prose = "This page keeps enough prose that compile does not treat it as a link list."
+    (store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+    (store / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+    (store / "living.md").write_text(
+        page("Living", "relates_to:\n  - path: dead.md\n    kind: related\n", f"See [dead](dead.md). {prose}"),
+        encoding="utf-8",
+    )
+    git(store, ["add", "."])
+    git(store, ["commit", "-m", "pages"])
+    raw = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=store,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    exclude = Path(raw)
+    if not exclude.is_absolute():
+        exclude = store / exclude
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("keep\n", encoding="utf-8")
+    os.chmod(exclude, 0o444)
+    before = (store / "dead.md").read_text(encoding="utf-8")
+    pruned = run(
+        [
+            "ref",
+            "prune",
+            "--summary",
+            "summary.md",
+            "--drop",
+            "dead.md",
+            "--ref",
+            "HEAD",
+            "--kind",
+            "derived_from",
+            "--root",
+            str(store),
+            "--json",
+        ]
+    )
+    if (
+        pruned.returncode == 0
+        or "not excluded" not in pruned.stdout
+        or (store / ".atlas-ref-prune.lock").exists()
+        or (store / "dead.md").read_text(encoding="utf-8") != before
+        or exclude.read_text(encoding="utf-8") != "keep\n"
+    ):
+        failures.append(f"unwritable exclude should abort before the lock: {pruned.stdout}")
+    else:
+        print("[PASS] prune aborts before creating a lock when exclude cannot be updated")
+
+
 def _scenario_contract() -> None:
     scenario = ROOT / "references/scenarios/git-ref-time-travel-adversarial-v1.yaml"
     text = scenario.read_text(encoding="utf-8")
@@ -148,6 +262,8 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="atlas-ref-"))
     try:
         symlink_exclude_refused(tmp, failures)
+        historical_summary_refused(tmp, failures)
+        unwritable_exclude_aborts(tmp, failures)
         store = tmp / "store"
         init = run(["init", "--root", str(store), "--json"])
         if init.returncode != 0:
