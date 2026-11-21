@@ -2,6 +2,17 @@
 
 ## Unreleased (targets 0.14.0)
 
+- New path `atlas-dream` and helper `scripts/atlas_dream.py report`: an
+  operator-chosen, read-only consolidation report for one target. It lists
+  `supersede-unmarked` pages (live targets of a `supersedes` edge),
+  `conflict-candidate` claim pairs (similar lines that differ in polarity or
+  in a number), `same-title` pages, and `duplicate-page` / `duplicate-claim`
+  items. Every finding quotes its source lines verbatim with path:line and
+  carries a suggested fix (usually a `supersedes` link); nothing is applied.
+  It writes `dream.json` and `dream.md` only to an `--out-dir` outside the
+  store, refuses an out-dir inside it, and has a page cost ceiling. It is the
+  report half of a future dreamer; sleep (automatic rewrite) is still not
+  implemented.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

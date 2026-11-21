@@ -30,6 +30,7 @@ Ask for details with “explain \<module\>” or “Atlas help \<module\>”.
 | **atlas-recall** | Navigate by loading path recall; do not restate the walk |
 | **atlas-forget** | Keep, vary, or abandon a memory without a new traffic value |
 | **atlas-optimise** | Operator-chosen fill and tidy of a named target: evidence-gated gist and schema fill, four-layer tidy repair, subject clustering, per-folder task list, dry-run first; not on install or compile |
+| **atlas-dream** | Operator-chosen, read-only consolidation report of a named target: duplicates, contradiction candidates and superseded-but-unmarked pages with verbatim path:line quotes; writes nothing in the store |
 | **work** | Open, update, or close `work_id` hubs |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory |
 | **schema** | Init, overlay install/new/uninstall; compile merge |
