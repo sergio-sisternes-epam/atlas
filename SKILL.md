@@ -149,6 +149,7 @@ still copies into staging; do not use it for strategy moves.
 | **atlas-recall** | Navigate the four-layer model by loading path recall | `references/paths/atlas-recall.md` |
 | **atlas-forget** | Drop memory with keep, vary, or abandon | `references/paths/atlas-forget.md` |
 | **atlas-optimise** | Operator-chosen fill and tidy of a named target: evidence-gated gist and schema fill, four-layer tidy repair, subject clustering, per-folder task list, dry-run first; not on install or compile | `references/paths/atlas-optimise.md` |
+| **atlas-dream** | Operator-chosen, read-only consolidation report of a named target: duplicates, contradiction candidates and superseded-but-unmarked pages with verbatim path:line quotes; writes nothing in the store; not on install or compile | `references/paths/atlas-dream.md` |
 | **work** | Open, update, or close `work_id` hubs | `references/paths/work.md` |
 | **landscape** | On-demand competitor + symbiont research; write comparison memory | `references/paths/landscape.md` |
 | **schema** | Init, overlay install/new/uninstall; compile merge; Atlas overlays from APM packages (step 3a) | `references/paths/schema.md` |
@@ -222,6 +223,8 @@ python3 <atlas-skill>/scripts/atlas.py schema memory-rung --set error --root <at
 python3 <atlas-skill>/scripts/atlas.py memory-migrate --root <atlas> --operation assess|inventory|apply [--batch contract-file|restamp]
 python3 <atlas-skill>/scripts/atlas_optimise.py plan|apply --root <atlas> --target <folder|.> [--optimise-mode path|full|custom|incremental] [--since-hours <N>] [--custom-tree <prefix>] [--tidy-only] [--auto-verbatim] [--fill-sensible] [--cost-ceiling <pages>] [--pilot] [--out-dir <dir>] [--plan <plan.json>]
                        # path atlas-optimise only: standalone helper, operator-chosen, never run by install or compile. Full is serial only.
+python3 <atlas-skill>/scripts/atlas_dream.py report --root <atlas> [--target <folder|.>] [--out-dir <dir>] [--json]
+                       # path atlas-dream only: standalone read-only helper, operator-chosen, never run by install or compile.
 ```
 
 Search engine: grep by default until recall is enabled. Without recall, `--engine bm25` ranks with SQLite FTS5 on a fresh on-disk index, falling back to grep with a warning only if FTS5 is unavailable or projection fails. A preferred engine (`atlas-mesh.json` `recall.engine` or `ATLAS_RECALL_ENGINE`) becomes the default, its index auto-created and refreshed; an enabled store recall profile still wins. An all-words FTS5 miss triggers one any-word retry labelled `match: "any"`. Opt-in default is `atlas:ranked` (published FTS5, content-digest fast path; beats grep on speed and follow-up reads). `atlas:tgrep` is advanced/limited. See paths `recall` and `configure`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md`.
