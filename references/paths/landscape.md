@@ -49,7 +49,7 @@ Optional extra names are additive only.
 7. **Cite or gap.** Living claims need `origin` / `sources` or an explicit gap line. Do not invent capabilities.
 8. **Job test**, not feature counts: can a second team mount, branch, PR, compile?
 9. **Compile green.**
-10. **log.md** only for structural adds (new partners/landscape folders, first promote of glossary).
+10. **log.md** (newest first: insert at the top) only for structural adds (new partners/landscape folders, first promote of glossary).
 
 ## Non-goals
 

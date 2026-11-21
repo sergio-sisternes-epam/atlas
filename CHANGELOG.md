@@ -2,6 +2,24 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Changed: `log.md` is **newest first**, matching OKF ("Chronological change
+  history, newest first"). Hard rule 6 and paths remember, work, schema and
+  landscape now say to insert each new entry at the top, below the heading
+  and any frontmatter, instead of appending. Existing oldest-first logs are
+  not rewritten by Atlas; compile reports them as info `log_md_order`.
+- Added: compile checks for OKF reserved files (`index.md`, `log.md` at any
+  level), which compile used to skip entirely.
+  - `reserved_name_concept` (warning, exit 1): a reserved file whose
+    frontmatter `type` is a concept type (anything but `document`), e.g. a
+    meeting summary filed as `index.md`. Move the content to a named page
+    (e.g. `summary.md`) and keep the reserved file a plain listing / log.
+  - `reserved_name_frontmatter` (info): any other frontmatter on a reserved
+    file. The store-root `index.md` may carry `okf_version` only.
+  - `log_md_order` (info): a `log.md` whose dated entries run oldest-first.
+  - Exempt: atlas-tasks list indexes (`type: task-list`, a `tasks` field,
+    or the generated folder listing with `generated_by: atlas-tasks` /
+    `task_list_page`). All three honour `<!-- atlas-ignore: <id> -->`.
+
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

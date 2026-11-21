@@ -884,6 +884,95 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
     return findings
 
 
+# OKF reserved files (skill okf, okf-authority "Reserved files"): index.md is a
+# directory listing with normally no frontmatter (the store-root index.md may
+# carry only okf_version); log.md is chronological change history, newest
+# first. Neither may be used as a concept document.
+ROOT_INDEX_ALLOWED_KEYS = frozenset({"okf_version"})
+LOG_ENTRY_DATE = re.compile(
+    r"^\s*(?:[-*+]|#{1,6})\s*(?:\*\*|__)?\s*(\d{4}-\d{2}-\d{2})", re.M
+)
+
+
+def _is_atlas_tasks_list_index(name: str, meta: dict) -> bool:
+    """atlas-tasks list indexes (root tasks/index.md and list-folder indexes) are intended."""
+    if name != "index.md":
+        return False
+    if str(meta.get("type") or "").strip() == "task-list":
+        return True
+    if "tasks" in meta or "task_list_page" in meta:
+        return True
+    return str(meta.get("generated_by") or "").strip() == "atlas-tasks"
+
+
+def log_md_order(body: str) -> str | None:
+    """Return "newest-first", "oldest-first" or None (fewer than two dated entries / tie)."""
+    dates = LOG_ENTRY_DATE.findall(body)
+    if len(dates) < 2:
+        return None
+    asc = sum(1 for a, b in zip(dates, dates[1:]) if b > a)
+    desc = sum(1 for a, b in zip(dates, dates[1:]) if b < a)
+    if asc > desc:
+        return "oldest-first"
+    if desc > asc:
+        return "newest-first"
+    return None
+
+
+def _reserved_file_findings(root: Path, path: Path, meta: dict, body: str) -> list[dict]:
+    """reserved_name_concept (warning), reserved_name_frontmatter / log_md_order (info)."""
+    findings: list[dict] = []
+    name = path.name
+    rpath = rel(root, path)
+    meta = meta if isinstance(meta, dict) else {}
+    if meta and _is_atlas_tasks_list_index(name, meta):
+        return findings
+    page_type = str(meta.get("type") or "").strip()
+    role = "directory listing" if name == "index.md" else "change log"
+    if page_type and page_type != "document":
+        findings.append(
+            {
+                "id": "reserved_name_concept",
+                "path": rpath,
+                "severity": "warning",
+                "msg": (
+                    f"{name} is OKF-reserved ({role}) and must not be a concept page "
+                    f"(frontmatter type '{page_type}'). Move the content to a named page "
+                    f"(e.g. summary.md) and keep {name} a plain "
+                    f"{'listing' if name == 'index.md' else 'log'}."
+                ),
+            }
+        )
+    elif meta:
+        allowed = ROOT_INDEX_ALLOWED_KEYS if (name == "index.md" and rpath == "index.md") else frozenset()
+        extra = sorted(str(k) for k in meta if k not in allowed)
+        if extra:
+            findings.append(
+                {
+                    "id": "reserved_name_frontmatter",
+                    "path": rpath,
+                    "severity": "info",
+                    "msg": (
+                        "OKF reserved files normally carry no frontmatter (the store-root "
+                        f"index.md may carry only okf_version); found: {', '.join(extra)}"
+                    ),
+                }
+            )
+    if name == "log.md" and log_md_order(body) == "oldest-first":
+        findings.append(
+            {
+                "id": "log_md_order",
+                "path": rpath,
+                "severity": "info",
+                "msg": (
+                    "OKF log.md is newest first; dated entries run oldest-first. "
+                    "Insert new entries at the top, below the heading."
+                ),
+            }
+        )
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -1036,7 +1125,19 @@ def run(
             continue
 
         if path.name in RESERVED:
-            # index.md / log.md are allowed; they should not be ordinary concepts
+            # index.md / log.md are allowed, but must not be ordinary concepts (OKF).
+            # Scope reserved files exactly like ordinary pages (--type and --path).
+            in_scope = not focused or _in_focus(
+                path, meta if isinstance(meta, dict) else {}, want_type, focus_path
+            )
+            if in_scope:
+                for finding in _reserved_file_findings(r, path, meta, body):
+                    if allow_inline_ignores and finding["id"] in ignores:
+                        continue
+                    if finding["severity"] == "warning":
+                        warnings.append(finding)
+                    else:
+                        info.append(finding)
             continue
 
         if focused:

@@ -30,7 +30,7 @@ root: <atlas store root>
 3. **Status** — use clear values e.g. `draft` | `implementing` | `done` (SCHEMA may extend).
 4. **relates_to from hub** — edges to important children (experiences, decisions, plans) with `kind: related` (or tighter kinds when accurate).
 5. **relates_to from children** — each child under this effort should include `implements` → this hub (see **remember**).
-6. **Close** — set `status: done`; link follow-on work with `related` / `follows` if any; append **log.md**.
+6. **Close** — set `status: done`; link follow-on work with `related` / `follows` if any; add a **log.md** entry at the top (newest first).
 7. **Compile** after material hub edits:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>

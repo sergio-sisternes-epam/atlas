@@ -175,7 +175,7 @@ Exit 2 → fix via **schema** verbs, not a text edit. Then compile again. Do not
 
 ### 6. log.md
 
-Append one bullet only when schema layout changed (init, first overlay, uninstall). Not for every type tweak.
+Add one bullet at the top (newest first, below the heading) only when schema layout changed (init, first overlay, uninstall). Not for every type tweak.
 
 ### 7. Memory rung (opt-in only)
 

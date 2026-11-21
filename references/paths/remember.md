@@ -63,7 +63,7 @@ root: <atlas store root>
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
    Exit ≠ 0 → fix critical issues; do **not** claim memory stored.
-12. **log.md** — append one bullet only for **structural** changes (new/closed work, layout migration, schema shift). Not for every experience.
+12. **log.md** — add one bullet, **newest first** (insert at the top, below the heading), only for **structural** changes (new/closed work, layout migration, schema shift). Not for every experience.
 
 ## Exit
 
