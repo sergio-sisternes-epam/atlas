@@ -266,6 +266,75 @@ class StructureModeTests(unittest.TestCase):
         _, result = self.compile(root)
         self.assertNotIn("schema_cue_claim", ids(result, "warnings"))
 
+    def test_list_nested_fences_hide_claims_and_cues(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        notes = root / "notes"
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        for marker, indent in (("-", "  "), ("1.", "   ")):
+            with self.subTest(marker=marker):
+                example = (
+                    f"{marker} ````markdown\n{indent}```\n"
+                    f"{indent}- [Notes schema](topics.schema.md) - {CLAIM}\n"
+                    f"{indent}````\n"
+                )
+                write_page(notes / "record.md", "memory", CLAIM)
+                (notes / "index.md").write_text("# Notes\n\n" + example, encoding="utf-8")
+                _, result = self.compile(root)
+                self.assertNotIn("schema_cue_claim", ids(result, "critical"))
+
+                write_page(notes / "record.md", "memory", example)
+                (notes / "index.md").write_text(
+                    f"# Notes\n\n- [Notes schema](topics.schema.md) - {CLAIM}\n",
+                    encoding="utf-8",
+                )
+                _, result = self.compile(root)
+                self.assertNotIn("schema_cue_claim", ids(result, "critical"))
+
+    def test_comments_hide_cues_and_claims(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        notes = root / "notes"
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        (notes / "index.md").write_text(
+            f"# Notes\n\n<!-- hidden\n- [Notes schema](topics.schema.md) - {CLAIM}\n-->\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        self.assertNotIn("schema_cue_claim", ids(result, "critical"))
+
+        write_page(notes / "record.md", "memory", f"<!-- hidden\n{CLAIM}\n-->")
+        (notes / "index.md").write_text(
+            f"# Notes\n\n- [Notes schema](topics.schema.md) - {CLAIM}\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        self.assertNotIn("schema_cue_claim", ids(result, "critical"))
+
+    def test_wrapped_cue_reports_first_line(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        (root / "notes" / "index.md").write_text(
+            "# Notes\n\n<!-- hidden\nignored\n-->\n"
+            "- [Notes schema](topics.schema.md) -\n"
+            f"  {CLAIM}\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        findings = [item for item in result["critical"] if item["id"] == "schema_cue_claim"]
+        self.assertEqual(len(findings), 1, result)
+        self.assertIn("line 6", findings[0]["msg"])
+
     def test_existing_findings_remain_without_structure_block(self) -> None:
         root = self.init_store()
         notes = root / "notes"

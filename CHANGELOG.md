@@ -2,6 +2,7 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed structure cue checks for wrapped list items, fenced examples, and HTML comments.
 - Added SGM (Schema, Gist, Memory) index-cue guidance and memory-page recall
   receipt rules. Optimise writes schema cues at the top of folder indexes.
   New stores default `compile.structure.mode` to `off`; opt-in `warn` or

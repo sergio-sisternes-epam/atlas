@@ -57,11 +57,67 @@ MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
 
 def _fence_marker(line: str) -> tuple[str, int, str] | None:
-    match = re.match(r"^(`{3,}|~{3,})(.*)$", line.strip())
+    match = re.match(r"^\s*(?:(?:>\s*)|(?:(?:[-*+]|\d+[.)])\s+))*(`{3,}|~{3,})(.*)$", line)
     if not match:
         return None
     fence = match.group(1)
     return fence[0], len(fence), match.group(2)
+
+
+def _visible_cue_lines(text: str):
+    fence_char: str | None = None
+    fence_length = 0
+    in_comment = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if fence_char is not None:
+            marker = _fence_marker(line)
+            if marker and marker[0] == fence_char and marker[1] >= fence_length and not marker[2].strip():
+                fence_char, fence_length = None, 0
+            yield number, ""
+            continue
+        visible = ""
+        while line:
+            if in_comment:
+                end = line.find("-->")
+                if end < 0:
+                    break
+                line = line[end + 3:]
+                in_comment = False
+            else:
+                start = line.find("<!--")
+                if start < 0:
+                    visible += line
+                    break
+                visible += line[:start] + " "
+                line = line[start + 4:]
+                in_comment = True
+        marker = _fence_marker(visible)
+        if marker:
+            fence_char, fence_length = marker[0], marker[1]
+            visible = ""
+        yield number, visible
+
+
+def _visible_cue_items(text: str):
+    item: list[str] = []
+    number = 0
+    content_indent = 0
+    for line_number, line in _visible_cue_lines(text):
+        match = re.match(r"^([ \t]*)(?:[-*+]|\d+[.)])[ \t]+", line)
+        if match:
+            if item:
+                yield number, " ".join(item)
+            number = line_number
+            content_indent = len(match.group(0).expandtabs(4))
+            item = [line.strip()]
+        elif item and line.strip() and len(line) - len(line.lstrip()) >= content_indent:
+            item.append(line.strip())
+        else:
+            if item:
+                yield number, " ".join(item)
+            item = []
+    if item:
+        yield number, " ".join(item)
 
 
 def _canonical_local_target(root: Path, target: str) -> str | None:
@@ -941,24 +997,13 @@ def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> 
         if ptype == "schema":
             schemas[path.resolve()] = folder
         elif ptype in MISSING_GIST_TYPES:
-            candidates = body.splitlines()
             description = meta.get("description")
+            candidates = [line for _, line in _visible_cue_lines(body)]
             if isinstance(description, str):
-                candidates.append(description)
-            fence_char: str | None = None
-            fence_length = 0
+                candidates.extend(line for _, line in _visible_cue_lines(description))
             for line in candidates:
                 line = line.strip()
-                marker = _fence_marker(line)
-                if marker:
-                    char, length, info = marker
-                    if fence_char is None:
-                        fence_char, fence_length = char, length
-                        continue
-                    if char == fence_char and length >= fence_length and not info.strip():
-                        fence_char, fence_length = None, 0
-                        continue
-                if fence_char is not None or not line or line.startswith(("#", "<!--")):
+                if not line or line.startswith("#"):
                     continue
                 line = re.sub(r"^(?:[-*+]|\d+\.)\s+", "", line)
                 if len(line) >= 40:
@@ -966,22 +1011,7 @@ def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> 
 
     findings: list[dict] = []
     for index in indexes:
-        fence_char: str | None = None
-        fence_length = 0
-        for number, line in enumerate(index.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            marker = _fence_marker(line)
-            if marker:
-                char, length, info = marker
-                if fence_char is None:
-                    fence_char, fence_length = char, length
-                    continue
-                if char == fence_char and length >= fence_length and not info.strip():
-                    fence_char, fence_length = None, 0
-                    continue
-            if fence_char is not None:
-                continue
-            if not re.match(r"^\s*(?:[-*+]|\d+\.)\s+", line):
-                continue
+        for number, line in _visible_cue_items(index.read_text(encoding="utf-8", errors="replace")):
             targets = [
                 m.group(2).strip().split()[0].strip("\"'")
                 for m in MD_LINK.finditer(line) if m.group(2).strip()
