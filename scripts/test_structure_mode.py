@@ -335,6 +335,63 @@ class StructureModeTests(unittest.TestCase):
         self.assertEqual(len(findings), 1, result)
         self.assertIn("line 6", findings[0]["msg"])
 
+    def test_lazy_cue_continuation_reports_first_line(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        (root / "notes" / "index.md").write_text(
+            "# Notes\n\n- [Notes schema](topics.schema.md) -\n"
+            f"{CLAIM}\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        findings = [item for item in result["critical"] if item["id"] == "schema_cue_claim"]
+        self.assertEqual(len(findings), 1, result)
+        self.assertIn("line 3", findings[0]["msg"])
+
+    def test_unclosed_list_fence_does_not_hide_sibling_cue(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        (root / "notes" / "index.md").write_text(
+            "# Notes\n\n- Example:\n  ```markdown\n  example\n\n"
+            f"- [Notes schema](topics.schema.md) - {CLAIM}\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        findings = [item for item in result["critical"] if item["id"] == "schema_cue_claim"]
+        self.assertEqual(len(findings), 1, result)
+        self.assertIn("line 7", findings[0]["msg"])
+
+    def test_indented_code_is_not_a_cue_but_nested_list_is(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "error"
+        self.save_contract(root, contract)
+        (root / "index.md").write_text("# Store\n", encoding="utf-8")
+        index = root / "notes" / "index.md"
+        index.write_text(
+            f"# Notes\n\n    - [Notes schema](topics.schema.md) - {CLAIM}\n",
+            encoding="utf-8",
+        )
+        code, result = self.compile(root)
+        self.assertEqual(code, 0, result)
+        self.assertNotIn("schema_cue_claim", ids(result, "critical"))
+
+        index.write_text(
+            f"# Notes\n\n- Examples:\n    - [Notes schema](topics.schema.md) - {CLAIM}\n",
+            encoding="utf-8",
+        )
+        _, result = self.compile(root)
+        self.assertIn("schema_cue_claim", ids(result, "critical"))
+
     def test_existing_findings_remain_without_structure_block(self) -> None:
         root = self.init_store()
         notes = root / "notes"

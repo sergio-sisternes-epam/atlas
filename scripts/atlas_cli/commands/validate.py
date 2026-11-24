@@ -67,14 +67,20 @@ def _fence_marker(line: str) -> tuple[str, int, str] | None:
 def _visible_cue_lines(text: str):
     fence_char: str | None = None
     fence_length = 0
+    fence_indent: int | None = None
+    list_indents: list[int] = []
     in_comment = False
     for number, line in enumerate(text.splitlines(), 1):
         if fence_char is not None:
-            marker = _fence_marker(line)
-            if marker and marker[0] == fence_char and marker[1] >= fence_length and not marker[2].strip():
-                fence_char, fence_length = None, 0
-            yield number, ""
-            continue
+            indent = len(line.expandtabs(4)) - len(line.expandtabs(4).lstrip())
+            if fence_indent is not None and line.strip() and indent < fence_indent:
+                fence_char, fence_length, fence_indent = None, 0, None
+            else:
+                marker = _fence_marker(line)
+                if marker and marker[0] == fence_char and marker[1] >= fence_length and not marker[2].strip():
+                    fence_char, fence_length, fence_indent = None, 0, None
+                yield number, ""
+                continue
         visible = ""
         while line:
             if in_comment:
@@ -91,31 +97,61 @@ def _visible_cue_lines(text: str):
                 visible += line[:start] + " "
                 line = line[start + 4:]
                 in_comment = True
+        expanded = visible.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip())
+        list_match = re.match(r"^ *(?:[-*+]|\d+[.)]) +", expanded)
+        if visible.strip():
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+            if list_match:
+                list_indents.append(len(list_match.group(0)))
         marker = _fence_marker(visible)
         if marker:
             fence_char, fence_length = marker[0], marker[1]
+            fence_indent = list_indents[-1] if list_indents else None
             visible = ""
         yield number, visible
 
 
 def _visible_cue_items(text: str):
+    """Scan list items, lazy/indented continuations, fences, indented code and HTML comments."""
     item: list[str] = []
     number = 0
     content_indent = 0
+    list_indents: list[int] = []
+    after_blank = True
+    in_code = False
     for line_number, line in _visible_cue_lines(text):
-        match = re.match(r"^([ \t]*)(?:[-*+]|\d+[.)])[ \t]+", line)
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip())
+        if line.strip():
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+        if in_code and line.strip() and indent < 4:
+            in_code = False
+        if line.strip() and after_blank and indent >= 4 and not list_indents:
+            in_code = True
+        if in_code:
+            after_blank = not line.strip()
+            continue
+        match = re.match(r"^ *(?:[-*+]|\d+[.)]) +", expanded)
         if match:
             if item:
                 yield number, " ".join(item)
             number = line_number
-            content_indent = len(match.group(0).expandtabs(4))
+            content_indent = len(match.group(0))
+            list_indents.append(content_indent)
             item = [line.strip()]
-        elif item and line.strip() and len(line) - len(line.lstrip()) >= content_indent:
+        elif item and line.strip() and (
+            indent >= content_indent
+            or (not after_blank and not re.match(r"^ {0,3}#{1,6}(?:\s|$)", expanded))
+        ):
             item.append(line.strip())
         else:
             if item:
                 yield number, " ".join(item)
             item = []
+        after_blank = not line.strip()
     if item:
         yield number, " ".join(item)
 
