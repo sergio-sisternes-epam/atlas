@@ -2071,9 +2071,10 @@ def main() -> int:
             and "incomplete Exit" in recall_text,
         )
         check(
-            "recall.md specifies early-stop index/schema/gist/memory disclosure",
+            "recall.md specifies evidence-gated index/schema/gist/memory disclosure",
             "Progressive disclosure (index → schema → gist → memory)" in recall_text
-            and "If it answers, stop" in recall_text
+            and "stop at the schema or relevant gist" in recall_text
+            and "Set `stopped_at: memory`" in recall_text
             and "hub.md" in recall_text
             and "not a memory level" in recall_text,
         )

@@ -8,6 +8,9 @@ tree at 7e84953 (the PR #62 squash merge) by running this file with
 temporary directory path (and the ``local/<name>-<hash>`` id derived from it)
 and timing values are normalised.
 
+The fixtures remove the newer compile.structure default after init to retain
+the original contract bytes and check existing stores against those goldens.
+
 The same command sequence runs twice: once with the plain mesh document, once
 with the new mesh keys (``recall.scope``, ``recall.rrf_k``, ``graph``,
 ``mesh_member: true``) set to their defaults where the running tree accepts
@@ -166,6 +169,10 @@ def scenario(tmp: Path, with_new_keys: bool) -> list[dict]:
         ("lone", lone, LONE_PAGES, "1.0"),
     ):
         step(f"init-{label}", "init", "--root", str(store), "--schema-version", version, "--json")
+        contract_path = store / "CONTRACT.json"
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        contract["compile"].pop("structure", None)
+        contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
         write_pages(store, pages)
 
     a, b, s, p = str(alpha), str(beta), str(lone), str(project)

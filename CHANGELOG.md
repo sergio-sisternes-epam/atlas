@@ -2,6 +2,11 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Added SGM (Schema, Gist, Memory) index-cue guidance and memory-page recall
+  receipt rules. Optimise writes schema cues at the top of folder indexes.
+  New stores default `compile.structure.mode` to `off`; opt-in `warn` or
+  `error` checks copied memory prose in existing schema cues without changing
+  the memory rung or existing findings.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

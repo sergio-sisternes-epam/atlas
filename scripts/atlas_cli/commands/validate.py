@@ -350,6 +350,16 @@ def _finding_in_focus(
     if not focused:
         return True
     fpath = (root / finding["path"]).resolve()
+    if finding.get("id") == "schema_cue_claim":
+        if want_type and want_type != "schema":
+            return False
+        if focus_path is None:
+            return True
+        target = (root / finding["schema_path"]).resolve()
+        return any(
+            path == focus_path or focus_path in path.parents
+            for path in (fpath, target)
+        )
     directory_scoped = fpath.is_dir()
     if finding.get("id") == "schema_folder":
         # An uncovered-gist finding is reported on the gist itself. Treat the
@@ -489,6 +499,24 @@ def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tup
             }
         ]
     return rung, []
+
+
+def _structure_mode(schema: dict | None, contract_name: str) -> tuple[str, list[dict]]:
+    """Resolve the separate organisation-structure control; absence means off."""
+    compile_cfg = schema.get("compile") if schema else None
+    if not isinstance(compile_cfg, dict) or "structure" not in compile_cfg:
+        return "off", []
+    structure = compile_cfg["structure"]
+    if isinstance(structure, dict) and "mode" not in structure:
+        return "off", []
+    mode = structure.get("mode") if isinstance(structure, dict) else None
+    if isinstance(mode, str) and mode.strip().lower() in {"off", "warn", "error"}:
+        return mode.strip().lower(), []
+    return "off", [{
+        "id": "structure_mode",
+        "path": contract_name,
+        "msg": "compile.structure must be an object; mode, if present, must be off, warn, or error",
+    }]
 
 
 _MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
@@ -884,6 +912,78 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
     return findings
 
 
+def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """Find verbatim memory prose copied into existing schema-link list items."""
+    schemas: dict[Path, Path] = {}
+    claims: dict[Path, set[str]] = {}
+    indexes: list[Path] = []
+    sv = schema_version(schema) if schema else "1.0"
+    for path in iter_concept_md(root, staging_name):
+        if path.name == "index.md":
+            indexes.append(path)
+            continue
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, body = read_page(path, sv)
+        except FrontmatterError:
+            continue
+        ptype = str(meta.get("type") or "").strip()
+        folder = path.parent.resolve()
+        if ptype == "schema":
+            schemas[path.resolve()] = folder
+        elif ptype in MISSING_GIST_TYPES:
+            candidates = body.splitlines()
+            description = meta.get("description")
+            if isinstance(description, str):
+                candidates.append(description)
+            in_fence = False
+            for line in candidates:
+                line = line.strip()
+                if line.startswith(("```", "~~~")):
+                    in_fence = not in_fence
+                    continue
+                if in_fence or not line or line.startswith(("#", "<!--")):
+                    continue
+                line = re.sub(r"^(?:[-*+]|\d+\.)\s+", "", line)
+                if len(line) >= 40:
+                    claims.setdefault(folder, set()).add(line)
+
+    findings: list[dict] = []
+    for index in indexes:
+        in_fence = False
+        for number, line in enumerate(index.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if line.strip().startswith(("```", "~~~")):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if not re.match(r"^\s*(?:[-*+]|\d+\.)\s+", line):
+                continue
+            targets = [
+                m.group(2).strip().split()[0].strip("\"'")
+                for m in MD_LINK.finditer(line) if m.group(2).strip()
+            ]
+            targets.extend(m.group(1).strip() for m in WIKILINK.finditer(line))
+            for target in targets:
+                if target.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
+                    continue
+                target = target.split("#", 1)[0].split("?", 1)[0]
+                if not target:
+                    continue
+                schema_path = (index.parent / target).resolve()
+                folder = schemas.get(schema_path)
+                if folder is not None and any(claim in line for claim in claims.get(folder, ())):
+                    findings.append({
+                        "id": "schema_cue_claim",
+                        "path": rel(root, index),
+                        "schema_path": rel(root, schema_path),
+                        "msg": f"schema cue on line {number} copies memory-page prose",
+                    })
+                    break
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -977,6 +1077,24 @@ def run(
         compile_cfg = schema.get("compile")
         if isinstance(compile_cfg, dict) and "allow_inline_ignores" in compile_cfg:
             allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
+    structure_mode, structure_shape_issues = _structure_mode(schema, contract_name)
+    critical.extend(structure_shape_issues)
+    if not skip_pages and structure_mode != "off":
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _schema_cue_findings(r, schema, staging_name):
+            fpath = r / finding["path"]
+            if allow_inline_ignores and finding["id"] in _ignores_in(
+                fpath.read_text(encoding="utf-8", errors="replace")
+            ):
+                continue
+            if not _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                continue
+            if structure_mode == "error":
+                finding["severity"] = "critical"
+                critical.append(finding)
+            else:
+                finding["severity"] = "warning"
+                warnings.append(finding)
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
         for finding in _memory_findings(

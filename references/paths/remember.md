@@ -56,8 +56,8 @@ root: <atlas store root>
    ```
    - **Index-only** means every critical finding id is `schema_missing_from_index` and every warning finding id is `index_md_present` (missing folder or root `index.md`); either list may be empty. If all findings are index-only and the exit is non-zero, proceed to step 10, including exit 2 when `schema_missing_from_index` is critical. Waiting for exit 0 first deadlocks the required schema cue.
    - If any critical finding id is not `schema_missing_from_index`, or any warning id is not `index_md_present`, fix those first; do **not** edit `index.md` yet and do **not** claim memory stored.
-   - Exit 0 → proceed to step 10 when a gist needs a hot-list pin.
-10. **Index** — create the owning folder's `index.md` if it is missing, then add or update a cue for the owning schema. Do not copy the memory claim or pin every gist on the index. Path `recall` reads the schema cues; it never writes them.
+   - Exit 0 → proceed to step 10 when an owning schema needs a cue.
+10. **Index** — create the owning folder's `index.md` if it is missing. If an owning schema exists, add or update its cue at the top and its entry in the store root index's `Folder schemas` list. Cues name the folder and kinds of pages, not memory claims; do not pin every gist or invent a schema to cue. Path `recall` reads the schema cues; it never writes them.
 11. **Compile again** — must exit 0 after the index edit before claiming memory stored:
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
