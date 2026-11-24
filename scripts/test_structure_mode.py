@@ -137,6 +137,40 @@ class StructureModeTests(unittest.TestCase):
         self.assertIn("missing_gist", ids(result, "critical"))
         self.assertNotIn("schema_cue_claim", ids(result, "critical") | ids(result, "warnings"))
 
+    def test_shipped_cue_format_is_clean_in_warn_and_error(self) -> None:
+        for version in ("1.0", "2.0"):
+            root = self.init_store(version)
+            notes = root / "notes"
+            write_page(notes / "record.md", "memory", CLAIM)
+            write_page(
+                notes / "topic.gist.md", "gist", CLAIM,
+                "relates_to:\n  - path: notes/record.md\n    kind: derived_from\n",
+            )
+            write_page(
+                notes / "topics.schema.md", "schema",
+                "This schema describes the kinds of records contained in the notes folder.",
+                "relates_to:\n  - path: notes/topic.gist.md\n    kind: related\n",
+            )
+            (root / "index.md").write_text(
+                "# Store\n\n## Folder schemas\n"
+                "- [Notes schema](notes/topics.schema.md) - notes: gist, memory pages\n",
+                encoding="utf-8",
+            )
+            (notes / "index.md").write_text(
+                "# Notes\n\n"
+                "- [Notes schema](topics.schema.md) - notes: gist, memory pages\n",
+                encoding="utf-8",
+            )
+            contract = self.contract(root)
+            for mode in ("warn", "error"):
+                with self.subTest(version=version, mode=mode):
+                    contract["compile"]["structure"]["mode"] = mode
+                    self.save_contract(root, contract)
+                    code, result = self.compile(root)
+                    self.assertEqual(code, 0, result)
+                    for bucket in ("info", "warnings", "critical"):
+                        self.assertNotIn("schema_cue_claim", ids(result, bucket))
+
     def test_valid_and_invalid_modes_in_both_versions(self) -> None:
         for version in ("1.0", "2.0"):
             root = self.init_store(version)
@@ -192,6 +226,44 @@ class StructureModeTests(unittest.TestCase):
         _, result = self.compile(root, "--type", "memory")
         self.assertNotIn("schema_cue_claim", ids(result, "warnings"))
         _, result = self.compile(root, "--path", "notes/record.md")
+        self.assertNotIn("schema_cue_claim", ids(result, "warnings"))
+
+    def test_long_fences_hide_claims_and_cue_examples(self) -> None:
+        root = self.init_store()
+        self.cue_fixture(root)
+        contract = self.contract(root)
+        contract["compile"]["structure"]["mode"] = "warn"
+        self.save_contract(root, contract)
+        notes = root / "notes"
+
+        write_page(
+            notes / "record.md",
+            "memory",
+            f"````markdown\n```\n{CLAIM}\n``` info\n````",
+        )
+        for index, schema_link in (
+            (root / "index.md", "notes/topics.schema.md"),
+            (notes / "index.md", "topics.schema.md"),
+        ):
+            index.write_text(
+                f"# Index\n\n- [Notes schema]({schema_link}) - notes: memory pages. {CLAIM}\n",
+                encoding="utf-8",
+            )
+        _, result = self.compile(root)
+        self.assertNotIn("schema_cue_claim", ids(result, "warnings"))
+
+        write_page(notes / "record.md", "memory", CLAIM)
+        for index, schema_link in (
+            (root / "index.md", "notes/topics.schema.md"),
+            (notes / "index.md", "topics.schema.md"),
+        ):
+            index.write_text(
+                "# Index\n\n````markdown\n```\n"
+                f"- [Notes schema]({schema_link}) - notes: memory pages. {CLAIM}\n"
+                "``` info\n````\n",
+                encoding="utf-8",
+            )
+        _, result = self.compile(root)
         self.assertNotIn("schema_cue_claim", ids(result, "warnings"))
 
     def test_existing_findings_remain_without_structure_block(self) -> None:
@@ -252,14 +324,37 @@ class StructureModeTests(unittest.TestCase):
             recall, r"## Folder schemas\n\s*- \[Notes schema\]\(notes/topics\.schema\.md\)"
                     r" - notes: decisions and memories"
         )
-        rows = [line for line in recall.splitlines() if line.startswith("| memory | correct |")]
+        rows = [line for line in recall.splitlines() if "| correct |" in line]
         examples = [tuple(cell.strip() for cell in row.strip("|").split("|")) for row in rows]
-        self.assertIn(("memory", "correct", "schema, gist", "memory",
-                       "miss: accepted memory not opened"), examples)
-        self.assertIn(("memory", "correct", "schema, gist", "recall_hit",
-                       "miss: accepted memory not opened"), examples)
-        self.assertIn(("memory", "correct", "schema, gist, accepted memory", "memory", "hit"), examples)
-        self.assertIn(("memory", "correct", "accepted memory", "recall_hit", "miss: wrong stop"), examples)
+        for stop in ("memory", "recall_hit"):
+            self.assertIn((
+                "Fact not on opened schema/gist; answer from memory snippet", "correct",
+                "schema, gist", stop, "miss: memory page not opened",
+            ), examples)
+        self.assertIn(("Answer from opened memory page", "correct",
+                       "schema, gist, memory", "memory", "hit"), examples)
+        self.assertIn(("Answer from opened memory page", "correct",
+                       "memory", "recall_hit", "hit"), examples)
+        for layer in ("schema", "gist"):
+            self.assertIn((
+                f"Opened {layer} states the fact; memory page also exists",
+                "correct", layer, layer, "hit",
+            ), examples)
+        self.assertIn(("Answer from recall-hit media or work pointer", "correct",
+                       "none", "recall_hit", "hit"), examples)
+        for hidden_term in ("gold expected stop", "accepted evidence path", "Gold stop",
+                            "accepted memory", "miss: wrong stop"):
+            self.assertNotIn(hidden_term, recall)
+        self.assertIn(
+            "Stop at the schema or relevant gist if the page you opened states the fact",
+            recall,
+        )
+        self.assertIn(
+            "A schema or gist stop remains valid when that opened page states the fact",
+            recall,
+        )
+        self.assertIn("The memory-page receipt obligation applies when the fact is not stated", recall)
+        self.assertIn("regardless of the `stopped_at` label", recall)
         self.assertIn("do not copy memory claims or pin every gist", recall)
         self.assertIn("A hub is never a stop", recall)
 

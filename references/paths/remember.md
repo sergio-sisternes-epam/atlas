@@ -54,8 +54,8 @@ root: <atlas store root>
    ```bash
    python3 <atlas-skill>/scripts/atlas.py compile --root <root>
    ```
-   - **Index-only** means every critical finding id is `schema_missing_from_index` and every warning finding id is `index_md_present` (missing folder or root `index.md`); either list may be empty. If all findings are index-only and the exit is non-zero, proceed to step 10, including exit 2 when `schema_missing_from_index` is critical. Waiting for exit 0 first deadlocks the required schema cue.
-   - If any critical finding id is not `schema_missing_from_index`, or any warning id is not `index_md_present`, fix those first; do **not** edit `index.md` yet and do **not** claim memory stored.
+   - **Index-only** means every critical finding id is one of `schema_missing_from_index` or `schema_cue_claim`, and every warning finding id is one of `index_md_present` or `schema_cue_claim` (`index_md_present` covers a missing folder or root `index.md`); either list may be empty. `schema_cue_claim` is allowed at either severity because step 10 repairs index cues. If all findings are index-only and the exit is non-zero, proceed to step 10, including exit 2 when `schema_missing_from_index` is critical. Waiting for exit 0 first deadlocks the required schema cue.
+   - If any critical finding id is outside `schema_missing_from_index` and `schema_cue_claim`, or any warning id is outside `index_md_present` and `schema_cue_claim`, fix those first; do **not** edit `index.md` yet and do **not** claim memory stored.
    - Exit 0 → proceed to step 10 when an owning schema needs a cue.
 10. **Index** — create the owning folder's `index.md` if it is missing. If an owning schema exists, add or update its cue at the top and its entry in the store root index's `Folder schemas` list. Cues name the folder and kinds of pages, not memory claims; do not pin every gist or invent a schema to cue. Path `recall` reads the schema cues; it never writes them.
 11. **Compile again** — must exit 0 after the index edit before claiming memory stored:

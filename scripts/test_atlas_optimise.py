@@ -828,6 +828,8 @@ relates_to:
         self.assertIn("kind: related", schema)
         self.assertNotIn("path: notes/alpha.md", schema)
         self.assertNotIn("path: notes/beta.md", schema)
+        cue = (notes / "index.md").read_text(encoding="utf-8")
+        self.assertIn("(./schema.schema.md) - notes: gist, memory pages", cue)
         compiled = json.loads(run(ATLAS, "compile", "--root", str(root), "--dry-run", "--json").stdout)
         missing = [item["path"] for item in compiled.get("info", []) if item["id"] == "missing_gist"]
         self.assertNotIn("notes/alpha.md", missing)

@@ -7,6 +7,9 @@
   New stores default `compile.structure.mode` to `off`; opt-in `warn` or
   `error` checks copied memory prose in existing schema cues without changing
   the memory rung or existing findings.
+- Clarified SGM recall receipts: schema/gist stops remain valid when the opened
+  page states the fact; the memory-page receipt applies when the fact is not on
+  that page. An opened memory page counts as a hit regardless of stop label.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

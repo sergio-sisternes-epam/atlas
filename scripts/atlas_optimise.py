@@ -2306,6 +2306,7 @@ def _apply_schema_fill(store: Store, task: dict) -> None:
 
 
 def _cue_schema(store: Store, schema_key: str, title: str) -> None:
+    store = Store(store.root)
     spath = store.root / schema_key
     idx = spath.parent / "index.md"
     folder = store.folder(schema_key)

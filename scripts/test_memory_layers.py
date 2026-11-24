@@ -2073,8 +2073,11 @@ def main() -> int:
         check(
             "recall.md specifies evidence-gated index/schema/gist/memory disclosure",
             "Progressive disclosure (index → schema → gist → memory)" in recall_text
-            and "stop at the schema or relevant gist" in recall_text
-            and "Set `stopped_at: memory`" in recall_text
+            and "Stop at the schema or relevant gist if the page you opened states the fact" in recall_text
+            and "set `stopped_at: memory`" in recall_text
+            and "A schema or gist stop remains valid when that opened page states the fact" in recall_text
+            and "gold expected stop" not in recall_text
+            and "accepted evidence path" not in recall_text
             and "hub.md" in recall_text
             and "not a memory level" in recall_text,
         )

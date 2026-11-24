@@ -56,6 +56,14 @@ GIST_PARENT_TYPES = frozenset(
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
 
+def _fence_marker(line: str) -> tuple[str, int, str] | None:
+    match = re.match(r"^(`{3,}|~{3,})(.*)$", line.strip())
+    if not match:
+        return None
+    fence = match.group(1)
+    return fence[0], len(fence), match.group(2)
+
+
 def _canonical_local_target(root: Path, target: str) -> str | None:
     """Resolve a relates_to target to the canonical store-relative key.
 
@@ -937,13 +945,20 @@ def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> 
             description = meta.get("description")
             if isinstance(description, str):
                 candidates.append(description)
-            in_fence = False
+            fence_char: str | None = None
+            fence_length = 0
             for line in candidates:
                 line = line.strip()
-                if line.startswith(("```", "~~~")):
-                    in_fence = not in_fence
-                    continue
-                if in_fence or not line or line.startswith(("#", "<!--")):
+                marker = _fence_marker(line)
+                if marker:
+                    char, length, info = marker
+                    if fence_char is None:
+                        fence_char, fence_length = char, length
+                        continue
+                    if char == fence_char and length >= fence_length and not info.strip():
+                        fence_char, fence_length = None, 0
+                        continue
+                if fence_char is not None or not line or line.startswith(("#", "<!--")):
                     continue
                 line = re.sub(r"^(?:[-*+]|\d+\.)\s+", "", line)
                 if len(line) >= 40:
@@ -951,12 +966,19 @@ def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> 
 
     findings: list[dict] = []
     for index in indexes:
-        in_fence = False
+        fence_char: str | None = None
+        fence_length = 0
         for number, line in enumerate(index.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            if line.strip().startswith(("```", "~~~")):
-                in_fence = not in_fence
-                continue
-            if in_fence:
+            marker = _fence_marker(line)
+            if marker:
+                char, length, info = marker
+                if fence_char is None:
+                    fence_char, fence_length = char, length
+                    continue
+                if char == fence_char and length >= fence_length and not info.strip():
+                    fence_char, fence_length = None, 0
+                    continue
+            if fence_char is not None:
                 continue
             if not re.match(r"^\s*(?:[-*+]|\d+\.)\s+", line):
                 continue

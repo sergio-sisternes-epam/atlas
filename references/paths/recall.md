@@ -47,7 +47,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    - [Notes schema](notes/topics.schema.md) - notes: decisions and memories
    ```
 
-3. **Progressive disclosure (index → schema → gist → memory)** — if a schema is cued for the question, open it. If there is no schema or gist, search for the relevant page instead. For an ask that does not require a memory record, stop at the schema or relevant gist if it answers. Do not load every gist for one ask. If the accepted evidence path is a memory page, open that page even if a schema, gist, or recall snippet appears to answer. Set `stopped_at: memory`. Confirmed records, including bookings, purchases, decisions, and outcomes, still stop at memory. On shipped `SCHEMA.json` stores, the first memory-layer page is named `frame`; on the current `CONTRACT.json` shape it is `schema`.
+3. **Progressive disclosure (index → schema → gist → memory)** — if a schema is cued for the question, open it. If there is no schema or gist, search for the relevant page instead. Stop at the schema or relevant gist if the page you opened states the fact that answers the ask; set `stopped_at` to `schema` or `gist` accordingly. Do not load every gist for one ask. Open a memory page, and set `stopped_at: memory`, only when the schema or gist you opened does not state the fact, or when the answer comes from a memory page or a recall snippet. Confirmed records, including bookings, purchases, decisions, and outcomes, still stop at memory. A schema or gist stop remains valid when that opened page states the fact. Recall-hit pointers are covered under Exit receipt below. On shipped `SCHEMA.json` stores, the first memory-layer page is named `frame`; on the current `CONTRACT.json` shape it is `schema`.
 4. **Form the query** from the intent. Free text plus only justified field tokens:
    - `type:<name>` — frontmatter type, not a body mention
    - `kva:<value>` — traffic (alive, forming, terminated, …)
@@ -71,7 +71,7 @@ Other paths (remember, work, landscape, an Autogenesis Run) may call `atlas reca
    **Engine choice.** Grep is the basic default (`recall` off) and stays the default when no flag is passed. With `recall` off, `--engine bm25` ranks with SQLite FTS5 and, from 0.14.0, keeps its index on disk and refreshes it when the corpus changes (a temporary index is used only when the index location cannot be written). A configured preferred engine (see **Preferred engine** below) replaces the no-flag default. It falls back to grep with a warning only when FTS5 is unavailable or projection fails. In both `--engine bm25` and FTS5 presets such as `atlas:ranked`, one any-word retry runs only when no eligible all-words match exists (eligibility — field filters, `path:` and the exit-state rule — is applied before ranks are cut, so an eligible all-words match ranked behind excluded pages still counts); the payload says `match: "any"` and so does each retried hit, so treat those hits as weaker evidence. FTS5 queries are tokenised like the index's `unicode61` tokenizer: Unicode letters and numbers form terms (`café`, `résumé`, `Grüße`, `東京`), while punctuation, symbols and `_` separate them (`foo_bar` is `foo` and `bar`); matching is case- and diacritic-insensitive (`cafe` and `café` find each other). A contiguous CJK run is a single term, so `東京` finds `東京` written as its own word but not inside a longer run such as `東京都`; use grep for such partial matches. After opt-in, `atlas:ranked` is the next configuration: published FTS5 plus content-digest fast path (product bench ~80ms vs grep ~108ms on ~395 pages, and 4–13× cheaper follow-up reads). `atlas:tgrep` is advanced with limited benefits; do not enable it for latency (leaf `p-tgrep-serve-and-subset-rank`). Field filters beat an engine switch. Published indexes live in the project at `.atlas/indexes/<driver-type>/<atlas-id>/` (project root and id from the matching `atlas-mesh.json` row, else the store's git top level with its origin id, or the store directory with a `local/` hash id; `references/drivers.md`, Index location). A `legacy_index_location` warning means Atlas read a deprecated in-store `.atlas-index/` (read-only for 0.14.x); rebuild with `atlas index build`, then you may delete `.atlas-index/`. Provenance: atlas-atlas lesson `lessons/2026-09-09-opt-in-ranked-after-fast-path.md` (experience `experiences/2026-09-09-smr-fast-path-product-bench.md`; leaf `p-query-engine-kpis`).
 6. **Rewrite (at most once)** — if the question is synthesis / why / evolve / “all ideas”, **or** top hits only *mention* the token to exclude it, run **one** extra search. Extra tokens come only from the **Search aliases** table in `glossary.md` and from titles of pages already opened. Cap extra tokens (about 6). Keep the original question in the second query. Do not invent synonyms.
 7. **Select hits from the payload** — prefer spine pages and `type: work` / `decision` for status, rules, names, or timelines; `experience` for what happened. Use `kva`, `status`, `work_id` on the hit. Pages with `kva`/`status` of `terminated` / `deprecated` / `superseded` are excluded by default; they appear only with `kva:terminated` (or `--include-exits`). Use them only to explain a dead frame.
-8. **Read** 1–3 top pages (full body + frontmatter), including a spine or work hub when it ranks.
+8. **Read** 1–3 top pages (full body + frontmatter) as needed to meet step 3's evidence requirement, including a spine or work hub when it ranks. Do not descend to memory just because search returned a memory page when the opened schema or gist already states the fact.
 9. **Expand** via authoritative `relates_to` (`path` + `kind`) on the hit or page. Body `## Related` is only a mirror. `atlas graph neighbours <page> --root <root> --json` gives the same `relates_to` expansion as structured JSON (direction, kind and hop per edge); see `references/graph.md`.
 10. **Never** treat `staging/` as an answer source.
 11. **Answer** from claims on those pages, citing paths. If nothing relevant → honest **gap**. After the one rewrite search, stop. A grep spiral is not allowed.
@@ -327,25 +327,32 @@ remember: no
 compile: n/a
 ```
 
-For an ask whose accepted evidence path is a memory page, a hit requires that
-page in `pages_read` and `stopped_at: memory`. A schema, gist, or recall
-snippet is not a substitute. A correct answer without the accepted memory page
-in the opened set is a receipt-path miss, including with `stopped_at: recall_hit`.
+The memory-page receipt obligation applies when the fact is not stated on the
+schema or gist page you actually opened and the answer comes from a memory page
+or a recall snippet. Open the memory page and include it in `pages_read`;
+a schema, gist, or recall snippet is not a substitute in that situation.
+A correct answer without that memory page opened is a receipt-path miss,
+including with `stopped_at: recall_hit`. A memory page opened counts as a hit
+regardless of the `stopped_at` label. A schema or gist stop remains valid when
+that opened page states the fact, even if a memory page also exists.
 
-For other asks, `stopped_at: recall_hit` is allowed only when the gold expected
-stop is `recall_hit` (for example, a media or work-pointer ask), or when the
+`stopped_at: recall_hit` is allowed when the answer came from a recall hit
+(for example, a media or work-pointer ask), or when the
 answer came from a recall hit whose path was then opened. `stopped_at: gap`
 means an honest gap. `stopped_at: frame` is the shipped `SCHEMA.json` name;
 `stopped_at: schema` is the current `CONTRACT.json` name. A hub is never a stop
-level.
+level. For memory facts not stated on an opened schema or gist, the memory-page
+receipt obligation above still applies; a recall-hit label does not waive it.
 
-| Gold stop | Answer | `pages_read` | `stopped_at` | Result |
+| Situation | Answer | `pages_read` | `stopped_at` | Result |
 |---|---|---|---|---|
-| memory | correct | schema, gist | memory | miss: accepted memory not opened |
-| memory | correct | schema, gist | recall_hit | miss: accepted memory not opened |
-| memory | correct | schema, gist, accepted memory | memory | hit |
-| memory | correct | accepted memory | recall_hit | miss: wrong stop |
-| recall_hit | correct | none | recall_hit | hit |
+| Fact not on opened schema/gist; answer from memory snippet | correct | schema, gist | memory | miss: memory page not opened |
+| Fact not on opened schema/gist; answer from memory snippet | correct | schema, gist | recall_hit | miss: memory page not opened |
+| Answer from opened memory page | correct | schema, gist, memory | memory | hit |
+| Answer from opened memory page | correct | memory | recall_hit | hit |
+| Opened schema states the fact; memory page also exists | correct | schema | schema | hit |
+| Opened gist states the fact; memory page also exists | correct | gist | gist | hit |
+| Answer from recall-hit media or work pointer | correct | none | recall_hit | hit |
 
 For a structural question, `recall_cmd` records the `atlas graph …` command that ran.
 
