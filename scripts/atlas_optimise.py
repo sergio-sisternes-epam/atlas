@@ -1646,7 +1646,7 @@ def plan_store(
             title = str(meta.get("title") or "").strip() or path.name
             tasks.append(_task(
                 "schema-index-cue", "auto", [k, _rel(root, idx) if idx.exists() else store.folder(k) + "/index.md"],
-                f"append a cue for {path.name} to {store.folder(k)}/index.md labelled with the schema title",
+                f"cue {path.name} at the top of {store.folder(k)}/index.md with its title and page kinds",
                 {"title": title}, store))
         for item in _relates(meta):
             if _kind(item) != "related":
@@ -2027,13 +2027,7 @@ def _apply_relates_remove(store: Store, schema_key: str, member: str) -> None:
 
 def _apply_schema_cue(store: Store, t: dict) -> None:
     skey = t["paths"][0]
-    spath = store.root / skey
-    idx = spath.parent / "index.md"
-    title = t["evidence"]["title"].replace("[", "(").replace("]", ")")
-    text = idx.read_text(encoding="utf-8") if idx.exists() else ""
-    if text and not text.endswith("\n"):
-        text += "\n"
-    _write(idx, text + f"- [{title}](./{spath.name})\n")
+    _cue_schema(store, skey, t["evidence"]["title"])
 
 
 def _rewrite_refs(store: Store, old_key: str, new_key: str, referrers: list[str]) -> None:
@@ -2308,23 +2302,36 @@ def _apply_schema_fill(store: Store, task: dict) -> None:
     if any(member["path"] not in related for member in members) or prose not in body:
         dest.unlink(missing_ok=True)
         raise Refusal(f"{schema_key}: schema prose did not round-trip; removed")
-    _cue_schema(store.root, schema_key, str(meta.get("title") or proposed["title"]))
+    _cue_schema(store, schema_key, str(meta.get("title") or proposed["title"]))
 
 
-def _cue_schema(root: Path, schema_key: str, title: str) -> None:
-    spath = root / schema_key
+def _cue_schema(store: Store, schema_key: str, title: str) -> None:
+    store = Store(store.root)
+    spath = store.root / schema_key
     idx = spath.parent / "index.md"
-    label = title.replace("[", "(").replace("]", ")")
-    link = f"- [{label}](./{spath.name})\n"
-    if idx.exists():
-        text = idx.read_text(encoding="utf-8")
-        if f"](./{spath.name})" in text or f"]({spath.name})" in text:
-            return
-        if text and not text.endswith("\n"):
-            text += "\n"
-        _write(idx, text + link)
+    folder = store.folder(schema_key)
+    kinds = sorted({
+        store.ptype(key) for key in store.pages
+        if store.folder(key) == folder and store.ptype(key) != "schema"
+        and re.fullmatch(r"[A-Za-z0-9_-]+", store.ptype(key))
+        and str(store.pages[key][1].get("sensitivity") or "").strip().lower() != "restricted"
+        and not _scan_findings(store.ptype(key))
+    })
+    label = re.sub(r"[\r\n]+", " ", title).replace("[", "(").replace("]", ")")
+    link = f"- [{label}](./{spath.name}) - {folder}: {', '.join(kinds) or 'other'} pages\n"
+    text = idx.read_text(encoding="utf-8") if idx.exists() else f"# {spath.parent.name}\n"
+    if any(store.resolve_local(idx, target) == spath.resolve() for target in _local_links(text)):
         return
-    _write(idx, f"# {spath.parent.name}\n\n{link}")
+    offset = 0
+    frontmatter = re.match(r"\A---[ \t]*\r?\n(?:.*?\r?\n)?---[ \t]*(?:\r?\n|$)", text, re.S)
+    if frontmatter:
+        offset = frontmatter.end()
+    heading = re.match(r"[ \t\r\n]*#[ \t]+[^\n]*(?:\n|$)", text[offset:])
+    if heading:
+        offset += heading.end()
+    before = text[:offset].rstrip("\r\n")
+    after = text[offset:].lstrip("\r\n")
+    _write(idx, (before + "\n\n" if before else "") + link + ("\n" if after else "") + after)
 
 
 def _parent_snapshot(root: Path, store: Store, selected: list[dict]) -> dict[str, bytes]:

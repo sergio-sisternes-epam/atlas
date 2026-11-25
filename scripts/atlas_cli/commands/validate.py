@@ -56,6 +56,106 @@ GIST_PARENT_TYPES = frozenset(
 MISSING_GIST_TYPES = GIST_PARENT_TYPES - {"protostar"}
 
 
+def _fence_marker(line: str) -> tuple[str, int, str] | None:
+    match = re.match(r"^\s*(?:(?:>\s*)|(?:(?:[-*+]|\d+[.)])\s+))*(`{3,}|~{3,})(.*)$", line)
+    if not match:
+        return None
+    fence = match.group(1)
+    return fence[0], len(fence), match.group(2)
+
+
+def _visible_cue_lines(text: str):
+    fence_char: str | None = None
+    fence_length = 0
+    fence_indent: int | None = None
+    list_indents: list[int] = []
+    in_comment = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if fence_char is not None:
+            indent = len(line.expandtabs(4)) - len(line.expandtabs(4).lstrip())
+            if fence_indent is not None and line.strip() and indent < fence_indent:
+                fence_char, fence_length, fence_indent = None, 0, None
+            else:
+                marker = _fence_marker(line)
+                if marker and marker[0] == fence_char and marker[1] >= fence_length and not marker[2].strip():
+                    fence_char, fence_length, fence_indent = None, 0, None
+                yield number, ""
+                continue
+        visible = ""
+        while line:
+            if in_comment:
+                end = line.find("-->")
+                if end < 0:
+                    break
+                line = line[end + 3:]
+                in_comment = False
+            else:
+                start = line.find("<!--")
+                if start < 0:
+                    visible += line
+                    break
+                visible += line[:start] + " "
+                line = line[start + 4:]
+                in_comment = True
+        expanded = visible.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip())
+        list_match = re.match(r"^ *(?:[-*+]|\d+[.)]) +", expanded)
+        if visible.strip():
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+            if list_match:
+                list_indents.append(len(list_match.group(0)))
+        marker = _fence_marker(visible)
+        if marker:
+            fence_char, fence_length = marker[0], marker[1]
+            fence_indent = list_indents[-1] if list_indents else None
+            visible = ""
+        yield number, visible
+
+
+def _visible_cue_items(text: str):
+    """Scan list items, lazy/indented continuations, fences, indented code and HTML comments."""
+    item: list[str] = []
+    number = 0
+    content_indent = 0
+    list_indents: list[int] = []
+    after_blank = True
+    in_code = False
+    for line_number, line in _visible_cue_lines(text):
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip())
+        if line.strip():
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+        if in_code and line.strip() and indent < 4:
+            in_code = False
+        if line.strip() and after_blank and indent >= 4 and not list_indents:
+            in_code = True
+        if in_code:
+            after_blank = not line.strip()
+            continue
+        match = re.match(r"^ *(?:[-*+]|\d+[.)]) +", expanded)
+        if match:
+            if item:
+                yield number, " ".join(item)
+            number = line_number
+            content_indent = len(match.group(0))
+            list_indents.append(content_indent)
+            item = [line.strip()]
+        elif item and line.strip() and (
+            indent >= content_indent
+            or (not after_blank and not re.match(r"^ {0,3}#{1,6}(?:\s|$)", expanded))
+        ):
+            item.append(line.strip())
+        else:
+            if item:
+                yield number, " ".join(item)
+            item = []
+        after_blank = not line.strip()
+    if item:
+        yield number, " ".join(item)
+
+
 def _canonical_local_target(root: Path, target: str) -> str | None:
     """Resolve a relates_to target to the canonical store-relative key.
 
@@ -350,6 +450,16 @@ def _finding_in_focus(
     if not focused:
         return True
     fpath = (root / finding["path"]).resolve()
+    if finding.get("id") == "schema_cue_claim":
+        if want_type and want_type != "schema":
+            return False
+        if focus_path is None:
+            return True
+        target = (root / finding["schema_path"]).resolve()
+        return any(
+            path == focus_path or focus_path in path.parents
+            for path in (fpath, target)
+        )
     directory_scoped = fpath.is_dir()
     if finding.get("id") == "schema_folder":
         # An uncovered-gist finding is reported on the gist itself. Treat the
@@ -489,6 +599,24 @@ def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tup
             }
         ]
     return rung, []
+
+
+def _structure_mode(schema: dict | None, contract_name: str) -> tuple[str, list[dict]]:
+    """Resolve the separate organisation-structure control; absence means off."""
+    compile_cfg = schema.get("compile") if schema else None
+    if not isinstance(compile_cfg, dict) or "structure" not in compile_cfg:
+        return "off", []
+    structure = compile_cfg["structure"]
+    if isinstance(structure, dict) and "mode" not in structure:
+        return "off", []
+    mode = structure.get("mode") if isinstance(structure, dict) else None
+    if isinstance(mode, str) and mode.strip().lower() in {"off", "warn", "error"}:
+        return mode.strip().lower(), []
+    return "off", [{
+        "id": "structure_mode",
+        "path": contract_name,
+        "msg": "compile.structure must be an object; mode, if present, must be off, warn, or error",
+    }]
 
 
 _MEMORY_ALLOWED_KEYS = frozenset({"rung", "layers", "legacy_types"})
@@ -884,6 +1012,66 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
     return findings
 
 
+def _schema_cue_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
+    """Find verbatim memory prose copied into existing schema-link list items."""
+    schemas: dict[Path, Path] = {}
+    claims: dict[Path, set[str]] = {}
+    indexes: list[Path] = []
+    sv = schema_version(schema) if schema else "1.0"
+    for path in iter_concept_md(root, staging_name):
+        if path.name == "index.md":
+            indexes.append(path)
+            continue
+        if path.name in RESERVED:
+            continue
+        try:
+            meta, body = read_page(path, sv)
+        except FrontmatterError:
+            continue
+        ptype = str(meta.get("type") or "").strip()
+        folder = path.parent.resolve()
+        if ptype == "schema":
+            schemas[path.resolve()] = folder
+        elif ptype in MISSING_GIST_TYPES:
+            description = meta.get("description")
+            candidates = [line for _, line in _visible_cue_lines(body)]
+            if isinstance(description, str):
+                candidates.extend(line for _, line in _visible_cue_lines(description))
+            for line in candidates:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                line = re.sub(r"^(?:[-*+]|\d+\.)\s+", "", line)
+                if len(line) >= 40:
+                    claims.setdefault(folder, set()).add(line)
+
+    findings: list[dict] = []
+    for index in indexes:
+        for number, line in _visible_cue_items(index.read_text(encoding="utf-8", errors="replace")):
+            targets = [
+                m.group(2).strip().split()[0].strip("\"'")
+                for m in MD_LINK.finditer(line) if m.group(2).strip()
+            ]
+            targets.extend(m.group(1).strip() for m in WIKILINK.finditer(line))
+            for target in targets:
+                if target.startswith(("http://", "https://", "mailto:", "atlas://", "#")):
+                    continue
+                target = target.split("#", 1)[0].split("?", 1)[0]
+                if not target:
+                    continue
+                schema_path = (index.parent / target).resolve()
+                folder = schemas.get(schema_path)
+                if folder is not None and any(claim in line for claim in claims.get(folder, ())):
+                    findings.append({
+                        "id": "schema_cue_claim",
+                        "path": rel(root, index),
+                        "schema_path": rel(root, schema_path),
+                        "msg": f"schema cue on line {number} copies memory-page prose",
+                    })
+                    break
+    return findings
+
+
 def run(
     root: str | None,
     as_json: bool = False,
@@ -977,6 +1165,24 @@ def run(
         compile_cfg = schema.get("compile")
         if isinstance(compile_cfg, dict) and "allow_inline_ignores" in compile_cfg:
             allow_inline_ignores = bool(compile_cfg["allow_inline_ignores"])
+    structure_mode, structure_shape_issues = _structure_mode(schema, contract_name)
+    critical.extend(structure_shape_issues)
+    if not skip_pages and structure_mode != "off":
+        sv = schema_version(schema) if schema else "1.0"
+        for finding in _schema_cue_findings(r, schema, staging_name):
+            fpath = r / finding["path"]
+            if allow_inline_ignores and finding["id"] in _ignores_in(
+                fpath.read_text(encoding="utf-8", errors="replace")
+            ):
+                continue
+            if not _finding_in_focus(r, finding, focused, want_type, focus_path, sv, staging_name):
+                continue
+            if structure_mode == "error":
+                finding["severity"] = "critical"
+                critical.append(finding)
+            else:
+                finding["severity"] = "warning"
+                warnings.append(finding)
     if not skip_pages:
         sv = schema_version(schema) if schema else "1.0"
         for finding in _memory_findings(

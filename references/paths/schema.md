@@ -173,6 +173,28 @@ Effective SCHEMA = the store's single core contract file (`SCHEMA.json` or `CONT
 
 Exit 2 → fix via **schema** verbs, not a text edit. Then compile again. Do not claim the store is healthy.
 
+#### Organisation-structure mode
+
+The core contract's `compile.structure.mode` is `off`, `warn`, or `error`.
+New stores ship `off`; an absent `compile.structure` or absent `mode` also
+means `off`. Invalid values are a critical `structure_mode` finding. There is
+no Atlas CLI writer for this key yet; store-owner provisioning tooling may
+set it, but agents must not hand-edit the contract or put it in an overlay.
+
+`warn` reports new structure findings as warnings (compile exit 1 without
+critical findings); `error` reports them as critical (exit 2). `off` emits
+none. The `schema_cue_claim` check detects a verbatim prose line or description
+of at least 40 characters from a memory-type page in the linked schema's
+folder, copied into an existing schema-link list item in an `index.md`. This
+check does not require cues, schemas, or gists to exist. It does not detect
+every possible paraphrase or copied claim.
+
+This setting is separate from `memory.rung`. Existing `missing_gist`,
+`gist_parent`, `legacy_document`, `frame_members`, `schema_folder`,
+`schema_missing_from_index`, and `stale_upper_page` findings keep their
+existing severities even when structure mode is `off`. In particular,
+`missing_gist` stays informational by default.
+
 ### 6. log.md
 
 Append one bullet only when schema layout changed (init, first overlay, uninstall). Not for every type tweak.
