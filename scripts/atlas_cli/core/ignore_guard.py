@@ -265,15 +265,63 @@ PRUNE_LOCK_NAME = ".atlas-ref-prune.lock"
 PRUNE_LOCK_CODE = "atlas_ref_prune_lock_ignore_failed"
 
 
-def _read_regular_exclude(exclude: Path) -> str:
-    """Read ``info/exclude`` without following a symlink. Missing is empty."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+def _require_nofollow() -> int:
+    flag = getattr(os, "O_NOFOLLOW", 0)
+    if not flag:
+        raise OSError(errno.ENOTSUP, "refusing to update info/exclude without O_NOFOLLOW")
+    return flag
+
+
+def _open_exclude_dir(store: Path) -> tuple[int, str]:
+    """Open ``.git/info`` without following a symlink at ``info`` or the git dir."""
+    nofollow = _require_nofollow()
+    git_dir = _git(store, "rev-parse", "--absolute-git-dir")
+    exclude_raw = _git(store, "rev-parse", "--git-path", "info/exclude")
+    if not git_dir or not exclude_raw:
+        raise OSError(errno.EINVAL, "git rev-parse failed")
+    git_dir_abs = git_dir if os.path.isabs(git_dir) else os.path.abspath(os.path.join(str(store), git_dir))
+    exclude_abs = exclude_raw if os.path.isabs(exclude_raw) else os.path.abspath(os.path.join(str(store), exclude_raw))
+    expected = os.path.abspath(os.path.join(git_dir_abs, "info", "exclude"))
+    if exclude_abs != expected:
+        raise OSError(errno.EINVAL, "refusing info/exclude outside the git directory")
     try:
-        fd = os.open(exclude, flags)
+        gitfd = os.open(git_dir_abs, os.O_RDONLY | os.O_DIRECTORY | nofollow)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink git dir") from e
+        raise
+    try:
+        try:
+            infofd = os.open("info", os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=gitfd)
+        except FileNotFoundError:
+            os.mkdir("info", dir_fd=gitfd)
+            infofd = os.open("info", os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=gitfd)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise OSError(errno.ELOOP, "refusing to follow symlink info") from e
+            raise
+    finally:
+        os.close(gitfd)
+    return infofd, "exclude"
+
+
+def _read_regular_exclude(dirfd: int, name: str) -> str:
+    """Read ``info/exclude`` through a directory fd. A symlink is not followed."""
+    nofollow = _require_nofollow()
+    try:
+        fd = os.open(name, os.O_RDONLY | nofollow, dir_fd=dirfd)
     except FileNotFoundError:
-        if exclude.is_symlink():
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except FileNotFoundError:
+            return ""
+        if stat.S_ISLNK(info.st_mode):
             raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude")
-        return ""
+        raise
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude") from e
+        raise
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
@@ -288,16 +336,18 @@ def _read_regular_exclude(exclude: Path) -> str:
         os.close(fd)
 
 
-def _append_regular_exclude(exclude: Path, text: str) -> None:
-    """Append to a regular ``info/exclude``. A symlink is not followed."""
-    if not hasattr(os, "O_NOFOLLOW"):
-        raise OSError(errno.ENOTSUP, "refusing to update info/exclude without O_NOFOLLOW")
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+def _append_regular_exclude(dirfd: int, name: str, text: str) -> None:
+    """Append through a directory fd. A symlink is not followed or created through."""
+    nofollow = _require_nofollow()
+    flags = os.O_WRONLY | os.O_APPEND | nofollow
     try:
-        fd = os.open(exclude, flags)
+        fd = os.open(name, flags, dir_fd=dirfd)
     except FileNotFoundError:
-        fd = os.open(exclude, flags | os.O_CREAT, 0o644)
+        fd = os.open(name, flags | os.O_CREAT, 0o644, dir_fd=dirfd)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude") from e
+        raise
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
@@ -374,18 +424,19 @@ def ensure_prune_lock_ignored(store: Path) -> GuardResult:
         exclude = Path(exclude_raw)
         if not exclude.is_absolute():
             exclude = store / exclude
-        # Resolve only the parent. Resolving the file would follow a symlink
-        # and append the ignore rule outside .git.
-        exclude = exclude.parent.resolve() / exclude.name
         escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
         prefix = f"/{escaped}/" if escaped else "/"
         line = prefix + PRUNE_LOCK_NAME
-        existing = _read_regular_exclude(exclude)
-        have = {item.strip() for item in existing.splitlines()}
-        if line in have:
-            return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line)
-        lead = "" if not existing or existing.endswith("\n") else "\n"
-        _append_regular_exclude(exclude, f"{lead}{line}\n")
+        dirfd, name = _open_exclude_dir(store)
+        try:
+            existing = _read_regular_exclude(dirfd, name)
+            have = {item.strip() for item in existing.splitlines()}
+            if line in have:
+                return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line)
+            lead = "" if not existing or existing.endswith("\n") else "\n"
+            _append_regular_exclude(dirfd, name, f"{lead}{line}\n")
+        finally:
+            os.close(dirfd)
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), line, note="the prune lock stays")
     except OSError as e:
         return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))

@@ -104,6 +104,136 @@ def symlink_exclude_refused(tmp: Path, failures: list[str]) -> None:
         print("[PASS] prune ignore refuses a symlinked info/exclude")
 
 
+def symlinked_info_refused(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "symlink-info"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"symlink info init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    raw = subprocess.run(
+        ["git", "rev-parse", "--absolute-git-dir"],
+        cwd=store,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    info = Path(raw) / "info"
+    outside = tmp / "outside-info"
+    outside.mkdir()
+    (outside / "exclude").write_text("keep\n", encoding="utf-8")
+    if info.is_symlink():
+        info.unlink()
+    elif info.exists():
+        shutil.rmtree(info)
+    info.symlink_to(outside, target_is_directory=True)
+    from atlas_cli.core.ignore_guard import ensure_prune_lock_ignored
+
+    result = ensure_prune_lock_ignored(store)
+    followed = (outside / "exclude").read_text(encoding="utf-8") != "keep\n"
+    if result.status != "failed" or followed or not info.is_symlink():
+        failures.append(f"symlinked info directory was followed: {result}")
+    else:
+        print("[PASS] prune ignore refuses a symlinked info directory")
+
+
+def nofollow_missing_refused(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "nofollow-missing"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"nofollow missing init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    raw = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=store,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    exclude = Path(raw)
+    if not exclude.is_absolute():
+        exclude = store / exclude
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("keep\n", encoding="utf-8")
+    from atlas_cli.core.ignore_guard import ensure_prune_lock_ignored
+
+    saved = getattr(os, "O_NOFOLLOW", None)
+    try:
+        if saved is not None:
+            delattr(os, "O_NOFOLLOW")
+        result = ensure_prune_lock_ignored(store)
+    finally:
+        if saved is not None:
+            os.O_NOFOLLOW = saved
+    if (
+        result.status != "failed"
+        or "O_NOFOLLOW" not in (result.reason or "")
+        or exclude.read_text(encoding="utf-8") != "keep\n"
+    ):
+        failures.append(f"missing O_NOFOLLOW should refuse exclude: {result}")
+    else:
+        print("[PASS] prune ignore refuses info/exclude without O_NOFOLLOW")
+
+
+def empty_ref_not_rewritten(tmp: Path, failures: list[str]) -> None:
+    store = tmp / "empty-ref"
+    init = run(["init", "--root", str(store), "--json"])
+    if init.returncode != 0:
+        failures.append(f"empty ref init failed: {init.stderr}")
+        return
+    git(store, ["init", "-b", "main"])
+    prose = "This page keeps enough prose that compile does not treat it as a link list."
+    (store / "dead.md").write_text(page("Dead", "relates_to: []\n", prose), encoding="utf-8")
+    (store / "summary.md").write_text(page("Summary", "relates_to: []\n", prose), encoding="utf-8")
+    living = store / "living.md"
+    living.write_text(
+        page(
+            "Living",
+            "relates_to:\n"
+            "  - path: dead.md\n"
+            "    kind: related\n"
+            '    ref: ""\n'
+            "  - path: dead.md\n"
+            "    kind: related\n"
+            "    ref: 0\n",
+            prose,
+        ),
+        encoding="utf-8",
+    )
+    git(store, ["add", "."])
+    git(store, ["commit", "-m", "empty ref history"])
+    before = living.read_text(encoding="utf-8")
+    dead_before = (store / "dead.md").read_text(encoding="utf-8")
+    pruned = run(
+        [
+            "ref",
+            "prune",
+            "--summary",
+            "summary.md",
+            "--drop",
+            "dead.md",
+            "--ref",
+            "HEAD",
+            "--kind",
+            "derived_from",
+            "--root",
+            str(store),
+            "--json",
+        ]
+    )
+    after = living.read_text(encoding="utf-8")
+    if (
+        pruned.returncode == 0
+        or after != before
+        or "summary.md" in after
+        or (store / "dead.md").read_text(encoding="utf-8") != dead_before
+    ):
+        failures.append(f"empty or non-string ref should stay history: {pruned.stdout}\n{after}")
+    else:
+        print("[PASS] prune does not rewrite an empty or non-string ref")
+
+
 def contract_file(root: Path) -> Path:
     for name in ("CONTRACT.json", "SCHEMA.json"):
         path = root / name
@@ -262,6 +392,9 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="atlas-ref-"))
     try:
         symlink_exclude_refused(tmp, failures)
+        symlinked_info_refused(tmp, failures)
+        nofollow_missing_refused(tmp, failures)
+        empty_ref_not_rewritten(tmp, failures)
         historical_summary_refused(tmp, failures)
         unwritable_exclude_aborts(tmp, failures)
         store = tmp / "store"

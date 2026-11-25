@@ -289,7 +289,7 @@ def _parsed_item(lines: list[str]) -> dict | None:
 def _item_has_ref(lines: list[str]) -> bool:
     """History is a parsed top-level ref. A nested mapping or block scalar is not."""
     parsed = _parsed_item(lines)
-    return parsed is not None and bool(str(parsed.get("ref") or "").strip())
+    return parsed is not None and "ref" in parsed
 
 
 def _needs_yaml_item(lines: list[str]) -> bool:
@@ -324,7 +324,7 @@ def _coerce_block_item(lines: list[str], drop: set[str]) -> list[str]:
     if not isinstance(value, dict):
         raise RefError("relates_to item must be a mapping")
     path = _norm_path(str(value.get("path") or "").strip())
-    if path not in drop or str(value.get("ref") or "").strip():
+    if path not in drop or "ref" in value:
         return lines
     clean: dict[str, str] = {}
     for key, field in value.items():
@@ -341,7 +341,7 @@ def _rewrite_item(lines: list[str], drop: set[str], summary: str, on_summary: bo
     if parsed is None:
         return lines, False
     path = _norm_path(str(parsed.get("path") or "").strip())
-    if not path or path not in drop or str(parsed.get("ref") or "").strip():
+    if not path or path not in drop or "ref" in parsed:
         return lines, False
     if on_summary:
         return None, True
@@ -895,7 +895,7 @@ def _scalar_drop_path(value: object, drop: set[str]) -> str | None:
         path = _norm_path(value.strip())
         return path if path in drop else None
     if isinstance(value, dict):
-        if str(value.get("ref") or "").strip():
+        if "ref" in value:
             return None
         path = _norm_path(str(value.get("path") or "").strip())
         return path if path in drop else None
@@ -916,7 +916,7 @@ def _remaining_drop_edge(text: str, drop: set[str], version: str) -> str | None:
             if named:
                 return named
             continue
-        if str(item.get("ref") or "").strip():
+        if "ref" in item:
             continue
         path = _norm_path(str(item.get("path") or "").strip())
         if path in drop:

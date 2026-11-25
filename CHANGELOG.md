@@ -24,7 +24,8 @@
 - `atlas ref prune` rechecks that the resolved rev is still an ancestor of HEAD after the mutation lock is held, before rewriting or dropping pages. A tip that moved to an unrelated commit is refused even when the drop bytes match.
 - `atlas ref show` and `atlas ref prune` refuse a path that was under `staging` or the `staging_dir` recorded on the selected commit, even when the worktree schema has renamed that directory. A commit that cannot prove its staging name is refused. A `staging_dir` that is not a single directory name, such as a list, is not coerced into one.
 - Projection version is 3, so a generation built before ref-bearing edges were omitted from projection is no longer current.
-- `atlas ref prune` adds `.atlas-ref-prune.lock` to the repository `info/exclude` before creating it, so the lock is not an untracked file a store can commit. A symlinked or unwritable `info/exclude` is refused, and the lock is not created unless that exclusion is installed.
+- `atlas ref prune` adds `.atlas-ref-prune.lock` to the repository `info/exclude` before creating it, so the lock is not an untracked file a store can commit. A symlinked `info` directory, a symlinked or unwritable `info/exclude`, or a platform without `O_NOFOLLOW` is refused, and the lock is not created unless that exclusion is installed.
+- `atlas ref prune` treats a present `ref` key as history, including an empty or non-string value. It does not rewrite that path or remove the key.
 - `atlas ref prune` refuses a summary that was under `staging` or the selected commit's `staging_dir`, even when the worktree schema has since renamed that directory.
 - Optimise treats a present `ref` key as history, including an empty or non-string value. A malformed ref is not a live coverage, cluster, or dead-member edge.
 - `atlas graph` documents that ref-bearing edges are omitted from tip projection. An omitted history edge is not missing data.
