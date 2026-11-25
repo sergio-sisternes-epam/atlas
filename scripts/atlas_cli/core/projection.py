@@ -41,7 +41,7 @@ SKIP_TOP = frozenset({"templates", ".atlas-index", ".atlas", "mesh", "schema.d",
 OVERLAY_DIR = "schema.d"
 # Bump whenever projection logic (parsing, roles, edges, eligibility) changes:
 # it is part of the corpus digest, so every existing generation rebuilds once.
-PROJECTION_VERSION = 2
+PROJECTION_VERSION = 3
 
 
 class ProjectionError(ValueError):
@@ -205,6 +205,11 @@ def cheap_fingerprint(root: Path, schema: dict[str, Any] | None, paths: list[Pat
     return h.hexdigest()
 
 
+def is_history_edge(item: dict[str, Any]) -> bool:
+    """Relation ref is history. Tip projection and search must not present it as a hop."""
+    return "ref" in item
+
+
 def _corpus_digest(entries: list[tuple[str, str]]) -> str:
     """sha256 over sorted ``relative path NUL sha256`` lines (renames change it too).
 
@@ -259,6 +264,8 @@ def _edges_from_meta(meta: dict[str, Any]) -> list[dict[str, str]]:
             continue
         target = str(item.get("path") or "").strip()
         if not target:
+            continue
+        if is_history_edge(item):
             continue
         kind = str(item.get("kind") or item.get("role") or "related").strip() or "related"
         edges.append({"target": target, "kind": kind, "direction": "outgoing"})

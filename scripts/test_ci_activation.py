@@ -47,11 +47,14 @@ class CiActivationContractTests(unittest.TestCase):
 
     def test_path_and_router_are_distinct_from_compile_path(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("| **ci** |", skill)
-        self.assertIn(
-            "path: recall | remember | work | landscape | schema | configure | ci | memory-migrate",
-            skill,
-        )
+        registry = re.findall(r"^\| \*\*([a-z0-9-]+)\*\* \|", skill, flags=re.M)
+        operational = registry[registry.index("recall"):registry.index("help")]
+        insert_at = operational.index("ci") + 1
+        operational = operational[:insert_at] + ["memory-migrate"] + operational[insert_at:]
+        self.assertIn("ci", operational)
+        for path_id in ("memory-migrate", "history", "version-hint", "prune"):
+            self.assertIn(path_id, operational)
+        self.assertIn("path: " + " | ".join(operational), skill)
         self.assertIn("`path: compile` is the agent-session", self.path_ci)
 
     def test_version_is_consistent(self) -> None:

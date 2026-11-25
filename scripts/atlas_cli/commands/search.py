@@ -28,7 +28,7 @@ from ..core.paths import (
     store_root,
     walk_tops,
 )
-from ..core.projection import ProjectedPage, ProjectionError, project_store
+from ..core.projection import ProjectedPage, ProjectionError, is_history_edge, project_store
 from ..core.recall import run_recall
 from ..core.engine_preference import (
     EnginePreferenceError,
@@ -127,7 +127,7 @@ def _relates_preview(meta: dict) -> list[dict]:
     if not isinstance(raw, list):
         return out
     for item in raw:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or is_history_edge(item):
             continue
         path = str(item.get("path") or "").strip()
         if not path:

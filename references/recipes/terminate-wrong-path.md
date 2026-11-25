@@ -22,6 +22,7 @@ Model disagreement alone is not a trigger.
    from the folder `index.md`. Keep `hub.md` in place; it is a work hub, not a
    memory level.
 6. After compile green, answer only from living pages and the exit-reason node. Do not continue the dead matrix.
+7. Tip exclusion is a separate explicit step. Discuss terminate does not delete. If the user wants the failed path off tip, enter Atlas path **prune** (`references/paths/prune.md`) after the exit-reason page exists. Do not prune inside this recipe.
 
 ## Do not
 

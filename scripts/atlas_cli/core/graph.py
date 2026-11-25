@@ -202,7 +202,11 @@ def node_record(page: ProjectedPage) -> dict[str, Any]:
 
 
 def all_edges(pages: list[ProjectedPage]) -> list[dict[str, Any]]:
-    """Every authored relates_to edge, resolved or not, in authored direction."""
+    """Tip-projection relates_to edges, resolved or not, in authored direction.
+
+    A relation with a ``ref`` key is history and is omitted before this list
+    is built. Absence here is not a missing tip edge.
+    """
     ids = {p.page_id for p in pages}
     seen: set[tuple[str, str, str]] = set()
     out: list[dict[str, Any]] = []

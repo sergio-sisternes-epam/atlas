@@ -9,8 +9,11 @@ edited; committed ``.gitignore`` files are never touched.
 
 from __future__ import annotations
 
+import errno
+import os
 import re
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -258,6 +261,99 @@ def guard_indexes(store: Path) -> GuardResult:
 
 
 MESH_PATTERNS = ("atlas-mesh.json.lock*", ".atlas-mesh.json.*.tmp")
+PRUNE_LOCK_NAME = ".atlas-ref-prune.lock"
+PRUNE_LOCK_CODE = "atlas_ref_prune_lock_ignore_failed"
+
+
+def _require_nofollow() -> int:
+    flag = getattr(os, "O_NOFOLLOW", 0)
+    if not flag:
+        raise OSError(errno.ENOTSUP, "refusing to update info/exclude without O_NOFOLLOW")
+    return flag
+
+
+def _open_exclude_dir(store: Path) -> tuple[int, str]:
+    """Open ``.git/info`` without following a symlink at ``info`` or the git dir."""
+    nofollow = _require_nofollow()
+    git_dir = _git(store, "rev-parse", "--absolute-git-dir")
+    exclude_raw = _git(store, "rev-parse", "--git-path", "info/exclude")
+    if not git_dir or not exclude_raw:
+        raise OSError(errno.EINVAL, "git rev-parse failed")
+    git_dir_abs = git_dir if os.path.isabs(git_dir) else os.path.abspath(os.path.join(str(store), git_dir))
+    exclude_abs = exclude_raw if os.path.isabs(exclude_raw) else os.path.abspath(os.path.join(str(store), exclude_raw))
+    expected = os.path.abspath(os.path.join(git_dir_abs, "info", "exclude"))
+    if exclude_abs != expected:
+        raise OSError(errno.EINVAL, "refusing info/exclude outside the git directory")
+    try:
+        gitfd = os.open(git_dir_abs, os.O_RDONLY | os.O_DIRECTORY | nofollow)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink git dir") from e
+        raise
+    try:
+        try:
+            infofd = os.open("info", os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=gitfd)
+        except FileNotFoundError:
+            os.mkdir("info", dir_fd=gitfd)
+            infofd = os.open("info", os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=gitfd)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise OSError(errno.ELOOP, "refusing to follow symlink info") from e
+            raise
+    finally:
+        os.close(gitfd)
+    return infofd, "exclude"
+
+
+def _read_regular_exclude(dirfd: int, name: str) -> str:
+    """Read ``info/exclude`` through a directory fd. A symlink is not followed."""
+    nofollow = _require_nofollow()
+    try:
+        fd = os.open(name, os.O_RDONLY | nofollow, dir_fd=dirfd)
+    except FileNotFoundError:
+        try:
+            info = os.lstat(name, dir_fd=dirfd)
+        except FileNotFoundError:
+            return ""
+        if stat.S_ISLNK(info.st_mode):
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude")
+        raise
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude") from e
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
+        chunks: list[bytes] = []
+        while True:
+            data = os.read(fd, 65536)
+            if not data:
+                break
+            chunks.append(data)
+        return b"".join(chunks).decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
+
+
+def _append_regular_exclude(dirfd: int, name: str, text: str) -> None:
+    """Append through a directory fd. A symlink is not followed or created through."""
+    nofollow = _require_nofollow()
+    flags = os.O_WRONLY | os.O_APPEND | nofollow
+    try:
+        fd = os.open(name, flags, dir_fd=dirfd)
+    except FileNotFoundError:
+        fd = os.open(name, flags | os.O_CREAT, 0o644, dir_fd=dirfd)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise OSError(errno.ELOOP, "refusing to follow symlink info/exclude") from e
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "refusing non-regular info/exclude")
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
 
 
 def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
@@ -299,6 +395,49 @@ def ensure_mesh_lock_ignored(project: Path) -> GuardResult:
         with exclude.open("a", encoding="utf-8") as fh:
             fh.write(lead + "".join(f"{line}\n" for line in missing))
         return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), missing[0])
+    except OSError as e:
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))
+    except Exception as e:  # noqa: BLE001 - a guard never fails the command
+        return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=str(e) or type(e).__name__)
+
+
+def ensure_prune_lock_ignored(store: Path) -> GuardResult:
+    """Append the exact prune lock path to ``info/exclude``. Never raises.
+
+    The lock stays in the store so cooperating prunes share one inode. A
+    store that is itself a worktree must not be able to commit that file.
+    """
+    code = PRUNE_LOCK_CODE
+    pattern = "/" + PRUNE_LOCK_NAME
+    exclude: Path | None = None
+    try:
+        if shutil.which("git") is None or not store.is_dir():
+            return GuardResult(NOT_GIT, code, pattern)
+        if _git(store, "rev-parse", "--is-inside-work-tree") != "true":
+            return GuardResult(NOT_GIT, code, pattern)
+        top = _git(store, "rev-parse", "--show-toplevel")
+        exclude_raw = _git(store, "rev-parse", "--git-path", "info/exclude")
+        if not top or not exclude_raw:
+            return GuardResult(FAILED, code, pattern, reason="git rev-parse failed")
+        rel_posix = store.resolve().relative_to(Path(top).resolve()).as_posix()
+        rel_posix = "" if rel_posix == "." else rel_posix
+        exclude = Path(exclude_raw)
+        if not exclude.is_absolute():
+            exclude = store / exclude
+        escaped = _GLOB_SPECIAL.sub(r"\\\1", rel_posix)
+        prefix = f"/{escaped}/" if escaped else "/"
+        line = prefix + PRUNE_LOCK_NAME
+        dirfd, name = _open_exclude_dir(store)
+        try:
+            existing = _read_regular_exclude(dirfd, name)
+            have = {item.strip() for item in existing.splitlines()}
+            if line in have:
+                return GuardResult(ALREADY_IGNORED, code, pattern, str(exclude), line)
+            lead = "" if not existing or existing.endswith("\n") else "\n"
+            _append_regular_exclude(dirfd, name, f"{lead}{line}\n")
+        finally:
+            os.close(dirfd)
+        return GuardResult(IGNORED_ADDED, code, pattern, str(exclude), line, note="the prune lock stays")
     except OSError as e:
         return GuardResult(FAILED, code, pattern, str(exclude) if exclude else None, reason=_os_reason(e))
     except Exception as e:  # noqa: BLE001 - a guard never fails the command
