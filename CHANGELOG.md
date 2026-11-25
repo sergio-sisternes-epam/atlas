@@ -7,6 +7,7 @@
 - Optional `relates_to[].ref` is a per-edge git rev. Absent `ref` is still tip. Present `ref` is not compiled and does not fail when the path is gone from HEAD. Relation `ref` is not mount `ref`.
 - `atlas ref show` prints a store path at a git rev. `atlas ref prune` drops named failed-path pages from tip, retargets inbound tip links to one summary, and keeps history on that summary's `ref` edges.
 - Runtime modules **history**, **version-hint**, and **prune**. Recall, remember, and terminate hand off to those cards. Claim A grain stays deferred.
+- Added SGM (Schema, Gist, Memory) index-cue guidance and memory-page recall receipt rules. Optimise writes schema cues at the top of folder indexes. New stores default `compile.structure.mode` to `off`; opt-in `warn` or `error` checks copied memory prose in existing schema cues without changing the memory rung or existing findings.
 
 ### Fixed
 
@@ -47,7 +48,8 @@
 - `atlas ref prune` keeps the parent directory locked through a drop deletion and refuses the drop if that name reappears before the old page is deleted.
 - `atlas ref prune` includes the summary in `rewritten` when appending history edges changes that page.
 - `atlas ref show` and `atlas ref prune` require an Atlas store root and refuse a managed directory used as `--root`, including a custom `staging_dir`.
-
+- Fixed structure cue checks for wrapped list items, fenced examples, and HTML comments.
+- Clarified SGM recall receipts: schema/gist stops remain valid when the opened page states the fact; the memory-page receipt applies when the fact is not on that page. An opened memory page counts as a hit regardless of stop label.
 - Fixed: `atlas index show/status` in mesh mode without `--store` no longer
   invent a store. Run from a consuming project's root (or a subdirectory)
   that has an `atlas-mesh.json` but is not itself a store, `show` reported a

@@ -61,6 +61,11 @@ or any other type may sit in the index with no gist and no typed middle
 extension. Non-memory types stay index-first-class: this path does not force
 them through a gist or a schema.
 
+Put schema cues at the top of folder indexes. Each cue names the folder and
+its visible page kinds, not memory claims. The store root index also has a
+`Folder schemas` list. Do not pin every gist or require cues for folders
+without them.
+
 When a gist is created, that gist forces one same-folder schema. A second
 schema is legal when the subject changes. A folder with zero gists needs no
 schema. `hub.md` is not a memory layer. Suffixes `.schema.md`, `.gist.md`,
@@ -129,8 +134,8 @@ not a refusal and does not fail the run.
 7. **Tidy repairs** (each task names its class):
    - `dead-index-cue` (auto): remove an `index.md` list line whose only link
      points at a missing page, such as a deleted `frame.md`.
-   - `schema-index-cue` (auto): cue a schema page from its folder `index.md`,
-     labelled with the schema's own title.
+   - `schema-index-cue` (auto): cue a schema page at the top of its folder
+     `index.md`, using the schema's title, folder name, and visible page kinds.
    - `uncovered-gist`: auto when the folder has exactly one schema (add the
      gist to its `relates_to`); handoff when it has none or several.
    - `dead-schema-member` (auto): drop a live schema `relates_to` entry whose

@@ -302,7 +302,11 @@ relates_to:
         self.assertIn(("schema-index-cue", "auto"), kinds)
         self.assertIn(("uncovered-gist", "auto"), kinds)
         run(OPT, "apply", "--root", str(root), "--target", ".", "--plan", str(self.base / "out" / "plan.json"))
-        self.assertIn("(./schema.schema.md)", (notes / "index.md").read_text())
+        index = (notes / "index.md").read_text()
+        self.assertIn("(./schema.schema.md)", index)
+        self.assertLess(index.index("(./schema.schema.md)"), index.index("(topic.gist.md)"))
+        self.assertIn("notes: gist, memory pages", index)
+        self.assertNotIn(MEM_DESC, index)
         self.assertIn("path: notes/extra.gist.md", (notes / "schema.schema.md").read_text())
         code, crit = compile_findings(root)
         self.assertNotIn("schema_folder", crit)
@@ -766,6 +770,31 @@ relates_to:
         run(OPT, "apply", "--root", str(root), "--target", ".", "--plan", str(self.base / "out" / "plan.json"))
         self.assertEqual((root / "CONTRACT.json").read_bytes(), contract)
 
+    def test_schema_cue_preserves_index_frontmatter(self) -> None:
+        root = shared_parent_store(self.base)
+        notes = root / "notes"
+        page(notes / "private.md", """
+type: restricted_kind
+title: Restricted page
+created: 2000-01-01
+sensitivity: restricted
+""", "This page has enough ordinary body text to satisfy the compile checks.")
+        for number, content in enumerate(("", "title: Notes\n")):
+            with self.subTest(frontmatter=content):
+                frontmatter = f"---\n{content}---\n"
+                (notes / "index.md").write_text(
+                    frontmatter + "# Notes\n\nExisting index content.\n", encoding="utf-8"
+                )
+                out = self.base / f"out-{number}"
+                plan(root, out)
+                applied = run(OPT, "apply", "--root", str(root), "--target", ".",
+                              "--plan", str(out / "plan.json"))
+                self.assertIn(applied.returncode, (0, 1), applied.stdout + applied.stderr)
+                text = (notes / "index.md").read_text()
+                self.assertTrue(text.startswith(frontmatter + "# Notes\n\n- [Notes schema]"), text)
+                self.assertIn("Existing index content.", text)
+                self.assertNotIn("restricted_kind", text)
+
     def test_beta7_and_final_stamps_are_accepted_alike(self) -> None:
         results = {}
         for stamp in ("0.13.0-beta.7", "0.13.0"):
@@ -1019,6 +1048,9 @@ relates_to:
         missing_cue = [item["path"] for item in compiled.get("critical", []) if item["id"] == "schema_missing_from_index"]
         self.assertNotIn("notes/topic.gist.md", uncovered)
         self.assertFalse(any(path.startswith("notes/") for path in missing_cue))
+        index = (notes / "index.md").read_text()
+        self.assertIn("(./schema.schema.md) - notes: gist, memory pages", index)
+        self.assertNotIn(LONG, index)
 
     def test_security_scan_blocks_secret_and_restricted(self) -> None:
         root = init_store(self.base)
@@ -1245,6 +1277,8 @@ relates_to:
         self.assertIn("kind: related", schema)
         self.assertNotIn("path: notes/alpha.md", schema)
         self.assertNotIn("path: notes/beta.md", schema)
+        cue = (notes / "index.md").read_text(encoding="utf-8")
+        self.assertIn("(./schema.schema.md) - notes: gist, memory pages", cue)
         compiled = json.loads(run(ATLAS, "compile", "--root", str(root), "--dry-run", "--json").stdout)
         missing = [item["path"] for item in compiled.get("info", []) if item["id"] == "missing_gist"]
         self.assertNotIn("notes/alpha.md", missing)

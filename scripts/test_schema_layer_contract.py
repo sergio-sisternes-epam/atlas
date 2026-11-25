@@ -934,14 +934,18 @@ def main() -> int:
             encoding="utf-8"
         ).lower()
         check(
-            "remember: schema cue critical is an index-only exit-2 first-pass exception",
+            "remember: schema cue findings are index-only at either severity",
             "schema_missing_from_index" in remember_text
             and "index-only" in remember_text
+            and "every critical finding id is one of `schema_missing_from_index` or `schema_cue_claim`" in remember_text
+            and "every warning finding id is one of `index_md_present` or `schema_cue_claim`" in remember_text
             and "including exit 2" in remember_text
             and "waiting for exit 0 first deadlocks the required schema cue" in remember_text
-            and "if any critical finding id is not `schema_missing_from_index`" in remember_text
+            and "`schema_cue_claim` is allowed at either severity" in remember_text
+            and "if any critical finding id is outside `schema_missing_from_index` and `schema_cue_claim`" in remember_text
+            and "or any warning id is outside `index_md_present` and `schema_cue_claim`" in remember_text
             and "do **not** edit `index.md` yet" in remember_text,
-            "step 9 does not describe the exit-2 schema-cue exception and non-index critical refusal",
+            "step 9 does not allow schema cue findings at either severity before repairing the index",
         )
 
         # === in-beta-refused ======================================================

@@ -31,6 +31,7 @@ DEFAULT_CONTRACT = {
         "hard_fail": True,
         "allow_inline_ignores": True,
         "min_body_chars": 40,
+        "structure": {"mode": "off"},
         "core_checks": [
             "okf_compliance",
             "frontmatter",
