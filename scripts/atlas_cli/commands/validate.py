@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
+from typing import Any
 
 from ..core.frontmatter import FrontmatterError, is_just_links, read_page
-from ..core.paths import RESERVED, iter_concept_md, rel, staging_files, store_root
+from ..core.paths import RESERVED, iter_concept_md, join_under, rel, staging_files, store_root
 from ..core.mesh import consolidate as mesh_consolidate
-from ..core.identity import IdentityError, parse_pointer
-from ..core.meshfile import MeshFileError, find_project_root, known_ids
+from ..core.identity import IdentityError, MalformedPinError, parse_pointer
+from ..core.meshfile import MeshFileError, find_project_root, find_store, known_ids
+from ..core.gitops import git_root
 from ..core.overlay import merge_overlays, receipt_issues
 from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
 from ..core import index_location
@@ -38,6 +42,8 @@ MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 NON_BLOCKING_WARNING_IDS = {
     "atlas_uri_unmounted",
+    "atlas_pin_unverifiable",
+    "atlas_pin_unverifiable_shallow",
     # Preferred recall engine index work never changes compile exit codes.
     "preferred_engine_invalid",
     "preferred_index_failed",
@@ -514,10 +520,12 @@ def _finding_in_focus(
     return True
 
 
-def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
+def _atlas_uri_findings(root: Path) -> tuple[list[dict], list[dict]]:
+    critical: list[dict] = []
     issues: list[dict] = []
+    project = find_project_root(root)
     try:
-        ids = known_ids(find_project_root(root))
+        ids = known_ids(project)
     except MeshFileError:
         ids = set()
     seen: set[str] = set()
@@ -529,8 +537,24 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
         for m in re.finditer(r"atlas://[^\s)\]\"']+", text):
             raw = m.group(0).rstrip(".,;`'\"")
             try:
-                aid = parse_pointer(raw).atlas_id
+                parsed = parse_pointer(raw)
+                aid = parsed.atlas_id
+            except MalformedPinError as e:
+                critical.append(
+                    {
+                        "id": "atlas_pin_malformed",
+                        "path": rel(root, path),
+                        "msg": f"{e}: {raw}",
+                        "severity": "critical",
+                    }
+                )
+                continue
             except IdentityError:
+                continue
+            if parsed.commit:
+                finding, is_critical = _pinned_uri_finding(project, parsed, rel(root, path))
+                if finding is not None:
+                    (critical if is_critical else issues).append(finding)
                 continue
             if aid in ids or aid in seen:
                 continue
@@ -543,7 +567,146 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
                     "severity": "warning",
                 }
             )
-    return issues
+    return critical, issues
+
+
+def _pin_git(repo: Path, *args: str) -> tuple[int, str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return 127, ""
+    return result.returncode, (result.stdout or "").strip()
+
+
+def _pinned_uri_finding(project: Path, parsed: Any, source_path: str) -> tuple[dict | None, bool]:
+    def warning(identity: str, message: str) -> tuple[dict, bool]:
+        return {
+            "id": identity,
+            "path": source_path,
+            "msg": message,
+            "severity": "warning",
+        }, False
+
+    def broken(message: str) -> tuple[dict, bool]:
+        return {
+            "id": "atlas_pin_broken",
+            "path": source_path,
+            "msg": message,
+            "severity": "critical",
+        }, True
+
+    try:
+        row = find_store(project, parsed.atlas_id)
+    except MeshFileError:
+        row = None
+    if not row:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"pinned atlas:// id is not mounted here; provenance not verified: {parsed.atlas_id}",
+        )
+    mount = Path(str(row.get("path") or (project / ".atlas" / Path(*parsed.atlas_id.split("/")))))
+    if not mount.is_absolute():
+        mount = project / mount
+    mount = mount.resolve()
+    subpath = str(row.get("subpath") or "")
+    store = join_under(mount, subpath)
+    if store is None:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"mounted store path is invalid; provenance not verified: {parsed.atlas_id}",
+        )
+    if not store.is_dir():
+        return warning(
+            "atlas_pin_unverifiable",
+            f"mounted path is unavailable; provenance not verified: {parsed.atlas_id}",
+        )
+    repo = git_root(store)
+    if repo is None:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"mounted store has no local Git repository; provenance not verified: {parsed.atlas_id}",
+        )
+    shallow_code, shallow_value = _pin_git(repo, "rev-parse", "--is-shallow-repository")
+    shallow = shallow_code == 0 and shallow_value == "true"
+    _, promisor = _pin_git(repo, "config", "--get-regexp", r"^remote\..*\.promisor$")
+    _, partial_clone = _pin_git(repo, "config", "--get", "extensions.partialClone")
+    not_fetched = any(line.rsplit(None, 1)[-1].lower() == "true" for line in promisor.splitlines()) or bool(partial_clone)
+    if shallow:
+        shallow_finding, _ = warning(
+            "atlas_pin_unverifiable_shallow",
+            f"mounted clone is shallow; pin provenance is not fully verifiable: {parsed.atlas_id}",
+        )
+    else:
+        shallow_finding = None
+
+    cited_sha = parsed.commit
+    commit_code, commit_type = _pin_git(repo, "cat-file", "-t", f"{cited_sha}^{{commit}}")
+    if commit_code != 0 or commit_type != "commit":
+        if shallow:
+            return shallow_finding, False
+        if not_fetched:
+            return warning(
+                "atlas_pin_unverifiable",
+                f"mounted partial clone has not fetched the cited commit: {cited_sha}",
+            )
+        return broken(f"pinned commit is missing from complete mounted store: {cited_sha}")
+
+    try:
+        repo_prefix = store.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"mounted store is outside its Git repository; provenance not verified: {parsed.atlas_id}",
+        )
+    repo_path = f"{repo_prefix}/" if repo_prefix != "." else ""
+    if join_under(store, parsed.in_store) is None:
+        if shallow:
+            return shallow_finding, False
+        return broken(f"pinned path is invalid at commit {cited_sha}: {parsed.in_store}")
+    repo_path += parsed.in_store
+    path_code, blob = _pin_git(repo, "rev-parse", "--verify", "--end-of-options", f"{cited_sha}:{repo_path}")
+    blob_type = _pin_git(repo, "cat-file", "-t", blob)[1] if path_code == 0 and blob else ""
+    if path_code != 0 or blob_type != "blob":
+        if shallow:
+            return shallow_finding, False
+        if not_fetched:
+            return warning(
+                "atlas_pin_unverifiable",
+                f"mounted partial clone has not fetched the cited path: {parsed.in_store}",
+            )
+        return broken(f"pinned path is missing at commit {cited_sha}: {parsed.in_store}")
+
+    if shallow_finding:
+        return shallow_finding, False
+
+    ref = str(row.get("ref") or "").strip()
+    if not ref:
+        branch_code, branch = _pin_git(repo, "symbolic-ref", "--short", "-q", "HEAD")
+        ref = branch if branch_code == 0 else "HEAD"
+    tip_code, tip = _pin_git(repo, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
+    if tip_code != 0 or not tip:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"mounted store tip is unavailable; provenance not fully verifiable: {parsed.atlas_id}",
+        )
+    ancestor_code, _ = _pin_git(repo, "merge-base", "--is-ancestor", cited_sha, tip)
+    if ancestor_code == 1:
+        return warning(
+            "atlas_pin_unreachable",
+            f"pinned commit is not reachable from mounted ref {ref}: {cited_sha}",
+        )
+    if ancestor_code != 0:
+        return warning(
+            "atlas_pin_unverifiable",
+            f"could not verify pin ancestry from mounted ref {ref}: {cited_sha}",
+        )
+    return None, False
 
 
 def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tuple[str, list[dict]]:
@@ -880,7 +1043,7 @@ def _memory_findings(
 
 
 def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
-    """Validate schema coverage, index cues, and gist-to-memory freshness."""
+    """Validate schema coverage, index cues, and upper-page freshness."""
     pages: list[tuple[Path, dict, str]] = []
     for path in iter_concept_md(root, staging_name):
         if path.name in RESERVED:
@@ -962,7 +1125,8 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
             )
 
     for gist_path, (_, gist_meta, _) in by_rel_path.items():
-        if str(gist_meta.get("type") or "").strip() != "gist":
+        upper_type = str(gist_meta.get("type") or "").strip()
+        if upper_type not in {"gist", "schema"}:
             continue
         description = gist_meta.get("description")
         if not isinstance(description, str) or not description:
@@ -971,6 +1135,7 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         if not isinstance(relates, list):
             continue
         memory_parents: list[tuple] = []
+        decision_parents: list[tuple] = []
         for item in relates:
             if not isinstance(item, dict):
                 continue
@@ -979,36 +1144,37 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
             target = str(item.get("path") or "").strip()
             canonical = _canonical_local_target(root, target)
             found = by_rel_path.get(canonical if canonical is not None else target)
-            if found is None or str(found[1].get("type") or "").strip() != "memory":
+            if found is None:
                 continue
-            memory_parents.append(found)
-        if not memory_parents:
-            continue
+            parent_type = str(found[1].get("type") or "").strip()
+            if parent_type == "memory" and upper_type == "gist":
+                memory_parents.append(found)
+            elif parent_type == "decision":
+                decision_parents.append(found)
         # N=1: the description must be a substring of that parent.
         # N>1: union pack — a substring of at least one derived_from parent.
         def _holds(found: tuple) -> bool:
-            memory_meta, memory_body = found[1], found[2]
-            memory_description = memory_meta.get("description")
-            return description in memory_body or (
-                isinstance(memory_description, str) and description in memory_description
+            parent_meta, parent_body = found[1], found[2]
+            parent_description = parent_meta.get("description")
+            return description in parent_body or (
+                isinstance(parent_description, str) and description in parent_description
             )
 
-        if any(_holds(found) for found in memory_parents):
-            continue
-        if len(memory_parents) == 1:
-            msg = (
-                "gist description is not present in its memory parent "
-                f"{rel(root, memory_parents[0][0])}"
-            )
+        if memory_parents and decision_parents:
+            parent_groups = (("memory and decision", memory_parents + decision_parents),)
         else:
-            msg = "gist description is not present in any derived_from memory parent"
-        findings.append(
-            {
-                "id": "stale_upper_page",
-                "path": gist_path,
-                "msg": msg,
-            }
-        )
+            parent_groups = (("memory", memory_parents), ("decision", decision_parents))
+        for parent_type, parents in parent_groups:
+            if not parents or any(_holds(found) for found in parents):
+                continue
+            if len(parents) == 1:
+                msg = (
+                    f"{upper_type} description is not present in its {parent_type} parent "
+                    f"{rel(root, parents[0][0])}"
+                )
+            else:
+                msg = f"{upper_type} description is not present in any derived_from {parent_type} parent"
+            findings.append({"id": "stale_upper_page", "path": gist_path, "msg": msg})
     return findings
 
 
@@ -1213,7 +1379,9 @@ def run(
     mesh_result = mesh_consolidate(r, write=not dry_run)
     critical.extend(mesh_result.get("critical") or [])
     warnings.extend(mesh_result.get("warnings") or [])
-    warnings.extend(_unknown_atlas_uri_warnings(r))
+    pin_critical, uri_warnings = _atlas_uri_findings(r)
+    critical.extend(pin_critical)
+    warnings.extend(uri_warnings)
 
     # staging must be empty
     staged = staging_files(r, staging_name)

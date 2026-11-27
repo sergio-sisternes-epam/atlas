@@ -149,17 +149,20 @@ not a refusal and does not fail the run.
      `--confirm`.
    - `layer-suffix` (opt-in): rename an unsuffixed `type: gist|schema|memory`
      page and rewrite every inbound `relates_to` path and relative link in the
-     store. Blocked when any `atlas://` text names the page or the page sits in
-     an overlay-claimed folder. Stores outside this root are not scanned.
+     store. Floating `atlas://` mentions still block the move; valid pinned
+     mentions do not, because `atlas link show` reports the resulting rename
+     impact. An overlay-claimed folder still blocks it. Stores outside this
+     root are not scanned.
 8. **Subject clustering.** The helper groups pages by naming only: the same
    filename stem in two or more folders, an operator-named
    `--subject-folder <folder>:<stem>`, or a page whose `work_id` names an
    existing `work/<work_id>/` folder. Without a safe target it is a `report`.
    A move is `confirm` only when the target folder exists, the filename is
-   free, the page is not a gist, schema, or memory page, and no `atlas://` text
-   names it. Moves rewrite inbound and outbound links. Layer pages hand off to
-   path remember because a move changes schema coverage. Do not detect subject
-   change any other way.
+   free, the page is not a gist, schema, or memory page, and no floating
+   `atlas://` mention names it. Valid pinned mentions do not block; inspect
+   their rename impact with `atlas link show`. Moves rewrite inbound and
+   outbound local links. Layer pages hand off to path remember because a move
+   changes schema coverage. Do not detect subject change any other way.
 9. **Apply.** Only after the operator has seen the task lists. `apply` re-checks
    HEAD and the sha256 of every file each selected task touches, including
    every evidence-pack source. Any change since plan means a stale plan: exit

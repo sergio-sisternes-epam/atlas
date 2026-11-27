@@ -2,6 +2,16 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed mixed-parent gist freshness checks to accept a matching memory or decision parent.
+- Fully unavailable as-of recall now fails closed; partial results remain available.
+- Routed undated past-tense questions to repository history.
+- Added conservative per-pin impact verdicts and reviewer-facing reasons.
+- Added local merge-impact reports and stale decision-source gist/schema checks.
+- Added `atlas link show` and `atlas link pin`, fail-closed pinned provenance
+  checks during compile, and pinned-link-aware optimise move gates.
+- Added `atlas history` and `atlas recall run --as-of` for local repository-version history.
+- Added commit-pinned URI syntax and malformed-pin compile checks. Resolving a
+  pin requires `--tip` to explicitly select the mounted tip, not the citation.
 - Fixed structure cue checks for wrapped list items, fenced examples, and HTML comments.
 - Added SGM (Schema, Gist, Memory) index-cue guidance and memory-page recall
   receipt rules. Optimise writes schema cues at the top of folder indexes.
