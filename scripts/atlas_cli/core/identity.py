@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from urllib.parse import urlsplit
 
 
@@ -10,11 +11,16 @@ class IdentityError(ValueError):
     """Pointer cannot be normalised to host/org/repo."""
 
 
+class MalformedPinError(IdentityError):
+    """A pin-like suffix is not a full lowercase commit or has no path."""
+
+
 @dataclass(frozen=True)
 class ParsedPointer:
     atlas_id: str
     in_store: str
     fragment: str
+    commit: str = ""
 
 
 def normalise(pointer: str) -> str:
@@ -28,15 +34,17 @@ def parse_pointer(pointer: str) -> ParsedPointer:
     if not s:
         raise IdentityError("empty pointer")
 
-    fragment = ""
+    s, _, fragment = s.partition("#")
     if s.startswith("atlas://"):
         s = s[len("atlas://") :]
 
     if "://" not in s and s.startswith("git@") and ":" in s[4:]:
         rest = s[4:]
         host, path = rest.split(":", 1)
-        if "#" in path:
-            path, fragment = path.split("#", 1)
+        port = re.match(r"^([0-9]+):(.*)$", path)
+        if port:
+            host = f"{host}:{port.group(1)}"
+            path = port.group(2)
     elif "://" in s:
         parts = urlsplit(s)
         if not parts.hostname:
@@ -45,10 +53,7 @@ def parse_pointer(pointer: str) -> ParsedPointer:
         if parts.port not in (None, 80, 443, 22):
             host = f"{host}:{parts.port}"
         path = parts.path or ""
-        fragment = parts.fragment or fragment
     elif "/" in s:
-        if "#" in s:
-            s, fragment = s.split("#", 1)
         first, _, rem = s.partition("/")
         host, path = first, rem
     else:
@@ -56,10 +61,24 @@ def parse_pointer(pointer: str) -> ParsedPointer:
 
     host = _fold_host(host)
     org, repo, extra = _org_repo_rest(path)
+    commit = ""
+    if extra:
+        match = re.search(r"@([A-Za-z0-9]{7,64})$", extra[-1])
+        if match:
+            candidate = match.group(1)
+            if not re.fullmatch(r"[0-9a-f]{40}", candidate):
+                raise MalformedPinError("malformed pin: expected 40 lowercase hex characters")
+            extra[-1] = extra[-1][: match.start()]
+            if not extra[-1] and len(extra) == 1:
+                raise MalformedPinError("malformed pin: empty in-store path")
+            if not extra[-1]:
+                raise MalformedPinError("malformed pin: empty final path segment")
+            commit = candidate
     return ParsedPointer(
         atlas_id=f"{host}/{org}/{repo}",
         in_store="/".join(extra),
         fragment=fragment,
+        commit=commit,
     )
 
 

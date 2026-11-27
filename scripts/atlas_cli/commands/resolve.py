@@ -16,12 +16,14 @@ def default_mount(project: Path, atlas_id: str) -> Path:
     return project / ".atlas" / Path(*atlas_id.split("/"))
 
 
-def run(pointer: str, start: str | None, as_json: bool) -> int:
+def run(pointer: str, start: str | None, as_json: bool, tip: bool = False) -> int:
     base = Path(start).resolve() if start else Path.cwd()
     try:
         parsed = parse_pointer(pointer)
     except IdentityError as e:
         return _fail(str(e), as_json)
+    if parsed.commit and not tip:
+        return _fail("pinned: use atlas link show", as_json)
     project = git_root(base)
     if project is None:
         return _fail("no git repository (refuse to resolve)", as_json)
@@ -61,9 +63,15 @@ def run(pointer: str, start: str | None, as_json: bool) -> int:
             as_json,
         )
     if as_json:
-        print(json.dumps({"ok": True, "path": str(target), "id": parsed.atlas_id}))
+        result = {"ok": True, "path": str(target), "id": parsed.atlas_id}
+        if parsed.commit:
+            result.update(resolution="tip", commit=parsed.commit, fragment=parsed.fragment)
+        print(json.dumps(result))
     else:
-        print(target)
+        if parsed.commit:
+            print(f"tip: {target}" + (f"#{parsed.fragment}" if parsed.fragment else ""))
+        else:
+            print(target)
     return 0
 
 

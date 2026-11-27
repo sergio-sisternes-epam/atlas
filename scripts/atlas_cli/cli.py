@@ -115,9 +115,10 @@ def mount_cmd(
 @click.argument("pointer")
 @click.option("--cwd", "start", default=None, help="project directory")
 @click.option("--json", "as_json", is_flag=True)
-def resolve_cmd(pointer: str, start: str | None, as_json: bool) -> None:
+@click.option("--tip", is_flag=True, help="resolve a pinned URI at mounted tip, not its cited commit")
+def resolve_cmd(pointer: str, start: str | None, as_json: bool, tip: bool) -> None:
     """Map an id to the mount root, or a page URI to a file."""
-    raise SystemExit(cmd_resolve.run(pointer, start, as_json))
+    raise SystemExit(cmd_resolve.run(pointer, start, as_json, tip))
 
 
 @main.command("init")

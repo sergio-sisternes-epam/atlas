@@ -2,6 +2,8 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Added commit-pinned URI syntax and malformed-pin compile checks. Resolving a
+  pin requires `--tip` to explicitly select the mounted tip, not the citation.
 - Fixed structure cue checks for wrapped list items, fenced examples, and HTML comments.
 - Added SGM (Schema, Gist, Memory) index-cue guidance and memory-page recall
   receipt rules. Optimise writes schema cues at the top of folder indexes.

@@ -16,18 +16,21 @@ def run(pointer: str, as_json: bool) -> int:
             print(f"atlas id: {e}", file=sys.stderr)
         return 2
     if as_json:
+        result = {
+            "ok": True,
+            "id": parsed.atlas_id,
+            "path": parsed.in_store,
+            "fragment": parsed.fragment,
+        }
+        if parsed.commit:
+            result["commit"] = parsed.commit
         print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "id": parsed.atlas_id,
-                    "path": parsed.in_store,
-                    "fragment": parsed.fragment,
-                }
-            )
+            json.dumps(result)
         )
     else:
         print(parsed.atlas_id)
         if parsed.in_store:
             print(parsed.in_store)
+        if parsed.commit:
+            print(f"@{parsed.commit}" + (f"#{parsed.fragment}" if parsed.fragment else ""))
     return 0

@@ -53,4 +53,15 @@ root: <set after resolve>
 
 3. Set card `root` to the resolve path. **Use skill atlas** with that `--root` (recall, remember, work, landscape).
 
+Page pointers may be floating (`atlas://<host>/<org>/<repo>/<path>[#fragment]`)
+or pinned (`atlas://<host>/<org>/<repo>/<path>@<commit>[#fragment]`), where
+`commit` is exactly 40 lowercase hexadecimal characters and the path is
+nonempty. A host may include a port. The fragment is opaque.
+Compile reports malformed pin-like suffixes as critical; it does not check
+commit or path availability. Floating pointers continue to resolve at the
+mounted tip. `atlas resolve` refuses a pin unless `--tip` is supplied; that
+option returns a result labelled `tip`, not the cited historical content.
+The refusal points to `atlas link show`, which is not yet available in this
+slice.
+
 Do not write into the calling skill package. This file is not a store.

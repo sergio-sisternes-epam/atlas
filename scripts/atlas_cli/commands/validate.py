@@ -7,7 +7,7 @@ from pathlib import Path
 from ..core.frontmatter import FrontmatterError, is_just_links, read_page
 from ..core.paths import RESERVED, iter_concept_md, rel, staging_files, store_root
 from ..core.mesh import consolidate as mesh_consolidate
-from ..core.identity import IdentityError, parse_pointer
+from ..core.identity import IdentityError, MalformedPinError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, known_ids
 from ..core.overlay import merge_overlays, receipt_issues
 from ..core.recall_config import recall_enabled, schema_version, validate_store_v2
@@ -514,7 +514,8 @@ def _finding_in_focus(
     return True
 
 
-def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
+def _atlas_uri_findings(root: Path) -> tuple[list[dict], list[dict]]:
+    critical: list[dict] = []
     issues: list[dict] = []
     try:
         ids = known_ids(find_project_root(root))
@@ -530,6 +531,16 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
             raw = m.group(0).rstrip(".,;`'\"")
             try:
                 aid = parse_pointer(raw).atlas_id
+            except MalformedPinError as e:
+                critical.append(
+                    {
+                        "id": "atlas_pin_malformed",
+                        "path": rel(root, path),
+                        "msg": f"{e}: {raw}",
+                        "severity": "critical",
+                    }
+                )
+                continue
             except IdentityError:
                 continue
             if aid in ids or aid in seen:
@@ -543,7 +554,7 @@ def _unknown_atlas_uri_warnings(root: Path) -> list[dict]:
                     "severity": "warning",
                 }
             )
-    return issues
+    return critical, issues
 
 
 def _memory_rung(schema: dict | None, contract_name: str = "SCHEMA.json") -> tuple[str, list[dict]]:
@@ -1213,7 +1224,9 @@ def run(
     mesh_result = mesh_consolidate(r, write=not dry_run)
     critical.extend(mesh_result.get("critical") or [])
     warnings.extend(mesh_result.get("warnings") or [])
-    warnings.extend(_unknown_atlas_uri_warnings(r))
+    pin_critical, uri_warnings = _atlas_uri_findings(r)
+    critical.extend(pin_critical)
+    warnings.extend(uri_warnings)
 
     # staging must be empty
     staged = staging_files(r, staging_name)
