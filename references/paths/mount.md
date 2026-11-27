@@ -67,4 +67,28 @@ read the cited version and compare it with the mounted tip; `--show` includes
 capped cited text and `--diff` includes a capped path-scoped diff.
 `atlas link pin <floating-uri-or-path>` creates a pin to the mounted tip.
 
+For merge review, run
+`atlas link impact --root <store> --since <base-commit> --until <incoming-ref> --json`.
+Both endpoints must be available locally; `--until` defaults to `HEAD` and the
+comparison is the two endpoints, not an automatically selected merge base.
+The store identity comes from its Git origin, or can be specified with
+`--atlas-id <host/org/repo>` (required if there is no suitable origin).
+The report lists changed Markdown paths, change kind (`A`, `M`, `D`, `R`, etc.),
+old and new blob IDs, insertion/deletion counts (null for binary diffs), and
+pins from other tracked pages in the ending snapshot. Rename entries include
+`old_path`; pins are compared with the ending snapshot using `link show`
+semantics, including unavailable citations. Uncommitted pages are not scanned.
+The helper reads only local objects; it does not fetch, edit, or accept a merge.
+Review the actual diffs and compile the integrated store separately.
+
+Record a review note in the work log or merge commit, not in page frontmatter:
+
+```text
+Changed claims: <pages and semantic changes reviewed>
+Drifted pins: <citations, status, and disposition>
+Stale cues: <gist/schema cues checked and disposition>
+Contradictions: <sibling pages checked and resolution>
+Outcome: <accept, reject, or stop and ask>
+```
+
 Do not write into the calling skill package. This file is not a store.

@@ -1660,6 +1660,38 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        for upper in ("gist", "schema"):
+            d = beta3_store(f"stale-decision-{upper}")
+            write_index(d / "notes")
+            write_page(d / "notes" / "choice.md", "decision", body="The decision has changed. " + PROSE)
+            upper_path = d / "notes" / f"choice.{upper}.md"
+            write_page(
+                upper_path, upper, [{"path": "notes/choice.md", "kind": "derived_from"}],
+                description="The former decision claim",
+            )
+            if upper == "gist":
+                write_page(d / "notes" / "s.schema.md", "schema",
+                           [{"path": "notes/choice.gist.md", "kind": "related"}])
+            code, payload = run_json(["compile", "--root", str(d), "--json"])
+            check(
+                f"stale_upper_page: stale {upper} over decision fails",
+                code != 0 and any(
+                    item.get("id") == "stale_upper_page" and item.get("path") == f"notes/choice.{upper}.md"
+                    for item in payload.get("critical", [])
+                ),
+                f"exit={code} critical={payload.get('critical')}",
+            )
+            write_page(
+                upper_path, upper, [{"path": "notes/choice.md", "kind": "derived_from"}],
+                description="The decision has changed.",
+            )
+            code, payload = run_json(["compile", "--root", str(d), "--json"])
+            check(
+                f"stale_upper_page: refreshed {upper} over decision passes",
+                code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
+                f"exit={code} critical={payload.get('critical')}",
+            )
+
         # Shared gist: union membership. The description may live in only one parent.
         d = beta3_store("stale-upper-page-shared")
         write_index(d / "notes")

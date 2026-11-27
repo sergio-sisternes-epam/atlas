@@ -203,32 +203,49 @@ def _emit(payload: dict[str, Any], as_json: bool) -> int:
 def show(uri: str, start: str | None, as_json: bool, include_text: bool, include_diff: bool) -> int:
     try:
         pointer = parse_pointer(uri)
-    except MalformedPinError:
-        return _emit(_failure("malformed_pin", None, uri), as_json)
     except IdentityError:
         return _emit(_failure("malformed_pin", None, uri), as_json)
     if not pointer.commit:
         return _show_floating(uri, pointer, start, as_json, include_text)
+    return _emit(inspect(uri, start, include_text, include_diff), as_json)
+
+
+def inspect(
+    uri: str, start: str | None, include_text: bool = False, include_diff: bool = False,
+    target: tuple[Path, str] | None = None,
+) -> dict[str, Any]:
+    try:
+        pointer = parse_pointer(uri)
+    except MalformedPinError:
+        return _failure("malformed_pin", None, uri)
+    except IdentityError:
+        return _failure("malformed_pin", None, uri)
+    if not pointer.commit:
+        raise ValueError("inspect requires a pinned URI")
 
     project = find_project_root(Path(start).resolve() if start else Path.cwd())
-    try:
-        row, mount, store = _store(project, pointer.atlas_id)
-    except MeshFileError:
-        row, mount, store = None, None, None
+    if target is not None:
+        store, ref = target
+        row = {"ref": ref}
+    else:
+        try:
+            row, _mount, store = _store(project, pointer.atlas_id)
+        except MeshFileError:
+            row, store = None, None
     if not row or store is None or not store.is_dir():
-        return _emit(_failure("store_not_mounted", pointer.commit, uri), as_json)
+        return _failure("store_not_mounted", pointer.commit, uri)
     location = _repo_and_store_path(store)
     if location is None:
-        return _emit(_failure("store_not_mounted", pointer.commit, uri), as_json)
+        return _failure("store_not_mounted", pointer.commit, uri)
     repo, prefix = location
     safe_path = join_under(store, pointer.in_store)
     if safe_path is None:
-        return _emit(_failure("path_not_in_commit", pointer.commit, uri), as_json)
+        return _failure("path_not_in_commit", pointer.commit, uri)
     cited_path = _repo_path(prefix, pointer.in_store)
     cited_sha = pointer.commit
     if not _commit_exists(repo, cited_sha):
         reason = "shallow_clone" if _shallow(repo) else "commit_missing"
-        return _emit(_failure(reason, cited_sha, uri), as_json)
+        return _failure(reason, cited_sha, uri)
     cited_blob, cited_path_exists, cited_kind = _blob_info(repo, cited_sha, cited_path)
     if cited_blob is None:
         reason = (
@@ -238,7 +255,7 @@ def show(uri: str, start: str | None, as_json: bool, include_text: bool, include
             if cited_path_exists and cited_kind is None
             else "path_not_in_commit"
         )
-        return _emit(_failure(reason, cited_sha, uri), as_json)
+        return _failure(reason, cited_sha, uri)
 
     tip_sha, tip_ref = _tip(repo, row)
     tip_path = cited_path
@@ -329,7 +346,7 @@ def show(uri: str, start: str | None, as_json: bool, include_text: bool, include
             payload["diff"] = _limited(output, truncated)
         else:
             payload["diff_error"] = "unable to produce the path-scoped diff from local Git objects"
-    return _emit(payload, as_json)
+    return payload
 
 
 def _limited(content: bytes | str, truncated: bool = False) -> str:
@@ -503,3 +520,16 @@ def show_cmd(uri: str, start: str | None, include_text: bool, include_diff: bool
 def pin_cmd(pointer_or_path: str, start: str | None, as_json: bool) -> None:
     """Pin a floating URI or mounted store path to its current tip."""
     raise SystemExit(pin(pointer_or_path, start, as_json))
+
+
+@link_group.command("impact")
+@click.option("--since", required=True, help="local starting commit or ref")
+@click.option("--until", default="HEAD", show_default=True, help="local ending commit or ref")
+@click.option("--root", default=None, help="store root (default: cwd)")
+@click.option("--atlas-id", default=None, help="store identity (default: origin remote)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def impact_cmd(since: str, until: str, root: str | None, atlas_id: str | None, as_json: bool) -> None:
+    """List changed pages and pins in the ending repository snapshot."""
+    from . import impact
+
+    raise SystemExit(impact.run(root, since, until, atlas_id, as_json))

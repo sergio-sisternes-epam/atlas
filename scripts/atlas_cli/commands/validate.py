@@ -1043,7 +1043,7 @@ def _memory_findings(
 
 
 def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) -> list[dict]:
-    """Validate schema coverage, index cues, and gist-to-memory freshness."""
+    """Validate schema coverage, index cues, and upper-page freshness."""
     pages: list[tuple[Path, dict, str]] = []
     for path in iter_concept_md(root, staging_name):
         if path.name in RESERVED:
@@ -1125,7 +1125,8 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
             )
 
     for gist_path, (_, gist_meta, _) in by_rel_path.items():
-        if str(gist_meta.get("type") or "").strip() != "gist":
+        upper_type = str(gist_meta.get("type") or "").strip()
+        if upper_type not in {"gist", "schema"}:
             continue
         description = gist_meta.get("description")
         if not isinstance(description, str) or not description:
@@ -1134,6 +1135,7 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         if not isinstance(relates, list):
             continue
         memory_parents: list[tuple] = []
+        decision_parents: list[tuple] = []
         for item in relates:
             if not isinstance(item, dict):
                 continue
@@ -1142,11 +1144,13 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
             target = str(item.get("path") or "").strip()
             canonical = _canonical_local_target(root, target)
             found = by_rel_path.get(canonical if canonical is not None else target)
-            if found is None or str(found[1].get("type") or "").strip() != "memory":
+            if found is None:
                 continue
-            memory_parents.append(found)
-        if not memory_parents:
-            continue
+            parent_type = str(found[1].get("type") or "").strip()
+            if parent_type == "memory" and upper_type == "gist":
+                memory_parents.append(found)
+            elif parent_type == "decision":
+                decision_parents.append(found)
         # N=1: the description must be a substring of that parent.
         # N>1: union pack — a substring of at least one derived_from parent.
         def _holds(found: tuple) -> bool:
@@ -1156,22 +1160,17 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
                 isinstance(memory_description, str) and description in memory_description
             )
 
-        if any(_holds(found) for found in memory_parents):
-            continue
-        if len(memory_parents) == 1:
-            msg = (
-                "gist description is not present in its memory parent "
-                f"{rel(root, memory_parents[0][0])}"
-            )
-        else:
-            msg = "gist description is not present in any derived_from memory parent"
-        findings.append(
-            {
-                "id": "stale_upper_page",
-                "path": gist_path,
-                "msg": msg,
-            }
-        )
+        for parent_type, parents in (("memory", memory_parents), ("decision", decision_parents)):
+            if not parents or any(_holds(found) for found in parents):
+                continue
+            if len(parents) == 1:
+                msg = (
+                    f"{upper_type} description is not present in its {parent_type} parent "
+                    f"{rel(root, parents[0][0])}"
+                )
+            else:
+                msg = f"{upper_type} description is not present in any derived_from {parent_type} parent"
+            findings.append({"id": "stale_upper_page", "path": gist_path, "msg": msg})
     return findings
 
 

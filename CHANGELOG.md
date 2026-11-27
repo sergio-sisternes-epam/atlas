@@ -2,6 +2,7 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Added local merge-impact reports and stale decision-source gist/schema checks.
 - Added `atlas link show` and `atlas link pin`, fail-closed pinned provenance
   checks during compile, and pinned-link-aware optimise move gates.
 - Added `atlas history` and `atlas recall run --as-of` for local repository-version history.
