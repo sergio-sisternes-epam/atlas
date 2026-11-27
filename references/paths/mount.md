@@ -57,11 +57,14 @@ Page pointers may be floating (`atlas://<host>/<org>/<repo>/<path>[#fragment]`)
 or pinned (`atlas://<host>/<org>/<repo>/<path>@<commit>[#fragment]`), where
 `commit` is exactly 40 lowercase hexadecimal characters and the path is
 nonempty. A host may include a port. The fragment is opaque.
-Compile reports malformed pin-like suffixes as critical; it does not check
-commit or path availability. Floating pointers continue to resolve at the
-mounted tip. `atlas resolve` refuses a pin unless `--tip` is supplied; that
-option returns a result labelled `tip`, not the cited historical content.
-The refusal points to `atlas link show`, which is not yet available in this
-slice.
+Compile reports malformed pin-like suffixes as critical and checks mounted
+pins locally without fetching: missing commits or paths in a complete clone
+are critical, while shallow or unmounted stores remain unverifiable warnings.
+Floating pointers continue to resolve at the mounted tip. `atlas resolve`
+refuses a pin unless `--tip` is supplied; that option returns a result labelled
+`tip`, not the cited historical content. Use `atlas link show <pinned-uri>` to
+read the cited version and compare it with the mounted tip; `--show` includes
+capped cited text and `--diff` includes a capped path-scoped diff.
+`atlas link pin <floating-uri-or-path>` creates a pin to the mounted tip.
 
 Do not write into the calling skill package. This file is not a store.

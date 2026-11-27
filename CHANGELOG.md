@@ -2,6 +2,8 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Added `atlas link show` and `atlas link pin`, fail-closed pinned provenance
+  checks during compile, and pinned-link-aware optimise move gates.
 - Added `atlas history` and `atlas recall run --as-of` for local repository-version history.
 - Added commit-pinned URI syntax and malformed-pin compile checks. Resolving a
   pin requires `--tip` to explicitly select the mounted tip, not the citation.

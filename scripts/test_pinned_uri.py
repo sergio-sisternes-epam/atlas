@@ -145,7 +145,10 @@ class CommandTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(result.returncode, 0, payload)
             self.assertFalse(any(f["id"] == "atlas_pin_malformed" for f in payload["critical"]))
-            self.assertEqual([f["id"] for f in payload["warnings"]], ["atlas_uri_unmounted"])
+            self.assertEqual(
+                [f["id"] for f in payload["warnings"]],
+                ["atlas_uri_unmounted", "atlas_pin_unverifiable"],
+            )
 
 
 if __name__ == "__main__":

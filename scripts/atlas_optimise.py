@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atlas_cli import __version__ as PACKAGE_VERSION  # noqa: E402
 from atlas_cli.commands.validate import GIST_PARENT_TYPES, MISSING_GIST_TYPES  # noqa: E402
 from atlas_cli.core.frontmatter import FrontmatterError, read_page  # noqa: E402
+from atlas_cli.core.identity import IdentityError, parse_pointer  # noqa: E402
 from atlas_cli.core.paths import CONTRACT_FILENAMES, CONTRACT_NAME, RESERVED  # noqa: E402
 from atlas_cli.core.recall_config import schema_version  # noqa: E402
 from atlas_cli.core.schema import (  # noqa: E402
@@ -358,7 +359,12 @@ def _atlas_mentions(store: Store, key: str) -> list[str]:
         except OSError:
             continue
         for m in ATLAS_URI.finditer(text):
-            if m.group(0).rstrip(").,>`'\"").endswith("/" + key):
+            raw = m.group(0).rstrip(").,>`'\"")
+            try:
+                pointer = parse_pointer(raw)
+            except IdentityError:
+                continue
+            if not pointer.commit and raw.split("#", 1)[0].endswith("/" + key):
                 hits.append(_rel(store.root, path))
                 break
     return hits

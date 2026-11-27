@@ -19,6 +19,7 @@ from .commands import index as cmd_index
 from .commands import graph as cmd_graph
 from .commands import storecmd as cmd_store
 from .commands import history as cmd_history
+from .commands import link as cmd_link
 
 
 @click.group(
@@ -28,6 +29,9 @@ from .commands import history as cmd_history
 @click.version_option(__version__, prog_name="atlas")
 def main() -> None:
     """Atlas CLI — lean deterministic gates for OKF v0.2 knowledge substrates."""
+
+
+main.add_command(cmd_link.link_group)
 
 
 @main.command("validate")
