@@ -191,6 +191,8 @@ python3 <atlas-skill>/scripts/atlas.py compile|validate --root <atlas> [--type <
 python3 <atlas-skill>/scripts/atlas.py recall run "..." --root <atlas> [--engine grep|bm25|nanograph] [--include-exits] [--profile <id>] [--allow-partial] [--scope store|mesh] [--rrf-k N]
                        # query tokens: type: kva: status: work_id: path:
                        # --scope mesh: federated recall over the atlas-mesh.json members (tiered RRF, k 1-1000, default 60); --profile and --allow-partial are store scope only (each exits 2 with --scope mesh); --limit 0 = all hits
+                       # --as-of <ISO-date-or-datetime>: local repository version at that date (store scope)
+python3 <atlas-skill>/scripts/atlas.py history <page> --root <atlas> [--json]
 python3 <atlas-skill>/scripts/atlas.py schema upgrade --to 2.0 --root <atlas> [--dry-run|--apply]
 python3 <atlas-skill>/scripts/atlas.py recall status|profiles|show|validate|activate|disable --root <atlas>
 # index verbs all take [--root <dir>] [--json]; `index build` replaces deprecated `recall index build`

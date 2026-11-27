@@ -18,6 +18,7 @@ from .commands import recall as cmd_recall
 from .commands import index as cmd_index
 from .commands import graph as cmd_graph
 from .commands import storecmd as cmd_store
+from .commands import history as cmd_history
 
 
 @click.group(
@@ -119,6 +120,15 @@ def mount_cmd(
 def resolve_cmd(pointer: str, start: str | None, as_json: bool, tip: bool) -> None:
     """Map an id to the mount root, or a page URI to a file."""
     raise SystemExit(cmd_resolve.run(pointer, start, as_json, tip))
+
+
+@main.command("history")
+@click.argument("page")
+@click.option("--root", default=None, help="Atlas store root (default: cwd)")
+@click.option("--json", "as_json", is_flag=True, help="machine-readable output")
+def history_cmd(page: str, root: str | None, as_json: bool) -> None:
+    """List repository versions of a store page (not claim-validity intervals)."""
+    raise SystemExit(cmd_history.run(root, page, as_json))
 
 
 @main.command("init")
@@ -389,6 +399,11 @@ def recall_group() -> None:
     metavar="N",
     help="mesh scope only: RRF k, an integer 1-1000 (atlas-mesh.json recall.rrf_k; default 60)",
 )
+@click.option(
+    "--as-of",
+    default=None,
+    help="recall a local repository version at an ISO date or datetime",
+)
 def recall_run_cmd(
     query: str,
     root: str | None,
@@ -400,8 +415,17 @@ def recall_run_cmd(
     allow_partial: bool,
     scope: str | None,
     rrf_k: str | None,
+    as_of: str | None,
 ) -> None:
     """Discover concepts (tool). Agent protocol is path recall + B17 card."""
+    if as_of is not None:
+        if scope and scope.lower() == "mesh":
+            raise click.ClickException("--as-of is available for store scope only")
+        raise SystemExit(
+            cmd_history.run_as_of(
+                root, query, as_of, limit, as_json, engine, profile, allow_partial
+            )
+        )
     raise SystemExit(
         cmd_search.run_scoped(
             root, query, limit, as_json, engine, include_exits, profile, allow_partial, scope, rrf_k
