@@ -67,6 +67,23 @@ read the cited version and compare it with the mounted tip; `--show` includes
 capped cited text and `--diff` includes a capped path-scoped diff.
 `atlas link pin <floating-uri-or-path>` creates a pin to the mounted tip.
 
+For each pinned citation, `verdict` and `verdict_basis` provide a conservative
+review flag, not an automatic acceptance or edit. `unchanged` means identical
+blobs. `contradicts` flags a deleted tip, an exit `status`, `kva` or `lifecycle`
+(`terminated`, `deprecated`, `superseded`), or a `supersedes`/`superseded_by`
+frontmatter link to the cited page. It also flags a replaced block in the cited
+scope when both blocks contain different number/date sequences, or a negation
+word (`not`, `no`, `never`, `neither`, `cannot`, `without`, `mustn't`, `isn't`,
+`doesn't`, `don't`) appears in the replacement but not the original. The cited
+scope is the named Markdown heading and its subsections for a fragment (GitHub
+heading slugs), otherwise the page body. `changed-compatible` means only
+bookkeeping frontmatter (`updated`, `modified`, `last_updated`, `last_modified`),
+whitespace, additions, or changes outside the cited section, with no cited
+lines removed or replaced. `unknown` covers unavailable or oversized blobs,
+unavailable fragments, non-bookkeeping frontmatter changes, and other removals
+or replacements. A reviewer must judge `unknown` and inspect the retained
+`diff_stat` and optional `--diff`; these rules cannot decide semantic truth.
+
 For merge review, run
 `atlas link impact --root <store> --since <base-commit> --until <incoming-ref> --json`.
 Both endpoints must be available locally; `--until` defaults to `HEAD` and the

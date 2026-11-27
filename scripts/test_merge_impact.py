@@ -67,6 +67,8 @@ class MergeImpactTests(unittest.TestCase):
         pin = change["pins"][0]
         self.assertEqual((pin["source"], pin["status"], pin["tip_sha"]), ("citation.md", "changed", end))
         self.assertEqual(pin["fragment"], "claim")
+        self.assertEqual(pin["verdict"], "unknown")
+        self.assertEqual(pin["verdict_basis"], ["fragment_unavailable"])
 
     def test_no_pins_and_explicit_identity(self) -> None:
         self.page.write_text("different\n", encoding="utf-8")
@@ -74,6 +76,21 @@ class MergeImpactTests(unittest.TestCase):
         result, payload = self.impact(self.first, "--atlas-id", ID)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(payload["changes"][0]["pins"], [])
+
+    def test_numeric_decision_verdict_in_impact(self) -> None:
+        self.page.write_text("## Decision\n\nThe fare is 10.\n", encoding="utf-8")
+        cited = self.commit("decision")
+        (self.repo / "citation.md").write_text(
+            f"atlas://{ID}/fact.md@{cited}#decision\n", encoding="utf-8"
+        )
+        baseline = self.commit("cite")
+        self.page.write_text("## Decision\n\nThe fare is 20.\n", encoding="utf-8")
+        self.commit("change number")
+        result, payload = self.impact(baseline)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pin = next(change for change in payload["changes"] if change["path"] == "fact.md")["pins"][0]
+        self.assertEqual(pin["verdict"], "contradicts")
+        self.assertEqual(pin["verdict_basis"], ["replaced_numbers"])
 
     def test_rename_and_delete_with_citations(self) -> None:
         (self.repo / "citation.md").write_text(
@@ -95,6 +112,7 @@ class MergeImpactTests(unittest.TestCase):
         change = payload["changes"][0]
         self.assertEqual((change["kind"], change["path"], change["new_blob"]), ("D", "renamed.md", None))
         self.assertEqual(change["pins"][0]["status"], "deleted")
+        self.assertEqual(change["pins"][0]["verdict"], "contradicts")
         result, payload = self.impact(baseline)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(payload["changes"][0]["pins"][0]["status"], "deleted")
@@ -110,6 +128,7 @@ class MergeImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         pin = payload["changes"][0]["pins"][0]
         self.assertEqual((pin["status"], pin["reason"]), ("cited_unavailable", "commit_missing"))
+        self.assertEqual(pin["verdict"], "unknown")
         self.assertNotIn("text", pin)
         result, payload = self.impact("missing-ref")
         self.assertEqual(result.returncode, 2)

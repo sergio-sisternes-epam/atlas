@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import click
 
 from ..core.gitops import git_root
+from ..core.frontmatter import FrontmatterError, split_fm_v2
 from ..core.identity import IdentityError, MalformedPinError, parse_pointer
 from ..core.meshfile import MeshFileError, find_project_root, find_store, load
 from ..core.paths import has_contract_file, join_under
@@ -176,7 +180,127 @@ def _failure(reason: str, cited_sha: str | None, uri: str) -> dict[str, Any]:
         "cited_sha": cited_sha,
         "tip_sha": None,
         "changed": None,
+        "verdict": "unknown",
+        "verdict_basis": ["cited_unavailable", reason],
     }
+
+
+def _section(body: str, fragment: str) -> str | None:
+    if not fragment:
+        return body
+    target = unquote(fragment).lower()
+    headings: list[tuple[int, int, str]] = []
+    counts: dict[str, int] = {}
+    fenced = False
+    fence_char = ""
+    for index, line in enumerate(body.splitlines()):
+        fence = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence:
+            char = fence.group(1)[0]
+            if not fenced:
+                fenced, fence_char = True, char
+            elif char == fence_char:
+                fenced = False
+            continue
+        if fenced:
+            continue
+        match = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if not match:
+            continue
+        name = re.sub(r"[^\w\s-]", "", match.group(2).lower())
+        slug = re.sub(r"\s+", "-", name.strip())
+        count = counts.get(slug, 0)
+        counts[slug] = count + 1
+        headings.append((index, len(match.group(1)), f"{slug}-{count}" if count else slug))
+    lines = body.splitlines()
+    for pos, (start, level, slug) in enumerate(headings):
+        if slug == target:
+            end = next((idx for idx, depth, _ in headings[pos + 1:] if depth <= level), len(lines))
+            return "\n".join(lines[start:end])
+    return None
+
+
+def _names_cited_page(value: Any, cited_path: str, tip_path: str, atlas_id: str) -> bool:
+    if isinstance(value, list):
+        return any(_names_cited_page(item, cited_path, tip_path, atlas_id) for item in value)
+    if not isinstance(value, str):
+        return False
+    value = value.strip().split("#", 1)[0]
+    if value.startswith("atlas://"):
+        try:
+            pointer = parse_pointer(value)
+        except IdentityError:
+            return False
+        return pointer.atlas_id == atlas_id and pointer.in_store == cited_path
+    return value == cited_path or posixpath.normpath(
+        posixpath.join(posixpath.dirname(tip_path), value)
+    ) == cited_path
+
+
+def _verdict(
+    repo: Path, cited_blob: str, tip_blob: str | None, deleted: bool,
+    fragment: str, cited_path: str, tip_path: str, atlas_id: str,
+) -> tuple[str, list[str]]:
+    if deleted:
+        return "contradicts", ["tip_deleted"]
+    if not tip_blob:
+        return "unknown", ["tip_unavailable"]
+    if cited_blob == tip_blob:
+        return "unchanged", ["identical_blobs"]
+    texts = []
+    for blob in (cited_blob, tip_blob):
+        code, data, truncated = _git_capped(repo, "cat-file", "blob", blob)
+        if code or truncated:
+            return "unknown", ["blob_unavailable" if code else "blob_too_large"]
+        try:
+            texts.append(data.decode("utf-8"))
+        except UnicodeDecodeError:
+            return "unknown", ["non_utf8_blob"]
+    try:
+        old_meta, old_body = split_fm_v2(texts[0])
+        new_meta, new_body = split_fm_v2(texts[1])
+    except FrontmatterError:
+        return "unknown", ["invalid_frontmatter"]
+
+    for key in ("status", "kva", "lifecycle"):
+        if str(new_meta.get(key) or "").strip().lower() in {"terminated", "deprecated", "superseded"}:
+            return "contradicts", ["tip_exit_status"]
+    for key in ("supersedes", "superseded_by"):
+        if _names_cited_page(new_meta.get(key), cited_path, tip_path, atlas_id):
+            return "contradicts", ["tip_supersession_link"]
+    relations = new_meta.get("relates_to")
+    if isinstance(relations, list):
+        for relation in relations:
+            if (isinstance(relation, dict)
+                and str(relation.get("kind") or relation.get("role") or "").lower() in {"supersedes", "superseded_by"}
+                and _names_cited_page(relation.get("path"), cited_path, tip_path, atlas_id)):
+                return "contradicts", ["tip_supersession_link"]
+
+    old_scope, new_scope = _section(old_body, fragment), _section(new_body, fragment)
+    if old_scope is None or new_scope is None:
+        return "unknown", ["fragment_unavailable"]
+    old_lines = [" ".join(line.split()) for line in old_scope.splitlines() if line.strip()]
+    new_lines = [" ".join(line.split()) for line in new_scope.splitlines() if line.strip()]
+    changes = SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
+    negation = re.compile(r"\b(?:not|no|never|neither|cannot|without|mustn't|isn't|doesn't|don't)\b", re.I)
+    for tag, a, b, c, d in changes:
+        if tag != "replace":
+            continue
+        old, new = " ".join(old_lines[a:b]), " ".join(new_lines[c:d])
+        old_numbers = re.findall(r"\d+(?:[./:-]\d+)*", old)
+        new_numbers = re.findall(r"\d+(?:[./:-]\d+)*", new)
+        if old_numbers and new_numbers and old_numbers != new_numbers:
+            return "contradicts", ["replaced_numbers"]
+        if negation.search(new) and not negation.search(old):
+            return "contradicts", ["added_negation"]
+    if any(tag in {"delete", "replace"} for tag, *_ in changes):
+        return "unknown", ["cited_lines_removed_or_replaced"]
+    bookkeeping = {"updated", "modified", "last_updated", "last_modified"}
+    if {k: v for k, v in old_meta.items() if k not in bookkeeping} != {
+        k: v for k, v in new_meta.items() if k not in bookkeeping
+    }:
+        return "unknown", ["non_bookkeeping_frontmatter_changed"]
+    return "changed-compatible", ["no_cited_lines_removed"]
 
 
 def _emit(payload: dict[str, Any], as_json: bool) -> int:
@@ -185,6 +309,7 @@ def _emit(payload: dict[str, Any], as_json: bool) -> int:
     else:
         if payload["pinned"]:
             print(f"{payload['status']}: {payload['uri']}")
+            print(f"verdict: {payload['verdict']} ({', '.join(payload['verdict_basis'])})")
             print(f"cited {payload.get('cited_sha')} ({payload.get('cited_blob')})")
             print(f"tip {payload.get('tip_sha') or 'unavailable'} ({payload.get('tip_blob')})")
         else:
@@ -325,6 +450,10 @@ def inspect(
         "commits_since": commits_since,
         "cited_reachable_from_tip": reachable,
     }
+    payload["verdict"], payload["verdict_basis"] = _verdict(
+        repo, cited_blob, tip_blob, deleted, pointer.fragment,
+        pointer.in_store, tip_path[len(prefix):] if prefix else tip_path, pointer.atlas_id,
+    )
     if include_text:
         code, content, truncated = _git_capped(repo, "cat-file", "blob", cited_blob)
         if code == 0:
@@ -509,7 +638,7 @@ def link_group() -> None:
 @click.option("--diff", "include_diff", is_flag=True, help="include a path-scoped diff (capped at 256 KiB)")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def show_cmd(uri: str, start: str | None, include_text: bool, include_diff: bool, as_json: bool) -> None:
-    """Show cited context and change impact for a pinned URI."""
+    """Show cited context and a conservative reviewer verdict (not an automatic decision)."""
     raise SystemExit(show(uri, start, as_json, include_text, include_diff))
 
 
@@ -529,7 +658,7 @@ def pin_cmd(pointer_or_path: str, start: str | None, as_json: bool) -> None:
 @click.option("--atlas-id", default=None, help="store identity (default: origin remote)")
 @click.option("--json", "as_json", is_flag=True, help="machine-readable output")
 def impact_cmd(since: str, until: str, root: str | None, atlas_id: str | None, as_json: bool) -> None:
-    """List changed pages and pins in the ending repository snapshot."""
+    """List changed pages and per-pin reviewer verdicts in the ending snapshot."""
     from . import impact
 
     raise SystemExit(impact.run(root, since, until, atlas_id, as_json))

@@ -1730,6 +1730,70 @@ def main() -> int:
             f"exit={code} critical={payload.get('critical')}",
         )
 
+        for matching_type in ("memory", "decision"):
+            d = beta3_store(f"stale-upper-page-mixed-{matching_type}")
+            write_index(d / "notes")
+            claim = "The mixed gist's exact claim."
+            memory_path = d / "notes" / "fact.memory.md"
+            decision_paths = [d / "notes" / "choice1.decision.md", d / "notes" / "choice2.decision.md"]
+            matching_path = memory_path if matching_type == "memory" else decision_paths[1]
+            write_page(memory_path, "memory", description=claim if matching_type == "memory" else None)
+            for path in decision_paths:
+                write_page(path, "decision", body=(claim + " " if path == matching_path else "") + PROSE)
+            write_page(
+                d / "notes" / "mixed.gist.md",
+                "gist",
+                [{"path": f"notes/{path.name}", "kind": "derived_from"}
+                 for path in [memory_path, *decision_paths]],
+                description=claim,
+            )
+            write_page(d / "notes" / "s.schema.md", "schema",
+                       [{"path": "notes/mixed.gist.md", "kind": "related"}])
+            code, payload = run_json(["compile", "--root", str(d), "--json"])
+            check(
+                f"stale_upper_page: mixed gist matches {matching_type} parent",
+                code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
+                f"exit={code} critical={payload.get('critical')}",
+            )
+            write_page(matching_path, matching_type, body="The original claim was overwritten. " + PROSE)
+            code, payload = run_json(["compile", "--root", str(d), "--json"])
+            stale = [item for item in payload.get("critical", []) if item.get("id") == "stale_upper_page"]
+            check(
+                f"stale_upper_page: mixed gist fails after matching {matching_type} parent overwritten",
+                code != 0 and len(stale) == 1
+                and stale[0].get("path") == "notes/mixed.gist.md"
+                and stale[0].get("msg") == "gist description is not present in any derived_from memory and decision parent",
+                f"exit={code} critical={payload.get('critical')}",
+            )
+
+        d = beta3_store("stale-upper-page-shared-decisions")
+        write_index(d / "notes")
+        claim = "A decision parent holds this claim."
+        for name, body in (("left", PROSE), ("right", claim + " " + PROSE)):
+            write_page(d / "notes" / f"{name}.decision.md", "decision", body=body)
+        write_page(
+            d / "notes" / "shared.gist.md", "gist",
+            [{"path": f"notes/{name}.decision.md", "kind": "derived_from"} for name in ("left", "right")],
+            description=claim,
+        )
+        write_page(d / "notes" / "s.schema.md", "schema",
+                   [{"path": "notes/shared.gist.md", "kind": "related"}])
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        check(
+            "stale_upper_page: decision-only union accepts one matching parent",
+            code == 0 and "stale_upper_page" not in findings_by_id(payload, "critical"),
+            f"exit={code} critical={payload.get('critical')}",
+        )
+        write_page(d / "notes" / "right.decision.md", "decision", body=PROSE)
+        code, payload = run_json(["compile", "--root", str(d), "--json"])
+        stale = [item for item in payload.get("critical", []) if item.get("id") == "stale_upper_page"]
+        check(
+            "stale_upper_page: decision-only union preserves stale message",
+            code != 0 and len(stale) == 1
+            and stale[0].get("msg") == "gist description is not present in any derived_from decision parent",
+            f"exit={code} critical={payload.get('critical')}",
+        )
+
         # === focused-compile-ignores-out-of-focus-schema-folder ==================
         # A --path/--type focused compile must not fail because of an
         # unrelated out-of-focus folder's schema_folder finding.

@@ -202,8 +202,9 @@ def _print_as_of(
     unavailable: list[dict[str, str]],
     code: int,
 ) -> int:
+    all_unavailable = bool(unavailable) and not hits
     payload = {
-        "ok": True,
+        "ok": not all_unavailable,
         "root": str(root),
         "query": query,
         "as_of": moment.isoformat().replace("+00:00", "Z"),
@@ -228,7 +229,7 @@ def _print_as_of(
             print(f"{item['path']}  unavailable ({item['reason_code']})")
         if not hits and not unavailable:
             print("no hits")
-    return code
+    return 2 if all_unavailable else code
 
 
 def _print_failure(

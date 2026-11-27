@@ -1154,13 +1154,17 @@ def _schema_folder_findings(root: Path, schema: dict | None, staging_name: str) 
         # N=1: the description must be a substring of that parent.
         # N>1: union pack — a substring of at least one derived_from parent.
         def _holds(found: tuple) -> bool:
-            memory_meta, memory_body = found[1], found[2]
-            memory_description = memory_meta.get("description")
-            return description in memory_body or (
-                isinstance(memory_description, str) and description in memory_description
+            parent_meta, parent_body = found[1], found[2]
+            parent_description = parent_meta.get("description")
+            return description in parent_body or (
+                isinstance(parent_description, str) and description in parent_description
             )
 
-        for parent_type, parents in (("memory", memory_parents), ("decision", decision_parents)):
+        if memory_parents and decision_parents:
+            parent_groups = (("memory and decision", memory_parents + decision_parents),)
+        else:
+            parent_groups = (("memory", memory_parents), ("decision", decision_parents))
+        for parent_type, parents in parent_groups:
             if not parents or any(_holds(found) for found in parents):
                 continue
             if len(parents) == 1:

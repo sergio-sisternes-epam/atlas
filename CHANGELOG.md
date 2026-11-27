@@ -2,6 +2,10 @@
 
 ## Unreleased (targets 0.14.0)
 
+- Fixed mixed-parent gist freshness checks to accept a matching memory or decision parent.
+- Fully unavailable as-of recall now fails closed; partial results remain available.
+- Routed undated past-tense questions to repository history.
+- Added conservative per-pin impact verdicts and reviewer-facing reasons.
 - Added local merge-impact reports and stale decision-source gist/schema checks.
 - Added `atlas link show` and `atlas link pin`, fail-closed pinned provenance
   checks during compile, and pinned-link-aware optimise move gates.

@@ -172,5 +172,5 @@ def run(root: str | None, since: str, until: str, atlas_id: str | None, as_json:
             if change["old_path"]:
                 print(f"  from {change['old_path']}")
             for pin in change["pins"]:
-                print(f"  {pin['source']}: {pin['status']} {pin['uri']}")
+                print(f"  {pin['source']}: {pin['status']} verdict={pin['verdict']} {pin['uri']}")
     return 0

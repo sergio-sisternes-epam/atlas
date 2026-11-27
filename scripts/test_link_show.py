@@ -117,6 +117,8 @@ class LinkShowTests(unittest.TestCase):
         code, result = self.show()
         self.assertEqual(code, 0)
         self.assertEqual(result["status"], "unchanged")
+        self.assertEqual(result["verdict"], "unchanged")
+        self.assertEqual(result["verdict_basis"], ["identical_blobs"])
         self.assertFalse(result["changed"])
         self.assertEqual(result["cited_blob"], result["tip_blob"])
         self.assertTrue(result["cited_reachable_from_tip"])
@@ -132,6 +134,7 @@ class LinkShowTests(unittest.TestCase):
         code, result = self.show(None, "--show", "--diff")
         self.assertEqual(code, 0)
         self.assertEqual(result["status"], "changed")
+        self.assertEqual(result["verdict"], "unknown")
         self.assertTrue(result["changed"])
         self.assertIn("first cited text", result["text"])
         self.assertIn("-first cited text", result["diff"])
@@ -166,6 +169,8 @@ class LinkShowTests(unittest.TestCase):
         self.assertEqual(result["status"], "deleted")
         self.assertTrue(result["deleted"])
         self.assertTrue(result["changed"])
+        self.assertEqual(result["verdict"], "contradicts")
+        self.assertEqual(result["verdict_basis"], ["tip_deleted"])
 
     def test_tip_unavailable_and_cited_commit_missing_fail_closed(self) -> None:
         mesh = json.loads((self.project / "atlas-mesh.json").read_text())
@@ -174,14 +179,68 @@ class LinkShowTests(unittest.TestCase):
         code, result = self.show(None, "--show")
         self.assertEqual(code, 0)
         self.assertEqual(result["status"], "tip_unavailable")
+        self.assertEqual(result["verdict"], "unknown")
+        self.assertEqual(result["verdict_basis"], ["tip_unavailable"])
         self.assertIsNone(result["changed"])
         self.assertIn("first cited text", result["text"])
         missing = "f" * 40
         code, result = self.show(f"atlas://{ATLAS_ID}/notes/fact.md@{missing}", "--show")
         self.assertEqual(code, 2)
         self.assertEqual(result["status"], "cited_unavailable")
+        self.assertEqual(result["verdict"], "unknown")
         self.assertEqual(result["reason"], "commit_missing")
         self.assertNotIn("text", result)
+
+    def test_compatible_additions_and_bookkeeping(self) -> None:
+        self.page.write_text(
+            "---\ntype: document\ntitle: Fact\ncreated: 2026-01-01\nupdated: 2026-02-01\n---\n\n"
+            "## Content\n\nfirst cited text and supporting context for this fact.\n\nExtra context.\n",
+            encoding="utf-8",
+        )
+        self.commit(self.target, "add context")
+        _, result = self.show()
+        self.assertEqual(result["verdict"], "changed-compatible")
+        self.assertEqual(result["verdict_basis"], ["no_cited_lines_removed"])
+
+    def test_fragment_ignores_outside_change_and_fails_closed_when_missing(self) -> None:
+        self.page.write_text("## Claim\n\nThe fare is 10.\n\n## Other\n\nOld context.\n", encoding="utf-8")
+        cited = self.commit(self.target, "scoped citation")
+        self.page.write_text("## Claim\n\nThe fare is 10.\n\n## Other\n\nNew context.\n", encoding="utf-8")
+        self.commit(self.target, "outside change")
+        uri = f"atlas://{ATLAS_ID}/notes/fact.md@{cited}#claim"
+        _, result = self.show(uri)
+        self.assertEqual(result["verdict"], "changed-compatible")
+        _, result = self.show(uri.replace("#claim", "#missing"))
+        self.assertEqual(result["verdict"], "unknown")
+        self.assertEqual(result["verdict_basis"], ["fragment_unavailable"])
+
+    def test_replaced_number_and_negation_flag_contradiction(self) -> None:
+        self.page.write_text("## Decision\n\nThe fare is 10.\n", encoding="utf-8")
+        cited = self.commit(self.target, "decision")
+        self.page.write_text("## Decision\n\nThe fare is 20.\n", encoding="utf-8")
+        self.commit(self.target, "replace number")
+        uri = f"atlas://{ATLAS_ID}/notes/fact.md@{cited}#decision"
+        _, result = self.show(uri)
+        self.assertEqual(result["verdict"], "contradicts")
+        self.assertEqual(result["verdict_basis"], ["replaced_numbers"])
+        self.page.write_text("## Decision\n\nThe fare is not 10.\n", encoding="utf-8")
+        self.commit(self.target, "negate")
+        _, result = self.show(uri)
+        self.assertEqual(result["verdict_basis"], ["added_negation"])
+
+    def test_exit_status_and_supersession_flag_contradiction(self) -> None:
+        self.page.write_text("---\nstatus: superseded\n---\n\nStill here.\n", encoding="utf-8")
+        self.commit(self.target, "superseded")
+        _, result = self.show()
+        self.assertEqual(result["verdict"], "contradicts")
+        self.assertEqual(result["verdict_basis"], ["tip_exit_status"])
+        self.page.write_text(
+            "---\nrelates_to:\n  - path: notes/fact.md\n    kind: supersedes\n---\n\nStill here.\n",
+            encoding="utf-8",
+        )
+        self.commit(self.target, "supersession link")
+        _, result = self.show()
+        self.assertEqual(result["verdict_basis"], ["tip_supersession_link"])
 
     def test_shallow_and_unmounted_fail_closed(self) -> None:
         source = self.base / "source-repo"

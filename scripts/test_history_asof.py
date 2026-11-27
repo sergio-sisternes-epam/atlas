@@ -136,7 +136,8 @@ def main() -> int:
         unavailable = before_payload.get("unavailable") or []
         check(
             "date-before-first-version-unavailable",
-            before.returncode == 0
+            before.returncode == 2
+            and before_payload.get("ok") is False
             and len(unavailable) == 1
             and unavailable[0].get("reason_code") == "no_commit_at_date"
             and "red" not in before.stdout.lower(),
@@ -193,12 +194,37 @@ def main() -> int:
         absent_items = absent_payload.get("unavailable") or []
         check(
             "path-absent-at-date-does-not-fall-forward",
-            path_absent.returncode == 0
+            path_absent.returncode == 2
+            and absent_payload.get("ok") is False
             and len(absent_items) == 1
             and absent_items[0].get("reason_code") == "path_absent"
             and not absent_payload.get("hits")
             and "current-only" not in path_absent.stdout,
             path_absent.stdout[:300],
+        )
+
+        partial_repo = temp / "partial"
+        partial_repo.mkdir()
+        git(["init", "-q"], partial_repo)
+        git(["config", "user.name", "Atlas Test"], partial_repo)
+        git(["config", "user.email", "atlas-test@example.invalid"], partial_repo)
+        (partial_repo / "other.md").write_text("Project alpha existed before.\n", encoding="utf-8")
+        dated_commit(partial_repo, "historical match", 1)
+        (partial_repo / "facts.md").write_text("Project alpha is a current-only tip.\n", encoding="utf-8")
+        dated_commit(partial_repo, "current match", 3)
+        partial = cli(
+            "recall", "run", "Project alpha", "--root", str(partial_repo), "--engine", "grep",
+            "--as-of", "2020-02-02", "--json",
+        )
+        partial_payload = json.loads(partial.stdout)
+        check(
+            "partial-unavailability-remains-successful",
+            partial.returncode == 0
+            and partial_payload.get("ok") is True
+            and len(partial_payload.get("hits") or []) == 1
+            and len(partial_payload.get("unavailable") or []) == 1
+            and "current-only" not in partial.stdout,
+            partial.stdout[:300],
         )
 
         shallow = temp / "shallow"
@@ -221,7 +247,8 @@ def main() -> int:
         check(
             "shallow-history-unavailable-without-tip-text",
             cloned.returncode == 0
-            and shallow_result.returncode == 0
+            and shallow_result.returncode == 2
+            and shallow_payload.get("ok") is False
             and len(shallow_unavailable) == 1
             and shallow_unavailable[0].get("reason_code") == "shallow_history"
             and not shallow_payload.get("hits")
